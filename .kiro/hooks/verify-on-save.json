@@ -1,0 +1,23 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Regenerate steering when the contract changes",
+      "trigger": "PostFileSave",
+      "matcher": "contract/.*\\.json$",
+      "action": {
+        "type": "command",
+        "command": "python tools/generate_kiro_workspace.py"
+      }
+    },
+    {
+      "name": "Deterministic unit tests after engine changes (no Bedrock calls)",
+      "trigger": "PostFileSave",
+      "matcher": "src/planpilot/(engine|validation|store|approval)/.*\\.py$",
+      "action": {
+        "type": "command",
+        "command": "python -m pytest tests/unit -q --no-header -x"
+      }
+    }
+  ]
+}

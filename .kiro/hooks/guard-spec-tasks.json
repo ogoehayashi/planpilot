@@ -1,0 +1,13 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Refuse a spec task that would invent an identifier",
+      "trigger": "PreTaskExec",
+      "action": {
+        "type": "prompt",
+        "prompt": "Before executing this task, confirm against contract/planpilot_agent_contract_v1.8.json that every identifier the task will introduce already exists in the contract's closed vocabularies (validation_issue_code, tool_error error_code, hard_constraints, tools, kpis, plan_profiles, workflow states, Events). If the task requires a new identifier, STOP and report that a contract revision is needed instead of writing code. Also confirm the task does not require an LLM call for arithmetic, scheduling, constraint enforcement, KPI computation or plan validation, and does not add a Bedrock call to local development or tests."
+      }
+    }
+  ]
+}

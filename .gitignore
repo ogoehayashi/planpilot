@@ -1,0 +1,27 @@
+# credentials - never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# runtime artefacts
+data/*.lock
+logs/
+*.sqlite
+*.db
+
+# evidence is committed deliberately; raw scratch is not
+tests/evidence/_scratch/
+
+# editors
+.vscode/
+.idea/
+.DS_Store
