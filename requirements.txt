@@ -1,0 +1,13 @@
+# PlanPilot runtime dependencies — exact pins only.
+#
+# Both versions are identity-bearing: the contract's determinism evidence
+# (cpsat_determinism_smoketest.py, five byte-identical runs) was produced on
+# ortools 9.11.4210, and every tool schema is validated as Draft 2020-12 by
+# jsonschema 4.23.0. verify_contract.py asserts the installed OR-Tools version
+# matches the pin exactly and fails otherwise.
+#
+# Do not use ranges. Do not upgrade without a contract revision and a re-run of
+# the determinism evidence.
+
+jsonschema[format]==4.23.0
+ortools==9.11.4210
