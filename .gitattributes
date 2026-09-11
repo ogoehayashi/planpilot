@@ -1,0 +1,48 @@
+# Line endings are identity-bearing in this repository.
+#
+# The contract artefact's SHA-256 is recorded in V1.8_changelog.md, the review
+# handoff and every steering file as
+#   b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639
+# That value is only valid for the LF form. Git's core.autocrlf would otherwise
+# rewrite it to CRLF on checkout and silently invalidate every recorded hash -
+# the same defect class that made V1.4-V1.7 hashes platform-specific.
+#
+# So: LF everywhere, in the working tree and in the index, for every file type.
+
+* text=auto eol=lf
+
+# The contract and all generated artefacts are byte-exact by requirement.
+contract/** text eol=lf
+.kiro/** text eol=lf
+tools/** text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.txt text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+AGENTS.md text eol=lf
+
+# Genuine binaries: never touch.
+*.xlsx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.mp4 binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.zip binary
+*.gz binary
+*.whl binary
+*.sqlite binary
+*.db binary
