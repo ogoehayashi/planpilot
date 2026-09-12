@@ -1,0 +1,15 @@
+# Development and test dependencies.
+#
+# Kept SEPARATE from requirements.txt on purpose: requirements.txt is the runtime
+# pin set and is diff-verified identical to the contract's own requirements.txt
+# (see V1.8_changelog.md). Adding pytest there would break that identity and would
+# also pull a test runner into the Lightsail deployment image.
+#
+# Install for development:
+#   python -m pip install -r requirements.txt -r requirements-dev.txt
+#
+# pytest is pinned exactly because tests/evidence/ records the interpreter and
+# package versions a given evidence pack was produced under. An unpinned runner
+# would make that record uninterpretable later.
+
+pytest==9.1.1

@@ -1,0 +1,125 @@
+{
+  "spec": "plan-store-and-digest",
+  "generated_at_utc": "2026-09-12T01:31:27+00:00",
+  "contract": {
+    "schema_version": "1.8.0",
+    "sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+    "bytes": 189921
+  },
+  "scope_statement": "UNIT evidence for one module (src/planpilot/store). This is NOT an EVAL result and does NOT make the contract pilot-ready: release_readiness.runtime_evaluation remains pending and no EVAL case (EVAL-001..030) has been executed. No LLM, network, credential or dataset was involved.",
+  "versions": {
+    "python": "3.11.5",
+    "python_implementation": "CPython",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "jsonschema": "4.23.0",
+    "ortools": "9.11.4210",
+    "pytest": "9.1.1"
+  },
+  "reference_digests": {
+    "baseline_plan_content": {
+      "digest": "b9aa87e27b0e2c513d23b29b1f09824074b4b12bf2fa6773c9b5b86c024a9c15",
+      "canonical_json_sha256": "acd9faa3a3a6125e5feed16e8c2e6c7aa270c6e490274b336eb814eaa823cf9e",
+      "operations": 2,
+      "profile": "Balanced"
+    },
+    "shuffled_operations_10_seeds": {
+      "distinct_digests": 1,
+      "digest": "b9aa87e27b0e2c513d23b29b1f09824074b4b12bf2fa6773c9b5b86c024a9c15",
+      "matches_baseline": true
+    },
+    "non_ascii_assumption": {
+      "digest": "029cdbe7e259b851866edee374f0c73f3410016dc0ae2d170597a6453fa22484",
+      "canonical_text_contains_raw_cjk": true,
+      "utf8_byte_len": 2704
+    },
+    "int_vs_float": {
+      "int_1": "5041bf1f713df204784353e82f6a4a535931cb64f1f4b4a5aeaffcb720918b22",
+      "float_1_0": "bf32f56236899e13ef54db875d136c6cbcc65244464829c54911aa9069b0ae25",
+      "distinct": true
+    },
+    "operation_sort_key": {
+      "key_fields": [
+        "start_time",
+        "machine_id",
+        "order_id",
+        "lot_no",
+        "operation_no"
+      ],
+      "input_order": [
+        [
+          "2026-09-14T13:00:00+08:00",
+          "MC-09",
+          "ORD-Z"
+        ],
+        [
+          "2026-09-14T08:00:00+08:00",
+          "MC-01",
+          "ORD-A"
+        ],
+        [
+          "2026-09-14T08:00:00+08:00",
+          "MC-09",
+          "ORD-Z"
+        ]
+      ],
+      "sorted_order": [
+        [
+          "2026-09-14T08:00:00+08:00",
+          "MC-01",
+          "ORD-A"
+        ],
+        [
+          "2026-09-14T08:00:00+08:00",
+          "MC-09",
+          "ORD-Z"
+        ],
+        [
+          "2026-09-14T13:00:00+08:00",
+          "MC-09",
+          "ORD-Z"
+        ]
+      ]
+    }
+  },
+  "results": {
+    "unit_tests": {
+      "exit_code": 0,
+      "summary": "149 passed in 0.95s"
+    },
+    "negative_control": {
+      "exit_code": 0,
+      "summary": "3 passed in 32.04s"
+    },
+    "vocabulary_guard_self_test": {
+      "exit_code": 0,
+      "summary": "SELF-TEST | PASS"
+    },
+    "vocabulary_guard_repo_scan": {
+      "exit_code": 0,
+      "summary": "CLOSED VOCABULARY CHECK | PASS"
+    },
+    "workspace_validation": {
+      "exit_code": 0,
+      "summary": "WORKSPACE VALIDATION | ok=190 fail=0"
+    },
+    "workspace_negative_control": {
+      "exit_code": 0,
+      "summary": "NEGATIVE CONTROL | caught=14 escaped=0 of 14"
+    }
+  },
+  "all_green": true,
+  "known_findings": [
+    {
+      "id": "F-STORE-01",
+      "summary": "No registered error code describes an illegal lifecycle transition.",
+      "detail": "VALIDATION_FAILED's details schema is the factory-state shape (status/errors/quarantined_entity_count); POLICY_VIOLATION's violated_policy is a closed enum with no fitting value; PLAN_VERSION_CONFLICT means 'you expected a different version'. TransitionNotAllowedError and LifecycleAlreadyExistsError are therefore StoreInvariantError with NO contract code: caller programming errors that must never be rendered as a tool_error. If a runtime path ever needs to refuse a transition AND tell the user, the contract needs a new registered code.",
+      "status": "open — needs a contract decision, not a code fix"
+    },
+    {
+      "id": "F-STORE-02",
+      "summary": "The two non-finite-float layers are not interchangeable.",
+      "detail": "_reject_non_finite raises CanonicalizationError with contract-shaped details and a json_path; allow_nan=False raises a bare ValueError with neither. Removing layer 1 still blocks NaN but produces an error the tool layer cannot turn into a valid tool_error. Measured by the negative control, which initially assumed the layers were redundant and was wrong.",
+      "status": "resolved — pinned by test_layer1_error_is_not_the_same_as_layer2"
+    }
+  ]
+}

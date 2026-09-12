@@ -193,6 +193,34 @@ class TestNonFiniteFloatsRejected:
         changed["engine"]["objective_value"] = -1.5
         assert isinstance(canonical_plan_digest(changed), str)
 
+    def test_layer1_error_is_not_the_same_as_layer2(self, content):
+        """The two float layers are NOT interchangeable — measured, not assumed.
+
+        `_reject_non_finite` raises CanonicalizationError with contract-shaped
+        details and a json_path. `allow_nan=False` raises a bare ValueError.
+        Only the first can become a valid tool_error, so removing it is a real
+        regression even though NaN is still blocked. This test pins that
+        difference so nobody "simplifies" layer 1 away as redundant.
+        """
+        changed = copy.deepcopy(content)
+        changed["kpis"]["overtime_hours"] = float("nan")
+
+        with pytest.raises(CanonicalizationError) as ours:
+            canonical_plan_digest(changed)
+        assert ours.value.code == "INVALID_INPUT"
+        assert ours.value.json_path
+
+        # what layer 2 alone would produce
+        import json as _json
+        with pytest.raises(ValueError) as stdlib:
+            _json.dumps({"x": float("nan")}, allow_nan=False)
+        assert not isinstance(stdlib.value, CanonicalizationError)
+        assert "not JSON compliant" in str(stdlib.value)
+
+        # the two are different exception types with different information
+        assert type(ours.value) is not type(stdlib.value)
+        assert hasattr(ours.value, "details") and not hasattr(stdlib.value, "details")
+
 
 class TestSerializationChoices:
     def test_no_whitespace_in_canonical_form(self, content):

@@ -1,0 +1,378 @@
+"""Task 5.1 — negative control for the plan-store-and-digest spec.
+
+A test suite that cannot fail is not a test suite. This project has already
+shipped an assertion containing `or True`, and a self-check that counted the
+guard's own body as evidence of use. Both looked green.
+
+Method — deliberately the unambiguous one
+-----------------------------------------
+Each mutation is written INTO the real source file, the real pytest suite is then
+run against it as a subprocess, and the mutation counts as CAUGHT only if that
+suite FAILS. The file is restored in a `finally`, and the whole run ends by
+asserting `git diff` is empty so a crash cannot leave the tree dirty.
+
+The first draft of this file did the opposite: it imported the mutated module and
+asked "did the protection hold?", then recorded True as "caught". That polarity
+inversion reported 10 caught / 5 escaped when the truth was close to the reverse.
+Running the actual suite removes the ambiguity entirely — there is nothing to
+interpret.
+
+It also caught a second, subtler problem: flipping `allow_nan=False` to `True`
+looks like it defeats the non-finite guard, but `_reject_non_finite()` runs first
+and still blocks it. A mutation that does not reach the behaviour it claims to
+test is worthless. So the float defence is probed three ways (layer one only,
+layer two only, both removed), which proves the defence in depth is real rather
+than accidental.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+STORE = ROOT / "src" / "planpilot" / "store"
+UNIT_TESTS = ROOT / "tests" / "unit"
+PYTEST = [sys.executable, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider"]
+
+
+def _sub_once(source: str, old: str, new: str, label: str) -> str:
+    """Replace exactly one occurrence, or fail loudly.
+
+    A mutation whose pattern no longer matches silently becomes a no-op, and a
+    no-op mutation always "passes" — which is how a negative control turns into
+    theatre. Asserting the count is what keeps it honest.
+    """
+    n = source.count(old)
+    if n != 1:
+        raise AssertionError(f"[{label}] pattern occurs {n} times, expected 1:\n{old!r}")
+    return source.replace(old, new)
+
+
+# (label, file, mutation, suite that must fail)
+MUTATIONS: list[tuple[str, str, object, str]] = [
+    # ---- canonical form
+    (
+        "canonical_json loses sort_keys",
+        "digest.py",
+        lambda s: _sub_once(s, "sort_keys=True", "sort_keys=False", "sort_keys"),
+        "test_digest_determinism.py",
+    ),
+    (
+        "canonical_json adds whitespace",
+        "digest.py",
+        lambda s: _sub_once(s, 'separators=(",", ":")', 'separators=(", ", ": ")', "separators"),
+        "test_digest_determinism.py",
+    ),
+    (
+        "canonical_json escapes non-ASCII",
+        "digest.py",
+        lambda s: _sub_once(s, "ensure_ascii=False", "ensure_ascii=True", "ensure_ascii"),
+        "test_digest_determinism.py",
+    ),
+    (
+        "operations not sorted before hashing",
+        "digest.py",
+        lambda s: _sub_once(
+            s,
+            '        payload["operations"] = sort_operations(ops)',
+            "        pass  # MUTATION: sorting removed",
+            "sort_operations call",
+        ),
+        "test_digest_determinism.py",
+    ),
+    (
+        "plan_digest no longer excluded (circularity returns)",
+        "digest.py",
+        lambda s: _sub_once(
+            s,
+            'DIGEST_EXCLUDED_FIELDS: frozenset[str] = frozenset({"plan_digest"})',
+            "DIGEST_EXCLUDED_FIELDS: frozenset[str] = frozenset()",
+            "DIGEST_EXCLUDED_FIELDS",
+        ),
+        "test_digest_determinism.py",
+    ),
+    (
+        "engine.canonical_plan_hash no longer excluded",
+        "digest.py",
+        lambda s: _sub_once(
+            s,
+            'ENGINE_DIGEST_EXCLUDED_FIELDS: frozenset[str] = frozenset({"canonical_plan_hash"})',
+            "ENGINE_DIGEST_EXCLUDED_FIELDS: frozenset[str] = frozenset()",
+            "ENGINE_DIGEST_EXCLUDED_FIELDS",
+        ),
+        "test_digest_determinism.py",
+    ),
+    # ---- the two digest identities
+    (
+        "second identity (canonical_plan_hash) not checked",
+        "digest.py",
+        lambda s: _sub_once(
+            s,
+            "    if canonical_hash != recomputed:",
+            "    if False:  # MUTATION: second identity unchecked",
+            "second identity check",
+        ),
+        "test_digest_identity.py",
+    ),
+    (
+        "first identity (plan_digest) not checked",
+        "digest.py",
+        lambda s: _sub_once(
+            s,
+            "    if declared != recomputed:",
+            "    if False:  # MUTATION: first identity unchecked",
+            "first identity check",
+        ),
+        "test_digest_identity.py",
+    ),
+    # ---- the float defence.
+    #
+    # Measured, not assumed. The two layers are NOT equivalent, and the first
+    # draft of this file wrongly expected removing layer 1 to be harmless:
+    #
+    #   layer 1 `_reject_non_finite` raises CanonicalizationError carrying
+    #           contract-shaped details (validates against
+    #           $defs.error_details_invalid_input) plus the json_path
+    #   layer 2 `allow_nan=False`   raises a bare ValueError
+    #           ("Out of range float values are not JSON compliant") with no
+    #           details and no path
+    #
+    # So removing layer 1 still blocks NaN — but reports it in a way the tool
+    # layer cannot turn into a valid tool_error. That is a real regression, and
+    # the suite correctly fails. Layer 2 is a backstop against emitting invalid
+    # JSON, not a substitute for layer 1.
+    (
+        "float layer 1 removed — suite MUST fail (error loses its contract shape)",
+        "digest.py",
+        lambda s: _sub_once(
+            s,
+            "    _reject_non_finite(obj, _path, _entity_id)",
+            "    pass  # MUTATION: explicit non-finite scan removed",
+            "_reject_non_finite call",
+        ),
+        "test_digest_determinism.py",
+    ),
+    (
+        "float layer 2 removed (allow_nan) — layer 1 must still hold",
+        "digest.py",
+        lambda s: _sub_once(s, "allow_nan=False", "allow_nan=True", "allow_nan"),
+        None,  # genuinely still passes: _reject_non_finite runs first
+    ),
+    (
+        "float defence removed entirely — suite MUST fail",
+        "digest.py",
+        lambda s: _sub_once(
+            _sub_once(s, "allow_nan=False", "allow_nan=True", "allow_nan (both)"),
+            "    _reject_non_finite(obj, _path, _entity_id)",
+            "    pass  # MUTATION: both float layers removed",
+            "_reject_non_finite (both)",
+        ),
+        "test_digest_determinism.py",
+    ),
+    # ---- store invariants
+    (
+        "write-once enforcement removed",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "            raise IdempotencyConflictError(",
+            "            return digest  # MUTATION: silent overwrite\n            raise IdempotencyConflictError(",
+            "IdempotencyConflictError raise",
+        ),
+        "test_plan_store_invariants.py",
+    ),
+    (
+        "digest not verified on write",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "        digest = assert_digest_consistent(content)",
+            '        digest = content.get("plan_digest")  # MUTATION: trust the caller',
+            "assert_digest_consistent call",
+        ),
+        "test_plan_store_invariants.py",
+    ),
+    (
+        "get_content hands out the internal dict",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "        return copy.deepcopy(self._content[(plan_id, version)])",
+            "        return self._content[(plan_id, version)]  # MUTATION: no copy",
+            "get_content deepcopy",
+        ),
+        "test_plan_store_invariants.py",
+    ),
+    (
+        "supersede made idempotent (double event possible)",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "            raise TransitionNotAllowedError(",
+            "            return record  # MUTATION: re-supersede allowed\n            raise TransitionNotAllowedError(",
+            "TransitionNotAllowedError raise",
+        ),
+        "test_plan_store_invariants.py",
+    ),
+    (
+        "re-creating a lifecycle record allowed",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "            raise LifecycleAlreadyExistsError(",
+            "            return copy.deepcopy(self._lifecycle[key])  # MUTATION\n            raise LifecycleAlreadyExistsError(",
+            "LifecycleAlreadyExistsError raise",
+        ),
+        "test_plan_store_invariants.py",
+    ),
+    (
+        "optimistic concurrency check removed",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "        if expected_plan_version is not None and expected_plan_version != version:",
+            "        if False:  # MUTATION: OCC disabled",
+            "expected_plan_version check",
+        ),
+        "test_plan_store_invariants.py",
+    ),
+    (
+        "load_state trusts the dump",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "            assert_digest_consistent(record)",
+            "            pass  # MUTATION: dumps are trusted",
+            "load_state verify",
+        ),
+        "test_plan_store_persistence.py",
+    ),
+    (
+        "dump uses non-canonical JSON",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "        text = canonical_json(state)",
+            "        text = json.dumps(state, indent=2)  # MUTATION: not canonical",
+            "dump canonical_json",
+        ),
+        "test_plan_store_persistence.py",
+    ),
+]
+
+
+def _run_suite(test_file: str | None) -> subprocess.CompletedProcess:
+    target = UNIT_TESTS if test_file is None else UNIT_TESTS / test_file
+    return subprocess.run(
+        [*PYTEST, str(target)],
+        cwd=ROOT, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=600,
+    )
+
+
+@pytest.fixture(scope="module")
+def baseline():
+    """The suite must be green before any mutation, or every result is meaningless."""
+    result = _run_suite(None)
+    assert result.returncode == 0, (
+        f"baseline suite is not green — negative control cannot interpret results:\n"
+        f"{result.stdout[-3000:]}"
+    )
+    return result
+
+
+def test_mutations_are_detected(baseline):
+    caught, escaped, broken = [], [], []
+    # Mutations with expected_suite=None assert defence-in-depth: removing ONE
+    # layer must NOT break the suite, because the other layer still holds.
+    still_held = []
+
+    pristine = {name: (STORE / name).read_bytes() for name in ("digest.py", "plan_store.py", "errors.py")}
+
+    try:
+        for label, filename, mutate, expected_suite in MUTATIONS:
+            original = pristine[filename].decode("utf-8")
+            try:
+                mutated = mutate(original)
+            except AssertionError as exc:
+                broken.append(str(exc))
+                continue
+            if mutated == original:
+                broken.append(f"[{label}] mutation produced no change")
+                continue
+
+            (STORE / filename).write_bytes(mutated.replace("\r\n", "\n").encode("utf-8"))
+            try:
+                result = _run_suite(expected_suite)
+            finally:
+                (STORE / filename).write_bytes(pristine[filename])
+
+            failed = result.returncode != 0
+
+            if expected_suite is None:
+                # defence in depth: the suite must STILL PASS
+                if failed:
+                    escaped.append(f"{label} (expected the other layer to hold, but the suite failed)")
+                else:
+                    still_held.append(label)
+            else:
+                if failed:
+                    caught.append(label)
+                else:
+                    escaped.append(f"{label} (suite passed — the guard did not detect it)")
+    finally:
+        for name, data in pristine.items():
+            (STORE / name).write_bytes(data)
+
+    # ---- the tree must be exactly as we found it
+    diff = subprocess.run(
+        ["git", "status", "--porcelain", "src/planpilot/store"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    restored = diff.stdout.strip() == ""
+
+    total = len(MUTATIONS)
+    print()
+    print(f"BROKEN FIXTURES (mutation did not apply): {len(broken)}")
+    for b in broken:
+        print(f"  {b}")
+    print()
+    print(f"DEFENCE IN DEPTH — one layer removed, suite still green: {len(still_held)}")
+    for s in still_held:
+        print(f"  {s}")
+    print()
+    print(f"NEGATIVE CONTROL (store) | caught={len(caught)} escaped={len(escaped)} "
+          f"broken_fixtures={len(broken)} of {total}")
+    for e in escaped:
+        print(f"  ESCAPED: {e}")
+    print(f"source tree restored: {restored}")
+
+    assert restored, "the store sources were not restored — the tree is dirty"
+    assert not broken, f"{len(broken)} mutation fixtures did not apply; results would be theatre"
+    assert not escaped, f"{len(escaped)} mutations escaped detection"
+    # every "must fail" mutation caught, plus every defence-in-depth case held
+    expected_caught = sum(1 for m in MUTATIONS if m[3] is not None)
+    assert len(caught) == expected_caught, f"caught {len(caught)}, expected {expected_caught}"
+
+
+def test_guard_self_test_still_passes():
+    """The closed-vocabulary guard's own self-test must stay green."""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "check_closed_vocabularies.py"), "--self-test"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+    )
+    assert result.returncode == 0, result.stdout[-2000:]
+    assert "SELF-TEST | PASS" in result.stdout
+
+
+def test_guard_passes_on_the_repository():
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "check_closed_vocabularies.py")],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+    )
+    assert result.returncode == 0, result.stdout[-2000:]
+    assert "CLOSED VOCABULARY CHECK | PASS" in result.stdout
