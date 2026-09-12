@@ -361,6 +361,42 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
         ),
         "test_plan_store_persistence.py",
     ),
+    # ---- the two defect classes task 5.1 names that were missing.
+    #
+    # Found while auditing tasks.md line by line: all 28 mutations above covered
+    # floats, canonicalisation, digest identities, write-once, supersede, the P0
+    # gates and load_state — but NOT "clock read internally" and NOT "fabricated
+    # code accepted". Both are named in task 5.1, and both are core guarantees of
+    # this module (injected clock = reproducible evidence pack; no invented code =
+    # every tool_error is emittable). A gap here means a regression in either
+    # would ship green.
+    (
+        "clock read internally instead of injected via ts",
+        "plan_store.py",
+        lambda s: _sub_once(
+            _sub_once(
+                s,
+                "from pathlib import Path",
+                "import datetime  # MUTATION\nfrom pathlib import Path",
+                "datetime import",
+            ),
+            '            "updated_at": ts,',
+            '            "updated_at": datetime.datetime.now().isoformat(),  # MUTATION: clock read internally',
+            "updated_at from the ts argument",
+        ),
+        "test_plan_store_invariants.py",
+    ),
+    (
+        "fabricated error code accepted",
+        "errors.py",
+        lambda s: _sub_once(
+            s,
+            '    code = "PLAN_DIGEST_MISMATCH"',
+            '    code = "PLAN_DIGEST_MISMATCHED"  # MUTATION: not a registered code',
+            "DigestMismatchError.code",
+        ),
+        "test_errors_schema.py",
+    ),
 ]
 
 

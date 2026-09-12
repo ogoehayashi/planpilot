@@ -23,6 +23,7 @@ from planpilot.store.errors import (
     InvalidContentError,
     LifecycleAlreadyExistsError,
     PlanNotFoundError,
+    SchemaViolationError,
     StoreError,
     StoreInvariantError,
     TransitionNotAllowedError,
@@ -171,11 +172,55 @@ class TestImmutability:
         b = store.get_content(content["plan_id"], 1)
         assert a == b and a is not b
 
-    def test_unknown_field_is_rejected_by_the_schema(self, content, fixtures):
-        """plan_content has additionalProperties: false."""
+    def test_unknown_field_is_rejected_by_the_schema(self, store, content, fixtures):
+        """plan_content has additionalProperties: false.
+
+        This test originally asserted only `not fixtures.is_valid(polluted, ...)`.
+        That is the exact defect the second audit reported as P0-1: it claimed the
+        store rejects unknown fields while never calling the store. The store at
+        the time accepted them, because it checked digest self-consistency and
+        nothing else — and a fabricated plan can always be re-signed.
+
+        Now it asserts BOTH halves: the payload violates the contract, and
+        put_content refuses it. The precondition matters — without it a payload
+        that stopped being invalid would make the store assertion pass vacuously.
+        """
         polluted = copy.deepcopy(content)
-        polluted["status"] = "PUBLISHED"
-        assert not fixtures.is_valid(polluted, "plan_content")
+        polluted["status"] = "PUBLISHED"      # belongs to plan_lifecycle, not here
+        assert not fixtures.is_valid(polluted, "plan_content"), \
+            "payload no longer violates additionalProperties:false; test is vacuous"
+
+        # The polluted copy is still digest-consistent, so ONLY the schema gate
+        # can reject it. That is what makes this a real P0-1 regression test.
+        before = store.get_content(content["plan_id"], 1)
+        with pytest.raises(SchemaViolationError):
+            store.put_content(polluted)
+        # The `store` fixture already holds v1, so the assertion is that the
+        # refused write changed nothing — not that the store is empty.
+        assert store.get_content(content["plan_id"], 1) == before
+        assert "status" not in store.get_content(content["plan_id"], 1)
+
+    def test_a_resigned_forged_plan_is_still_rejected(self, store, content, fixtures):
+        """Re-signing the forgery must not help.
+
+        The digest is content-addressed, so an attacker who adds a field can
+        recompute plan_digest and engine.canonical_plan_hash to match. Any defence
+        resting on the digest alone is defeated by one function call — which is
+        precisely why the schema gate exists separately from it.
+        """
+        forged = copy.deepcopy(content)
+        forged["injected_field"] = "attacker-controlled"
+        digest = canonical_plan_digest(forged)
+        forged["plan_digest"] = digest
+        forged["engine"]["canonical_plan_hash"] = digest
+
+        # digest identities hold, so assert_digest_consistent would pass
+        assert forged["plan_digest"] == canonical_plan_digest(forged)
+        before = store.get_content(content["plan_id"], 1)
+        with pytest.raises(SchemaViolationError):
+            store.put_content(forged)
+        assert store.get_content(content["plan_id"], 1) == before
+        assert "injected_field" not in store.get_content(content["plan_id"], 1)
 
 
 class TestLifecycle:

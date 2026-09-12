@@ -103,6 +103,28 @@ class TestGuardCatchesFabrication:
         assert found
         assert found[0][2] == "parse_error"
 
+    def test_task_4_2_literal_case_both_outcomes_in_one_module(self, probe):
+        """Task 4.2 verbatim: one temp module holding a valid and a fabricated token.
+
+        Written as its own test because tasks.md names these two tokens
+        specifically, and a reader checking the spec against the code should find
+        them here rather than having to infer that other contract members were
+        used as equivalent samples. The point of pairing them in ONE module is
+        that it proves the guard discriminates per token: flagging the file
+        wholesale would also "pass" a broken guard that reports everything.
+        """
+        found = probe(
+            'CODE = "POLICY_VIOLATION"\n'        # a real contract member: must pass
+            'OTHER = "PLAN_DIGEST_MISMATCHED"\n'  # fabricated near-miss: must fail
+        )
+        flagged = [entry[1] for entry in found]
+        assert "PLAN_DIGEST_MISMATCHED" in flagged, \
+            "the fabricated token was not caught"
+        assert "POLICY_VIOLATION" not in flagged, \
+            "a real contract member was flagged — the guard over-reports"
+        assert len(flagged) == 1, \
+            f"expected exactly one flag, got {flagged}"
+
 
 class TestGuardDoesNotOverReport:
     """Precision matters as much as recall: a guard that flags everything gets ignored."""
