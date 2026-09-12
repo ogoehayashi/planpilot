@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -53,6 +54,49 @@ def _run(args: list[str]) -> tuple[int, str]:
         encoding="utf-8", errors="replace", timeout=900,
     )
     return proc.returncode, proc.stdout + proc.stderr
+
+
+# NEGATIVE CONTROL (store) | caught=27 escaped=0 broken_fixtures=0 of 28
+_NEGCTL_RE = re.compile(
+    r"NEGATIVE CONTROL \(store\) \| caught=(\d+) escaped=(\d+) broken_fixtures=(\d+) of (\d+)"
+)
+_RESTORED_RE = re.compile(r"sources restored to pre-test bytes: (\w+)")
+
+
+def _extract_negative_control(out: str) -> dict:
+    """Pull the mutation counters out of a negative-control run.
+
+    Returns a dict that is merged into results["negative_control"]. `ok` is False
+    when the counter line is missing, when anything escaped, when a mutation
+    fixture failed to apply, or when the sources were not restored — any of which
+    means the negative control did NOT do its job. A silently-missing counter is
+    worse than a visible failure, because it lets an evidence pack claim green
+    while carrying no mutation evidence, so it is reported as ok=False and
+    all_green consults it rather than only the pytest exit code.
+    """
+    m = _NEGCTL_RE.search(out)
+    if m is None:
+        return {
+            "ok": False,
+            "caught": None, "escaped": None, "broken_fixtures": None, "total": None,
+            "sources_restored": None,
+            "detail": "counter line not found in negative-control output",
+        }
+    caught, escaped, broken, total = (int(g) for g in m.groups())
+
+    r = _RESTORED_RE.search(out)
+    restored = (r.group(1) == "True") if r else None
+
+    ok = (escaped == 0 and broken == 0 and restored is True and total > 0)
+    return {
+        "ok": ok,
+        "caught": caught,
+        "escaped": escaped,
+        "broken_fixtures": broken,
+        "total": total,
+        "sources_restored": restored,
+        "detail": m.group(0),
+    }
 
 
 def main() -> int:
@@ -139,7 +183,19 @@ def main() -> int:
 
     rc2, out2 = _run([py, "-m", "pytest", "tests/negative_control", "-q", "--no-header", "-s",
                       "-p", "no:cacheprovider"])
-    results["negative_control"] = {"exit_code": rc2, "summary": out2.strip().splitlines()[-1] if out2.strip() else ""}
+    # The LAST line of a `-s` negative-control run is pytest's "N passed", which
+    # says nothing useful: those 3 tests are wrappers around 28 mutations. The
+    # numbers that matter are printed mid-output by the test itself. Recording
+    # only the last line is how an evidence pack ends up claiming green while
+    # carrying no mutation results at all, so the counter line is extracted
+    # explicitly — and a missing or non-zero-escape line is treated as a FAILURE,
+    # not as a cosmetic gap.
+    negctl = _extract_negative_control(out2)
+    results["negative_control"] = {
+        "exit_code": rc2,
+        "summary": out2.strip().splitlines()[-1] if out2.strip() else "",
+        **negctl,
+    }
     (OUT_DIR / "negative_control.log").write_bytes(out2.replace("\r\n", "\n").encode("utf-8"))
 
     rc3, out3 = _run([py, str(ROOT / "tools" / "check_closed_vocabularies.py"), "--self-test"])
@@ -197,7 +253,14 @@ def main() -> int:
         "versions": versions,
         "reference_digests": refs,
         "results": results,
-        "all_green": all(r["exit_code"] == 0 for r in results.values()),
+        # exit_code alone is not enough: the negative control prints its mutation
+        # counters mid-output and can exit 0 while carrying no usable numbers, so
+        # its own `ok` flag is part of green. Every other entry has no `ok` key
+        # and falls back to exit_code.
+        "all_green": all(
+            r.get("exit_code") == 0 and r.get("ok", True)
+            for r in results.values()
+        ),
         "known_findings": [
             {
                 "id": "F-STORE-01",
@@ -239,8 +302,11 @@ def main() -> int:
     print(f"  baseline digest: {refs['baseline_plan_content']['digest'][:32]}…")
     print(f"  all_green: {evidence['all_green']}")
     for name, r in results.items():
-        mark = "OK " if r["exit_code"] == 0 else "FAIL"
-        print(f"  {mark} {name}: {r['summary'][:70]}")
+        mark = "OK " if (r["exit_code"] == 0 and r.get("ok", True)) else "FAIL"
+        # Prefer the negative control's own counter line over pytest's "N passed",
+        # which hides the mutation numbers that are the entire point of that run.
+        shown = r.get("detail") or r["summary"]
+        print(f"  {mark} {name}: {shown[:78]}")
     return 0 if evidence["all_green"] else 1
 
 
