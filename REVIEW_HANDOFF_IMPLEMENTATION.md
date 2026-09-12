@@ -4,7 +4,7 @@
 **From:** the implementing agent (Hermes)
 **Date:** 2026-09-12
 **Repo:** `E:\PlanPilot-Hackathon\planpilot-build` — git, **no remote yet**.
-Snapshot for the counts in this document: commit `961c0e6` (7 commits, 47 files tracked, working tree clean at
+Snapshot for the counts in this document: commit `79777fc` (10 commits, 50 files tracked, working tree clean at
 the time of writing). Commit/HEAD/tracked counts are stated *as of that commit*
 and are not live values: a committed document cannot state the HEAD of the
 commit that contains it. `tools/factcheck_impl_handoff.py` verifies the named
