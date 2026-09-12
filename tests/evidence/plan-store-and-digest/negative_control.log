@@ -5,6 +5,6 @@ DEFENCE IN DEPTH — one layer removed, suite still green: 1
   float layer 2 removed (allow_nan) — layer 1 must still hold
 
 NEGATIVE CONTROL (store) | caught=18 escaped=0 broken_fixtures=0 of 19
-source tree restored: True
+sources restored to pre-test bytes: True
 ...
-3 passed in 33.02s
+3 passed in 36.61s

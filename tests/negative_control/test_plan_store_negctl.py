@@ -328,12 +328,19 @@ def test_mutations_are_detected(baseline):
         for name, data in pristine.items():
             (STORE / name).write_bytes(data)
 
-    # ---- the tree must be exactly as we found it
-    diff = subprocess.run(
-        ["git", "status", "--porcelain", "src/planpilot/store"],
-        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    restored = diff.stdout.strip() == ""
+    # ---- the sources must be exactly the bytes we captured at start
+    #
+    # This used to assert `git status --porcelain src/planpilot/store` was empty.
+    # That was WRONG: it couples "did the test undo its own mutations" to "is the
+    # working tree committed", so the test fails whenever legitimate work is in
+    # progress — twice already, and the message claimed the sources were not
+    # restored when in fact they were. The real invariant is byte equality against
+    # `pristine`, which is what the finally-block above restores.
+    not_restored = [
+        name for name, data in pristine.items()
+        if (STORE / name).read_bytes() != data
+    ]
+    restored = not not_restored
 
     total = len(MUTATIONS)
     print()
@@ -349,9 +356,10 @@ def test_mutations_are_detected(baseline):
           f"broken_fixtures={len(broken)} of {total}")
     for e in escaped:
         print(f"  ESCAPED: {e}")
-    print(f"source tree restored: {restored}")
+    print(f"sources restored to pre-test bytes: {restored}"
+          + (f" (not restored: {not_restored})" if not_restored else ""))
 
-    assert restored, "the store sources were not restored — the tree is dirty"
+    assert restored, f"the store sources were not restored: {not_restored}"
     assert not broken, f"{len(broken)} mutation fixtures did not apply; results would be theatre"
     assert not escaped, f"{len(escaped)} mutations escaped detection"
     # every "must fail" mutation caught, plus every defence-in-depth case held

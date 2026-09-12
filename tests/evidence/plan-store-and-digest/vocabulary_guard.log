@@ -1,8 +1,8 @@
 contract: planpilot_agent_contract_v1.8.json
 vocabularies: 21 sets, 135 known members
-scanning 23 modules under src/ tests/ tools/
+scanning 25 modules under src/ tests/ tools/
 
-allowlist: 11 entries
+allowlist: 12 entries
   ANOTHER_ONE — used by tests/unit/test_closed_vocabularies.py
       reason: asserts __all__ export names are not treated as vocabulary claims
   EVAL-031 — used by tests/unit/test_closed_vocabularies.py, tests/unit/test_guard_bypass_regressions.py
@@ -11,6 +11,8 @@ allowlist: 11 entries
       reason: asserts an out-of-range event id is flagged
   FABRICATED_CODE — used by tests/unit/test_closed_vocabularies.py
       reason: asserts the guard rejects an invented error code
+  HACKED_PUBLISHED — used by tests/unit/test_audit_fixes_pinned.py
+      reason: fabricated lifecycle status proving load_state rejects out-of-enum records (audit F1)
   HC-014 — used by tests/unit/test_closed_vocabularies.py, tests/unit/test_guard_bypass_regressions.py
       reason: asserts an out-of-range hard-constraint id is flagged
   HC-099 — used by tests/unit/test_closed_vocabularies.py

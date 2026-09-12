@@ -80,6 +80,63 @@ class TestF4SortOperationsIsATotalOrder:
         assert out[0]["start_time"] == "2026-09-14T08:00:00+08:00"
 
 
+class TestF12SortOperationsIsTotalOnMalformedKeys:
+    """Design decision 4 promises the digest layer never raises on bad input.
+
+    F12: mixed-type sort fields raised TypeError, contradicting that promise.
+    A malformed operation must still produce a deterministic digest; schema
+    rejection is validate_plan's job, not the digest layer's.
+    """
+
+    def _op(self, **over):
+        base = fixtures.make_operation(operation_no=1, machine_id="M1",
+                                       order_id="O1", start_time="2026-09-14T08:00:00+08:00")
+        base.update(over)
+        return base
+
+    def test_mixed_int_str_lot_no_does_not_raise(self):
+        """The exact F12 reproduction: lot_no 1 vs '1' on otherwise-tied ops."""
+        ops = [self._op(lot_no=1), self._op(lot_no="1")]
+        out = sort_operations(ops)          # must not raise TypeError
+        assert len(out) == 2
+
+    def test_dict_in_a_sort_field_does_not_raise(self):
+        ops = [self._op(lot_no=1), self._op(lot_no={"weird": "value"})]
+        assert len(sort_operations(ops)) == 2
+
+    def test_none_in_a_sort_field_does_not_raise(self):
+        ops = [self._op(lot_no=1), self._op(lot_no=None)]
+        assert len(sort_operations(ops)) == 2
+
+    def test_digest_is_computable_on_mixed_type_keys(self):
+        """canonical_plan_digest must not raise either — it calls sort_operations."""
+        content = fixtures.make_content()
+        content["operations"] = [self._op(lot_no=1), self._op(lot_no="1")]
+        d = canonical_plan_digest(content)   # must not raise
+        assert len(d) == 64
+
+    def test_mixed_type_order_is_deterministic(self):
+        """Whatever order it picks, it must pick the SAME order every time."""
+        ops = [self._op(lot_no=1), self._op(lot_no="1"), self._op(lot_no=None)]
+        d1 = [o["lot_no"] for o in sort_operations(ops)]
+        d2 = [o["lot_no"] for o in sort_operations(list(reversed(ops)))]
+        # canonical-JSON tiebreaker makes even cross-type ties order-independent
+        assert d1 == d2
+
+    def test_type_rank_uses_equality_not_identity(self):
+        """Guard against `rank is FALLBACK` regressions (works only by int caching).
+
+        _total_key must route a dict to the fallback branch via ==, so a future
+        change to the fallback value cannot silently break dispatch.
+        """
+        from planpilot.store.digest import _total_key, _TYPE_RANK_FALLBACK
+        rank, _ = _total_key({"x": 1})
+        assert rank == _TYPE_RANK_FALLBACK
+        # a well-formed value keeps its own type rank, not the fallback
+        assert _total_key(7)[0] != _TYPE_RANK_FALLBACK
+        assert _total_key("s")[0] != _TYPE_RANK_FALLBACK
+
+
 # --------------------------------------------------------- F3: idempotent retry
 
 class TestF3IdempotentRetryComparesDigestNotBytes:

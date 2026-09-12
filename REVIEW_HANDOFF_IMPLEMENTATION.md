@@ -16,7 +16,8 @@ made a judgement call, the call is named so it can be attacked.
 
 **Read in this order:**
 1. this file
-2. `IMPLEMENTATION_NOTES.md` — the 13 defects found while building, and finding F-STORE-01
+2. `IMPLEMENTATION_NOTES.md` — the 13 defects found while building (D1–D13), the
+   external audit findings (F1–F15), and finding F-STORE-01
 3. `.kiro/specs/plan-store-and-digest/design.md` — what the module is supposed to do
 4. `.kiro/specs/plan-store-and-digest/tasks.md` — the task list it was built against
 5. the code: `src/planpilot/store/{digest,errors,plan_store}.py`
@@ -42,27 +43,26 @@ dataset access. 8 of the 15 specs in `.kiro/specs/README.md` are untouched.
 fact that the test suite runs in a clean venv with only `jsonschema`, `ortools`
 (transitively) and `pytest` installed — verified in §3.
 
-Scale: **4,263 lines** across 19 Python files (the subject; the factcheck tool that
-measures them is excluded to avoid self-reference); 47 files tracked in git
-as of the snapshot commit.
+Scale: **5,023 lines** across 21 Python files (the subject; the factcheck tool that
+measures them is excluded to avoid self-reference); tracked-file count is as of the
+snapshot commit.
 
 | layer | lines | files |
 |---|---|---|
-| `src/planpilot/` — store package + top-level `__init__` | 920 | 5 |
-| `tests/unit/` — 6 test modules + `__init__` | 1,591 | 7 |
-| `tests/negative_control/` | 378 | 2 |
+| `src/planpilot/` — store package + top-level init | 1,150 | 5 |
+| `tests/unit/` — 8 test modules + init | 2,102 | 9 |
+| `tests/negative_control/` | 386 | 2 |
 | `tests/_fixtures.py`, `conftest.py`, `__init__.py` | 403 | 3 |
-| `tools/check_closed_vocabularies.py` | 723 | 1 |
+| `tools/check_closed_vocabularies.py` | 734 | 1 |
 | `tools/write_evidence_plan_store.py` | 248 | 1 |
-| **subject total** | **4,263** | **19** |
+| **subject total** | **5,023** | **21** |
 
 `tools/factcheck_impl_handoff.py` (269 lines) checks the table above, so it is
 **deliberately excluded from the total** — the same reason `canonical_plan_digest`
 excludes `plan_digest` and `engine.canonical_plan_hash` from the hashed payload. A
 checker that counts itself makes the figure move every time the checker is edited,
-which is a circular dependency, not a measurement. (All 20 Python files together
-are 4,532 lines, including the 269-line
-factcheck tool.)
+which is a circular dependency, not a measurement. (All 22 Python files together are
+5,310 lines, including the 287-line factcheck tool.)
 
 ---
 
@@ -77,18 +77,20 @@ set PY=E:\PlanPilot-Hackathon\contract-review\.venv\Scripts\python.exe
 
 | # | command | result |
 |---|---|---|
-| 1 | `%PY% -m pytest tests/unit -q` | **202 passed** |
+| 1 | `%PY% -m pytest tests/unit -q` | **265 passed** |
 | 2 | `%PY% -m pytest tests/negative_control -q` | **3 passed** (19 mutations) |
 | 3 | `%PY% tools/check_closed_vocabularies.py --self-test` | **SELF-TEST \| PASS** (17 cases) |
-| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 23 modules scanned |
+| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 25 modules scanned |
 | 5 | `%PY% tools/validate_kiro_workspace.py` | **ok=190 fail=0** |
 | 6 | `%PY% tools/negative_control_workspace.py` | **caught=14 escaped=0 of 14** |
 | 7 | `sha256sum contract/planpilot_agent_contract_v1.8.json` | `b92e53f4ff054105…` unchanged |
 
 Negative-control detail (from the run): **18 caught / 0 escaped / 0 broken
-fixtures of 19**, source tree restored (asserted via `git status --porcelain`).
-The one non-"caught" case is intentional and is the only genuine
-defence-in-depth demonstration — see §5.
+fixtures of 19**, sources restored to their pre-test bytes. The restore check
+used to compare `git status --porcelain`, which wrongly failed whenever legitimate
+uncommitted work existed; it now compares against the pristine bytes captured at
+test start (the actual invariant). The one non-"caught" case is intentional and is
+the only genuine defence-in-depth demonstration — see §5.
 
 Evidence pack: `tests/evidence/plan-store-and-digest/EVIDENCE.json` plus three raw
 logs. It records reference digests, package versions, and a `scope_statement`
@@ -107,10 +109,11 @@ cleanenv\Scripts\python.exe -m pytest tests/ -q
 **152 passed in 27.71s, exit 0.** Only the two requirements files were used. The
 temp venv was deleted afterwards and is not in the repo.
 
-That run predates five tests added to pin the filename-reference fix (§3.1). The
-suite is now **205 tests** (202 unit + 3 negative control). The
-clean-environment claim is about the two requirements files being sufficient,
-which is unaffected.
+That run predates later additions (the filename-reference pins in §3.1, the audit
+fixes, and the ghost test). The suite is now **268 tests** (265 unit + 3 negative
+control). The clean-environment claim is about the two requirements files being
+sufficient, which is unaffected — but re-run it for the current count rather than
+trusting this number.
 
 This matters because of defect **D8**: `pytest` was imported by the tests but
 declared nowhere — it had been installed by hand. A fresh clone would not have
@@ -118,6 +121,56 @@ run. Fixed by adding `requirements-dev.txt` rather than editing
 `requirements.txt`, which is diff-verified identical to the contract's runtime
 pins (asserted by `tools/validate_kiro_workspace.py`) and must not gain a test
 runner that would also land in the Lightsail image.
+
+### 2.2 An independent audit, and what it found
+
+After the first commit, I delegated a **read-only audit** of this module to an
+independent subagent — the same access a human auditor gets. It wrote
+`_audit_scratch/FINDINGS.md` incrementally and reported 15 findings (F1–F15).
+
+**I reproduced every finding against clean HEAD before believing or fixing it.**
+A subagent report is a claim, not a fact. All four HIGH findings reproduced. The
+full disposition table is in `IMPLEMENTATION_NOTES.md` §"External audit"; the
+summary here:
+
+| # | sev | finding | disposition |
+|---|---|---|---|
+| F1 | HIGH | `load_state` restored lifecycle records unvalidated — a hand-edited dump could inject a fake status or a digest disagreeing with its content | FIXED + pinned |
+| F2 | HIGH | `PlanNotFoundError` used `lookup_kind` values outside the schema enum → unemittable tool_error | FIXED + pinned |
+| F5 | HIGH | `DigestMismatchError` built details with `str(None)`, violating `^[a-f0-9]{64}$` | FIXED + pinned |
+| F11 | HIGH | `transition(pid, None, "PUBLISHED")` published the newest version regardless of which one was approved | FIXED + pinned |
+| F3 | MED | idempotency compared order-sensitive bytes, not the digest | FIXED + pinned |
+| F4 | LOW/MED | tied operations kept input order → digest depended on input order | FIXED, measured |
+| F12 | MED | `sort_operations` raised `TypeError` on mixed-type keys, contradicting design decision 4 | FIXED + pinned |
+| F6 | LOW/MED | `int(plan_version)` raised `ValueError`, masking the real error | FIXED + pinned |
+| F7, F9, F10 | info/LOW | back-transitions accepted; raw dicts handed out; fields cannot be cleared | DOCUMENTED / deferred to later specs |
+| F8 | MED | `version=None` resolves newest | MITIGATED by the F11 fix |
+| F13 | LOW | default `lookup_kind` untested | FIXED by the ghost test |
+| F14, F15 | context | dirty tree (my concurrent edits, not a defect); negctl method reviewed clean | NOT A DEFECT |
+
+**The audit's most valuable finding was not any F-number — it was the root cause
+of F2 and F5.** `errors.py` and `tasks.md` both cited
+`tests/unit/test_errors_schema.py` as the schema-validating guard. **That file had
+never been written.** A cited-but-absent test cannot fail, so F2 and F5 ran green
+the whole time. The file is now real (39 tests) and a negative control proves it
+FAILS (6, then 8) when F2 and F5 are reintroduced. This is the same orphan-spec
+class the V1.8 contract review found eight instances of — and I committed it
+again, in prose, in two files.
+
+**Two audit findings I would not have caught myself:**
+
+1. The ghost test. I ran the suite green many times; nothing failed, because a
+   test that does not exist cannot fail. Only an external reader noticed the
+   citation pointed at nothing.
+2. F12 contradicting my own design decision 4. I had *written* "the digest layer
+   stays total" as a selling point. It was not true, and I believed my prose over
+   the code until the audit forced a reproduction.
+
+**One digest consequence to flag:** F4 (tiebreaker) and F12 (type rank) both
+changed `sort_operations`, so the canonical digest output changed. The baseline
+`plan_content` digest is now `b9aa87e27b0e2c513d23…`. `EVIDENCE.json` shows
+`baseline_plan_content.digest == shuffled_operations_10_seeds.digest` — the direct
+proof F4 is fixed. No document hardcodes the old value.
 
 ---
 
@@ -269,8 +322,9 @@ found six more.
   limitation. Is that acceptable, or should definition-site checks be stricter?
 - `TOKEN_RE` uses a negative lookbehind for `.` to skip dotted prose. Can a real
   vocabulary claim be smuggled past it?
-- The allowlist is now 11 entries, all scoped to
-  `tests/unit/test_closed_vocabularies.py`. Is path-scoping sufficient, or should
+- The allowlist is now 12 entries, scoped across the three fixture test modules
+  (`test_closed_vocabularies.py`, `test_guard_bypass_regressions.py`,
+  `test_audit_fixes_pinned.py`). Is path-scoping sufficient, or should
   the guard refuse to allowlist prefixed ids (`HC-014`) at all?
 - `classify()` returns `fabricated_hard_constraint` for `HC-014` **before**
   checking near misses. Is that ordering right for every prefix family?
@@ -292,7 +346,7 @@ decision is asserted by a test:
 | `ensure_ascii` | `False` | `test_non_ascii_is_not_escaped` |
 | non-finite floats | rejected, with contract-shaped error | `TestNonFiniteFloatsRejected` (5 tests) |
 | int vs float | type-preserving (`1` ≠ `1.0`) | `test_int_and_float_are_distinguished` |
-| operations order | `(start_time, machine_id, order_id, lot_no, operation_no)` | `test_sort_operations_uses_the_contract_key` |
+| operations order | `(start_time, machine_id, order_id, lot_no, operation_no)`, then a canonical-JSON tiebreaker and a per-field type rank so the order is TOTAL | `test_sort_operations_uses_the_contract_key`, `TestF4…`, `TestF12…` |
 | algorithm | SHA-256 of that exact text | `test_digest_equals_sha256_of_canonical_text` |
 
 **Both identities must hold**, per `$defs.plan_content.plan_digest.description`

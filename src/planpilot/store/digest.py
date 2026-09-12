@@ -103,6 +103,36 @@ def canonical_json(obj: Any, *, _path: str = "", _entity_id: str | None = None) 
     )
 
 
+# Type ranks for the total-order sort key. bool is ranked separately from int
+# (bool is a subclass of int in Python, so it must be tested first). Exact-type
+# lookup, with a fallback rank for anything unexpected.
+_TYPE_RANK = {bool: 0, int: 1, float: 2, str: 3, type(None): 4}
+_TYPE_RANK_FALLBACK = 99
+
+
+def _total_key(value) -> tuple:
+    """A comparison key that never raises, for one sort-key field.
+
+    Returns `(type_rank, comparable)`. Two such keys compare safely because
+    Python compares element-wise: when the ranks differ it short-circuits on the
+    int rank and never compares the second elements; when the ranks are equal the
+    two values are the SAME type, so the native comparison is well-defined.
+
+    Audit finding F12: the bare 5-field key raised
+    `TypeError: '<' not supported between str and int` on mixed-type lot_no,
+    which broke this module's documented promise (design decision 4) that the
+    digest layer is TOTAL — "a malformed operation still produces a
+    deterministic digest". For well-formed homogeneous input every field has one
+    type, so the rank is constant per position and ordering is unchanged.
+    """
+    rank = _TYPE_RANK.get(type(value), _TYPE_RANK_FALLBACK)
+    if rank == _TYPE_RANK_FALLBACK:
+        # dict/list/etc. in a sort field is malformed; canonical_json is always a
+        # string, so these stay mutually comparable and never raise against ints.
+        return (rank, canonical_json(value))
+    return (rank, value)
+
+
 def sort_operations(operations: list[dict]) -> list[dict]:
     """Return operations ordered by the contract's sort key, as a TOTAL order.
 
@@ -111,28 +141,27 @@ def sort_operations(operations: list[dict]) -> list[dict]:
     comparison of the string equals chronological comparison — no parsing, and
     therefore no dependence on the host locale or timezone database.
 
-    Audit finding F4/F12: the contract key alone is NOT a total order. Two
-    operations can tie on all five fields yet differ in other fields (duration,
-    worker, material allocation). Python's sort is stable, so such ties kept their
-    INPUT order — which made the digest depend on input order and broke
-    plan_store.retention ("digests are recomputable from stored content at any
-    time"). Measured before fixing: reordering two tied ops changed the digest.
+    Two properties this must hold, both pinned by tests:
 
-    Fix: after the five contract fields, break remaining ties with the canonical
-    JSON of the whole operation. That is a deterministic function of content, not
-    of position, so the result is now a total order and the digest is
-    input-order-independent. The contract's five-field key still governs the
-    primary order; the tiebreaker only decides among operations the contract
-    already considers equivalent.
+    * F4/F12 (order-independence): two operations tied on all five contract
+      fields but differing elsewhere must NOT keep input order — that made the
+      digest depend on input order and broke plan_store.retention ("digests are
+      recomputable from stored content at any time"). Measured before fixing:
+      reordering two tied ops changed the digest. Fixed by breaking remaining
+      ties with the canonical JSON of the whole operation.
 
-    Missing keys sort as empty string / 0 rather than raising: the digest layer
-    must not re-implement schema validation (that is validation/factory_state.py
-    and validate_plan). A malformed operation still produces a deterministic
-    digest; schema rejection happens elsewhere.
+    * F12 (totality): mixed-type key fields (e.g. lot_no 1 vs "1") must not
+      raise TypeError. Each field is wrapped in _total_key so cross-type
+      comparison short-circuits on a type rank. The digest layer stays total, as
+      design decision 4 promises; schema rejection belongs to validate_plan.
+
+    The contract's five-field key still governs the primary order. For
+    well-formed input the tiebreaker and the type rank never change the result,
+    so the baseline digest is unchanged.
     """
     def key(op: dict) -> tuple:
         primary = tuple(
-            op.get(f, "" if f in ("start_time", "machine_id", "order_id") else 0)
+            _total_key(op.get(f, "" if f in ("start_time", "machine_id", "order_id") else 0))
             for f in OPERATION_SORT_KEY_FIELDS
         )
         # Tiebreaker: canonical JSON of the operation. canonical_json is itself

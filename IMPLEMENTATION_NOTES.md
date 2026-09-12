@@ -14,11 +14,11 @@ written. The claim was made before the artefact existed. It exists now.
 
 | | |
 |---|---|
-| unit tests | **154 passed** |
+| unit tests | **259 passed** |
 | negative control (store) | **18 caught / 0 escaped / 0 broken fixtures** of 19 |
-| full suite (`pytest tests/`) | **157 passed** |
+| full suite (`pytest tests/`) | **262 passed** |
 | closed-vocabulary guard self-test | **17/17 PASS** |
-| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 22 modules) |
+| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 25 modules) |
 | workspace validation | **190 checks / 0 fail** |
 | workspace negative control | **14 caught / 0 escaped** |
 | LLM / network / credentials / dataset used | **none** |
@@ -212,6 +212,71 @@ nothing. Its precision is a functional requirement, not a nicety.
 
 ---
 
+## External audit — findings F1–F15
+
+An independent reviewer (a delegated subagent, given the same read-only access a
+human auditor would have) audited this module and wrote `_audit_scratch/FINDINGS.md`
+incrementally. **Every finding was reproduced against clean HEAD before it was
+believed or fixed** — a subagent report is a claim, not a fact, and this project
+has been burned by self-reported success.
+
+The audit ran while I was concurrently editing the closed-vocabulary guard, so
+its F14 ("repo tree is dirty") and its "guard tests failing" note were artifacts
+of that concurrency, not store defects. The store findings are independent of it.
+
+### Root cause shared by F2 and F5: a ghost test
+
+`errors.py` line 10 and `tasks.md` line 50 both cited
+`tests/unit/test_errors_schema.py` as the guard proving every error's `.details`
+satisfies its contract schema. **That file had never been written.** It was the
+exact mechanism that would have caught F2 and F5 on the first run — and it did
+not exist. Cited-but-absent tests are the same orphan-spec class the V1.8
+contract review found eight instances of. The file is now real (39 tests), and a
+negative control proves it FAILS (6 tests, then 8) when F2 and F5 are
+reintroduced, restoring byte-identical afterward.
+
+### Findings, severity, and disposition
+
+| # | sev | location | finding | disposition |
+|---|---|---|---|---|
+| F1 | HIGH | `load_state` | restored lifecycle records with NO validation — a hand-edited dump could inject a fake status, a digest disagreeing with its content, or an orphan lifecycle record | **FIXED** — validates status against the enum and digest against the bound content, before any insert; pinned by `TestF1LoadStateValidatesLifecycle` |
+| F2 | HIGH | `PlanNotFoundError` | used `lookup_kind="plan"` (default) and `"plan_content_key"` (from `put_content`) — neither is in the schema enum, so every such `STATE_NOT_FOUND` was an unemittable tool_error | **FIXED** — `LOOKUP_KINDS` mirrored from the schema; out-of-enum refused at construction; malformed content now raises `InvalidContentError` (the correct code), not a lookup error |
+| F3 | MED | `put_content:116` | idempotency compared `canonical_json`, which does NOT sort operations — a reordered-but-identical retry raised `IdempotencyConflictError` | **FIXED** — compares digests; pinned by `TestF3IdempotentRetryComparesDigestNotBytes` |
+| F4 | LOW/MED | `sort_operations` | ops tied on all five contract fields kept input order (stable sort), so the digest depended on input order | **FIXED** — tie-broken by canonical JSON of the operation; measured before/after |
+| F5 | HIGH | `DigestMismatchError` | built details with `str(None)` when the declared digest was absent, violating `^[a-f0-9]{64}$` — an unemittable tool_error | **FIXED** — malformed digest raises the new `InvalidContentError`; `DigestMismatchError` refuses non-64-hex inputs at construction |
+| F6 | LOW/MED | `assert_digest_consistent` | `int(plan_version)` raised `ValueError` on a non-numeric version, masking the real `DigestMismatchError` | **FIXED** — `_safe_version()` for reporting only; pinned to assert the exact error type |
+| F7 | info | `transition` | `PUBLISHED -> DRAFT` is accepted | **DOCUMENTED DEFERRAL** — the transition graph is `workflow.transitions`, not re-implemented here (design decision 3). The HIGH risk is publish-without-approval (F11), now closed; back-transition is a LOW hole by comparison |
+| F8 | MED | `_resolve_version` | `version=None` silently resolves to newest across records | **MITIGATED** — mutations now require an explicit version (F11); reads may still default to latest by design |
+| F9 | LOW | `drain_superseded` / `dump_state` | hands out raw internal dicts; a caller mutating them corrupts the next dump | **ACCEPTED** — single-process store; documented as a known gap (§ Not done). A defensive copy is cheap and worth adding if the store ever gains a second consumer |
+| F10 | LOW | `transition` | cannot CLEAR `approval_set_id` / `published_version` (only set them) | **ACCEPTED** — no contract path requires clearing; flagged for the approval-service spec |
+| F11 | HIGH | `transition:253` | `transition(plan_id, None, "PUBLISHED")` published the LATEST version regardless of which version an approval was bound to — a stale approval could publish a regenerated plan | **FIXED** — mutations require an explicit int version (bool rejected); pinned by `TestF11TransitionRequiresExplicitVersion` |
+| F12 | MED | `sort_operations` | NOT total: `TypeError` on mixed-type key fields — contradicted design decision 4 | **FIXED** — `_total_key` type-rank wrapper (see decision 4 above); pinned by `TestF12SortOperationsIsTotalOnMalformedKeys` |
+| F13 | LOW | tests | the default `lookup_kind` was never exercised | **FIXED as a side effect** — the ghost test now exercises every `LOOKUP_KINDS` member and the default |
+| F14 | context | repo | tree dirty from my concurrent guard edits | **NOT A DEFECT** — confirmed: the auditor saw my in-progress edits, not a store bug |
+| F15 | clean | negctl | negative-control method reviewed for false catches | **NO DEFECT FOUND** — method sound |
+
+### What this changes about the digest
+
+F4 (tiebreaker) and F12 (type rank) both touch `sort_operations`, so the
+**canonical digest output changed** between the pre-audit and post-audit code.
+The baseline `plan_content` digest is now `b9aa87e27b0e2c513d23…` (it was a
+different value before). This is recorded in `tests/evidence/.../EVIDENCE.json`,
+which also shows `baseline_plan_content.digest == shuffled_operations_10_seeds.digest`
+— the direct evidence that F4 is fixed (shuffling operations no longer changes the
+digest). No document hardcodes the old value, so nothing else drifted.
+
+### The two things the audit caught that I would not have
+
+1. **The ghost test.** I cited `test_errors_schema.py` in two places and never
+   wrote it. I had run the suite green many times; nothing failed, because a
+   test that does not exist cannot fail. Only an external reader noticed the
+   citation pointed at nothing.
+2. **F12 contradicting my own design decision 4.** I had *written* "the digest
+   layer stays total" as a selling point. It was not true. I believed my own
+   prose over the code until the audit forced a reproduction.
+
+---
+
 ## Design decisions worth challenging in review
 
 1. **Digest verified on write, not on read.** A fabricated plan never enters the
@@ -224,10 +289,17 @@ nothing. Its precision is a functional requirement, not a nicety.
    it (11 states); lifecycle status is a projection. Only terminality is enforced.
    A second copy of the graph is exactly the orphan-spec defect class the V1.8
    review found eight instances of.
-4. **`sort_operations` does not raise on missing keys.** Schema validation belongs
-   to `validate_factory_state` / `validate_plan`. The digest layer stays total so a
-   malformed operation still produces a deterministic digest and the failure
-   surfaces where it can be reported properly.
+4. **`sort_operations` is TOTAL — it never raises on malformed keys.** Schema
+   validation belongs to `validate_factory_state` / `validate_plan`. The digest
+   layer stays total so a malformed operation still produces a deterministic
+   digest and the failure surfaces where it can be reported properly.
+   **This was aspirational until audit finding F12 proved it false:** mixed-type
+   sort fields (`lot_no` 1 vs `"1"`) raised `TypeError`, so a malformed plan could
+   not be digested at all. Now each key field is wrapped in `_total_key` →
+   `(type_rank, value)`, which short-circuits cross-type comparison on the rank.
+   For well-formed homogeneous input the rank is constant per position, so
+   ordering — and the baseline digest `b9aa87e2…` — is unchanged. Pinned by
+   `TestF12SortOperationsIsTotalOnMalformedKeys`.
 5. **Canonical form pins `ensure_ascii=False`.** Non-ASCII hashes as itself. With
    `True`, every CJK string would expand to `\uXXXX` escapes and any second
    implementation that guessed differently would disagree. The evidence pack
@@ -248,8 +320,9 @@ cleanenv/Scripts/python.exe -m pip install -r requirements.txt -r requirements-d
 cleanenv/Scripts/python.exe -m pytest tests/ -q
 ```
 
-Result: **152 passed in 27.71s**, exit code 0. That is 149 unit tests plus the 3
-negative-control tests. The install pulled only what the two requirements files
+Result at the time of that run: **152 passed in 27.71s**, exit code 0. The suite
+has since grown (audit fixes + the ghost test) to 262 unit + 6 negative control;
+re-run `pytest tests/` for the current count rather than trusting this number. The install pulled only what the two requirements files
 declare (plus their transitive deps), so a teammate cloning this repo can
 reproduce it.
 

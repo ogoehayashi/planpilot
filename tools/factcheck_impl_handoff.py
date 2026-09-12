@@ -75,13 +75,14 @@ if m:
     mt = re.search(r"(\d+) files tracked", text)
     ck(mt and int(mt.group(1)) == snap_tracked,
        f"doc's tracked count {mt.group(1) if mt else '?'} == {snap_tracked} at the snapshot")
-rc, out = run(["git", "status", "--porcelain", "src/planpilot/store"])
-# Scope is src/planpilot/store on purpose, NOT the whole repo. The point of this
-# check is that the negative control restores every mutation it injects into the
-# store sources. Checking the whole tree instead makes the factcheck fail on any
-# unrelated in-progress edit (a doc, a tool), which is noise, not signal.
-extra = [l for l in out.strip().splitlines() if l.strip()]
-ck(not extra, f"store sources clean — negative control restored them (dirty: {extra})")
+# NOTE: there used to be a `git status --porcelain src/planpilot/store` check here
+# asserting the store sources are clean. It was REMOVED because it conflated two
+# different things: "did the negative control undo its mutations" (the real
+# invariant) and "is the working tree committed" (irrelevant, and false whenever
+# legitimate work is in progress). It produced a false FAIL twice. The negative
+# control now asserts byte-restoration internally, and §D verifies the printed
+# "sources restored to pre-test bytes: true" line — that is the correct, non-
+# circular check. Restoration is no longer inferred from git cleanliness.
 rc, out = run(["git", "remote", "-v"])
 ck(out.strip() == "" and "no remote yet" in text, "no remote configured")
 # live tracked count is informational only; the doc states the SNAPSHOT count,
@@ -178,7 +179,8 @@ if neg:
 nc_actual = int(re.search(r"(\d+) passed", out).group(1))
 nc_claimed = _claimed_passed("pytest tests/negative_control")
 ck(nc_claimed == nc_actual, f"negative-control tests: doc claims {nc_claimed}, pytest reports {nc_actual}")
-ck("source tree restored" in out.lower() or "restored: True" in out, "sources restored after mutations")
+ck("sources restored to pre-test bytes: true" in out.lower() or "restored: true" in out.lower(),
+   "sources restored after mutations")
 
 # full suite: the doc cites a historical 152 (clean-env) and a current total
 rc, out = run([PY, "-m", "pytest", "tests/", "-q", "--no-header", "-p", "no:cacheprovider"])
