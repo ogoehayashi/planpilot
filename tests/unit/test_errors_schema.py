@@ -45,9 +45,28 @@ def _def_name_for_code(code: str) -> str:
 # Every StoreError subclass that carries a contract code, with the minimal valid
 # constructor arguments. Each MUST produce details that satisfy its schema — that
 # is the whole point of this file.
+#
+# This list is checked for completeness against the actual class hierarchy by
+# TestCoverageOfTheErrorHierarchy below, so adding a StoreError subclass without
+# adding it here fails the suite instead of silently escaping validation.
+def _schema_violation_inner():
+    """A real validation failure, used to construct SchemaViolationError.
+
+    Built by actually violating the contract rather than hand-assembling an error
+    object, so this entry exercises the same path production does.
+    """
+    from planpilot.validation import SchemaValidationError, validation_issues_for
+    issues = validation_issues_for(
+        {"totally_made_up_field": "x"}, "plan_content", "plan_content", "PLAN-1"
+    )
+    assert issues, "the payload did not actually violate $defs.plan_content"
+    return SchemaValidationError(issues, "plan_content", "PLAN-1")
+
+
 CONCRETE_ERRORS = [
     (E.CanonicalizationError, ("non-finite float", "plan_content.kpis.x"), {}),
     (E.InvalidContentError, ("PLAN-1", 1), {"json_path": "plan_digest", "reason": "malformed"}),
+    (E.SchemaViolationError, (_schema_violation_inner(),), {}),
     (E.DigestMismatchError, ("PLAN-1", 1, _HEX64, _HEX64B), {}),
     (E.VersionConflictError, ("PLAN-1", 3, 5), {}),
     (E.IdempotencyConflictError, ("PLAN-1", 2), {"original_status": "DRAFT"}),
@@ -182,4 +201,73 @@ class TestStoreInvariantErrorsAreNotToolErrors:
     def test_lifecycle_already_exists_has_no_contract_code(self):
         err = E.LifecycleAlreadyExistsError("PLAN-1", 1, "APPROVED")
         assert not hasattr(err, "details")
-        assert not hasattr(err, "code")
+
+
+class TestCoverageOfTheErrorHierarchy:
+    """The list above is hardcoded, so it can silently miss a new error class.
+
+    That is exactly how this file came to be a ghost: it was cited as the guard
+    that validates error details against the contract, but it did not exist, and
+    nothing noticed because nothing enumerated what should be in it. Enumerating
+    the hierarchy means a new StoreError subclass FAILS until it is added to
+    CONCRETE_ERRORS with arguments that actually construct it.
+    """
+
+    @staticmethod
+    def _all_store_errors():
+        """Every concrete StoreError subclass, transitively."""
+        found: set[type] = set()
+        queue = [E.StoreError]
+        while queue:
+            cls = queue.pop()
+            for sub in cls.__subclasses__():
+                if sub not in found:
+                    found.add(sub)
+                    queue.append(sub)
+        return found
+
+    def test_every_store_error_subclass_is_covered(self):
+        covered = {cls for cls, _args, _kw in CONCRETE_ERRORS}
+        missing = self._all_store_errors() - covered
+        assert not missing, (
+            f"these StoreError subclasses are never constructed in this file, so "
+            f"their .details are never validated against the contract: "
+            f"{sorted(c.__name__ for c in missing)}. Add them to CONCRETE_ERRORS."
+        )
+
+    def test_every_covered_class_is_really_a_store_error(self):
+        """The mirror check: no stale entry for a class that stopped being one."""
+        for cls, _args, _kw in CONCRETE_ERRORS:
+            assert issubclass(cls, E.StoreError), f"{cls.__name__} is not a StoreError"
+
+    def test_every_store_error_subclass_declares_a_registered_code(self):
+        """A code outside the registry would be an unemittable tool_error."""
+        for cls in self._all_store_errors():
+            code = getattr(cls, "code", None)
+            assert code in RETRYABILITY_REGISTRY, (
+                f"{cls.__name__}.code={code!r} is not in "
+                f"tool_execution_contract.retryability_registry"
+            )
+
+    def test_the_store_raises_one_exception_root(self):
+        """SchemaViolationError wraps the validation package's own error.
+
+        Without that, the tool layer would need to special-case two hierarchies.
+        """
+        from planpilot.validation import SchemaValidationError
+        assert issubclass(E.SchemaViolationError, E.StoreError)
+        assert issubclass(E.SchemaViolationError, ValueError)
+        # and the wrapped error is NOT a StoreError — hence the need to wrap it
+        assert not issubclass(SchemaValidationError, E.StoreError)
+
+    def test_schema_violation_details_are_emittable(self):
+        from planpilot.validation import SchemaValidationError, ValidationIssue
+        inner = SchemaValidationError(
+            [ValidationIssue(code="INVALID_VALUE", entity_type="plan_content",
+                             message="nope", field="kpis", entity_id="PLAN-1")],
+            "plan_content", "PLAN-1",
+        )
+        err = E.SchemaViolationError(inner)
+        fixtures.validate(err.details, "error_details_invalid_input")
+        assert err.code == "INVALID_INPUT"
+        assert err.retryable is False

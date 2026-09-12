@@ -21,14 +21,16 @@ from .errors import (
     CanonicalizationError,
     DigestMismatchError,
     IdempotencyConflictError,
+    InvalidContentError,
     LifecycleAlreadyExistsError,
     PlanNotFoundError,
+    SchemaViolationError,
     StoreError,
     StoreInvariantError,
     TransitionNotAllowedError,
     VersionConflictError,
 )
-from .plan_store import LIFECYCLE_STATUSES, PlanStore
+from .plan_store import INVALIDATION_CAUSES, LIFECYCLE_STATUSES, PlanStore
 
 __all__ = [
     "DIGEST_EXCLUDED_FIELDS",
@@ -42,12 +44,15 @@ __all__ = [
     "CanonicalizationError",
     "DigestMismatchError",
     "IdempotencyConflictError",
+    "InvalidContentError",
     "LifecycleAlreadyExistsError",
     "PlanNotFoundError",
+    "SchemaViolationError",
     "StoreError",
     "StoreInvariantError",
     "TransitionNotAllowedError",
     "VersionConflictError",
+    "INVALIDATION_CAUSES",
     "LIFECYCLE_STATUSES",
     "PlanStore",
 ]

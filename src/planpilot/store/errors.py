@@ -23,6 +23,7 @@ __all__ = [
     "StoreInvariantError",
     "CanonicalizationError",
     "InvalidContentError",
+    "SchemaViolationError",
     "DigestMismatchError",
     "VersionConflictError",
     "IdempotencyConflictError",
@@ -157,6 +158,43 @@ class InvalidContentError(StoreError):
         })
         self.plan_id = plan_id
         self.plan_version = plan_version
+
+
+class SchemaViolationError(StoreError, ValueError):
+    """Instance failed contract `$defs` validation at a store write boundary.
+
+    Wraps `planpilot.validation.SchemaValidationError` so the store keeps ONE
+    exception root: every code the store can raise stays a StoreError carrying a
+    registered tool_error code and schema-shaped details, which is what lets the
+    tool layer map failures without special-casing the validation package.
+
+    Raised for audit finding P0-1. Before this class existed, `put_content`
+    checked only id/version presence and digest self-consistency — so a plan that
+    violated `additionalProperties: false`, dropped a required field, or used
+    `plan_version=True` was accepted whenever the caller re-signed its digest.
+    Digest consistency proves content was not tampered with AFTER signing; it
+    never proves the content is legal. Both checks are required.
+
+    Multiple inheritance from ValueError is deliberate: callers that only expect
+    ValueError from malformed input keep working, and it matches
+    SchemaValidationError's own base.
+
+    Maps to INVALID_INPUT.
+    details schema: $defs.error_details_invalid_input
+      required: field_errors, rejected_entity_type, rejected_entity_id
+    """
+
+    code = "INVALID_INPUT"
+
+    def __init__(self, inner) -> None:
+        # `inner` is a planpilot.validation.SchemaValidationError. Its details are
+        # already built to satisfy error_details_invalid_input (capped at the
+        # schema's maxItems: 50), so they are reused verbatim rather than
+        # re-derived — re-deriving is how F2 and F5 produced unemittable details.
+        super().__init__(str(inner), dict(inner.details))
+        self.issues = inner.issues
+        self.rejected_entity_type = inner.rejected_entity_type
+        self.rejected_entity_id = inner.rejected_entity_id
 
 
 class DigestMismatchError(StoreError):

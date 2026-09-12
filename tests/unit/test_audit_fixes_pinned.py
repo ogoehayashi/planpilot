@@ -23,6 +23,8 @@ from planpilot.store.errors import (
     IdempotencyConflictError,
     InvalidContentError,
     PlanNotFoundError,
+    SchemaViolationError,
+    VersionConflictError,
 )
 
 
@@ -254,7 +256,14 @@ class TestF1LoadStateValidatesLifecycle:
         assert fresh.get_lifecycle(content["plan_id"], 1)["status"] == "APPROVED"
 
     def test_load_refuses_a_lifecycle_with_a_fake_status(self, store, content, tmp_path):
-        """F1: lifecycle records were restored with NO validation."""
+        """F1: lifecycle records were restored with NO validation.
+
+        Now caught by the SHAPE layer (STATE_SCHEMA's status enum) rather than by
+        the explicit enum check that F1 added — the envelope is validated as a
+        whole before any record is inspected. Same code (INVALID_INPUT), earlier
+        and stronger: a malformed `updated_at` or an unknown top-level key is
+        refused too, which a per-field enum check could not see.
+        """
         store.put_content(content)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
         p = tmp_path / "state.json"
@@ -265,9 +274,10 @@ class TestF1LoadStateValidatesLifecycle:
         p.write_text(json.dumps(raw), encoding="utf-8")
 
         fresh = PlanStore()
-        with pytest.raises(InvalidContentError) as exc:
+        with pytest.raises(SchemaViolationError) as exc:
             fresh.load_state(p)
         fixtures.validate(exc.value.details, "error_details_invalid_input")
+        assert exc.value.code == "INVALID_INPUT"
         assert len(fresh) == 0, "a refused load must not half-populate the store"
 
     def test_load_refuses_a_lifecycle_digest_that_disagrees_with_content(self, store, content, tmp_path):

@@ -248,7 +248,14 @@ class TestOptimisticConcurrency:
         assert rec["status"] == "APPROVED"
 
     def test_stale_approval_cannot_publish_a_regenerated_plan(self, store, content, fixtures):
-        """security_controls.approvals_bound_to_plan_version_and_digest, exercised."""
+        """security_controls.approvals_bound_to_plan_version_and_digest, exercised.
+
+        v2 needs a lifecycle record for this to test CONCURRENCY rather than
+        existence: transition() checks that a lifecycle record exists before it
+        checks any version gate, because you cannot transition a record that is
+        not there. The first version of this test omitted create_lifecycle for v2
+        and so was passing for the wrong reason once that ordering was corrected.
+        """
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
         store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1,
                          approval_set_id="AS-001", expected_plan_version=1)
@@ -260,12 +267,28 @@ class TestOptimisticConcurrency:
         v2["plan_digest"] = d2
         v2["engine"]["canonical_plan_hash"] = d2
         store.put_content(v2)
+        store.create_lifecycle(content["plan_id"], 2, d2, ts=fixtures.T2)
 
         # a caller still holding version 1 cannot drive version 2
         with pytest.raises(VersionConflictError):
             store.transition(content["plan_id"], 2, "PUBLISHED", ts=fixtures.T2,
                              expected_plan_version=1)
         assert store.get_lifecycle(content["plan_id"], 1)["status"] == "APPROVED"
+
+    def test_transition_needs_a_lifecycle_record_before_it_checks_versions(self, store, content, fixtures):
+        """The ordering the test above depends on, pinned on its own terms."""
+        store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
+        v2 = copy.deepcopy(content)
+        v2["plan_version"] = 2
+        v2["kpis"]["on_time_rate"] = 0.6
+        d2 = canonical_plan_digest(v2)
+        v2["plan_digest"] = d2
+        v2["engine"]["canonical_plan_hash"] = d2
+        store.put_content(v2)          # content exists, lifecycle does not
+
+        with pytest.raises(PlanNotFoundError):
+            store.transition(content["plan_id"], 2, "PUBLISHED", ts=fixtures.T2,
+                             expected_plan_version=2)
 
 
 class TestSupersede:
