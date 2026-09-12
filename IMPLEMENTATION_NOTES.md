@@ -14,10 +14,11 @@ written. The claim was made before the artefact existed. It exists now.
 
 | | |
 |---|---|
-| unit tests | **149 passed** |
+| unit tests | **154 passed** |
 | negative control (store) | **18 caught / 0 escaped / 0 broken fixtures** of 19 |
+| full suite (`pytest tests/`) | **157 passed** |
 | closed-vocabulary guard self-test | **17/17 PASS** |
-| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 18 modules) |
+| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 22 modules) |
 | workspace validation | **190 checks / 0 fail** |
 | workspace negative control | **14 caught / 0 escaped** |
 | LLM / network / credentials / dataset used | **none** |
@@ -158,12 +159,16 @@ a test runner (which would also land in the Lightsail image).
 Verified by installing into a fresh venv from the two files alone and running the
 suite — see the clean-environment result at the foot of this file.
 
-### D9 — `parents[N]` off-by-one, twice
+### D9 — `parents[N]` / `parent` off-by-one, three times
 
 `tests/_fixtures.py` used `parents[2]` and failed with `FileNotFoundError`. Fixed
 by searching upward for `contract/`. Then `tools/write_evidence_plan_store.py` made
-**the same mistake**. Second occurrence is the signal that counting levels is the
-wrong pattern, so both now search for markers (`contract/` + `src/planpilot/`).
+**the same mistake**. Then `tools/factcheck_impl_handoff.py` made it a **third**
+time, using `Path(__file__).parent` and resolving to `tools/` instead of the repo
+root.
+
+Three occurrences is not bad luck, it is the wrong pattern. All three now search
+upward for markers (`contract/` + `src/planpilot/`) instead of counting levels.
 
 ### D10 — a meaningless ternary left in shipped code
 
@@ -182,6 +187,28 @@ translates newlines.
 `assert_digest_consistent` had `from .errors import DigestMismatchError  # local
 import: errors imports nothing here`. There was no circular-import problem, so the
 import was dead weight and the comment was false. Moved to the module top.
+
+### D13 — the guard flagged filenames as fabricated identifiers
+
+`TOKEN_RE` ended with `(?![\w])`, so the string `"IMPLEMENTATION_NOTES.md"` yielded
+the token `IMPLEMENTATION_NOTES` — a filename stem, not a vocabulary claim. Six
+such references in `tools/factcheck_impl_handoff.py` made the repo scan fail.
+
+The blast radius was the interesting part: `test_the_repository_passes_its_own_guard`
+asserts a clean scan, so a guard false positive turned the **entire unit suite**
+red. A precision bug in the guard is therefore more disruptive than a missed
+fabrication.
+
+Fixed with a `(?!\.\w)` lookahead — a token followed by a dot and a word character
+is naming a file. A trailing sentence period still matches, because `"MISMATCHED."`
+is a dot followed by whitespace, not by `\w`.
+
+Pinned by `test_filename_references_are_not_scanned` (four filenames) and
+`test_a_trailing_sentence_period_does_not_disable_detection`, so the lookahead
+cannot be removed as "simplification" without a test failing.
+
+**General lesson:** a guard that cries wolf gets overridden, and then it guards
+nothing. Its precision is a functional requirement, not a nicety.
 
 ---
 

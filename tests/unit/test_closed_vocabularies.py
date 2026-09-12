@@ -132,6 +132,28 @@ class TestGuardDoesNotOverReport:
         src = 'raise RuntimeError("see planpilot.NOT_A_REAL_MEMBER for details")\n'
         assert not probe(src), "a dotted attribute reference was treated as a vocabulary claim"
 
+    @pytest.mark.parametrize("filename", [
+        "IMPLEMENTATION_NOTES.md",
+        "REVIEW_HANDOFF_FOR_CODEX.md",
+        "REVIEW_HANDOFF_IMPLEMENTATION.md",
+        "V1.8_changelog.md",
+    ])
+    def test_filename_references_are_not_scanned(self, probe, filename):
+        """A token followed by `.ext` names a file; it is not a vocabulary claim.
+
+        Pinned because this exclusion was added after the guard flagged six
+        filename stems in tools/factcheck_impl_handoff.py, which blocked the whole
+        test suite via test_the_repository_passes_its_own_guard. Without this
+        test someone could "simplify" the lookahead away and reintroduce it.
+        """
+        assert not probe(f'p = ROOT / "{filename}"\n')
+
+    def test_a_trailing_sentence_period_does_not_disable_detection(self, probe):
+        """The lookahead must not swallow a real violation ending a sentence."""
+        found = probe('msg = "the code was PLAN_DIGEST_MISMATCHED."\n')
+        assert found, "a fabricated token before a sentence period was not flagged"
+        assert found[0][1] == "PLAN_DIGEST_MISMATCHED"
+
     def test_implementation_namespace_is_not_scanned(self, probe):
         assert not probe('X = "PLANPILOT_SOMETHING_NEW"\n')
 

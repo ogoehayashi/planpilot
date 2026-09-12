@@ -136,12 +136,23 @@ PREFIXED_VALID: dict[str, set[str]] = {
     },
 }
 
-# The token shape. Negative lookbehind for `.` and word chars excludes dotted
-# attribute references in prose; negative lookahead excludes mid-word matches.
+# The token shape.
+#   (?<![.\w])  excludes dotted attribute references in prose
+#               ("see planpilot.CONTRACT_SHA256")
+#   (?!\.\w)    excludes FILENAME references ("IMPLEMENTATION_NOTES.md",
+#               "REVIEW_HANDOFF_FOR_CODEX.md"). A token followed by a dot and a
+#               word char is naming a file, not claiming a vocabulary value.
+#               This was added after the guard flagged six filename stems in
+#               tools/factcheck_impl_handoff.py and thereby blocked the whole
+#               test suite — a false positive in the guard is worse than a miss,
+#               because it trains people to override it.
+#               A trailing sentence period still matches: "MISMATCH." is a dot
+#               followed by whitespace, not by \w.
+#   (?![\w])    excludes mid-word matches
 TOKEN_RE = re.compile(
     r"(?<![.\w])"
     r"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[A-Z]{2,}-\d{3})"
-    r"(?![\w])"
+    r"(?!\.\w)(?![\w])"
 )
 
 # The implementation's own namespaces. These are env vars and local constants,
