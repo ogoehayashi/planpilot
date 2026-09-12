@@ -9,9 +9,11 @@ runs on the write path, so it may never reach for an LLM.
 """
 
 from .schema import (
+    ContractIntegrityError,
     SchemaValidationError,
     ValidationIssue,
     contract_path,
+    contract_sha256,
     def_names,
     errors_for,
     is_valid,
@@ -22,9 +24,11 @@ from .schema import (
 )
 
 __all__ = [
+    "ContractIntegrityError",
     "SchemaValidationError",
     "ValidationIssue",
     "contract_path",
+    "contract_sha256",
     "def_names",
     "errors_for",
     "is_valid",

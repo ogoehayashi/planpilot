@@ -22,7 +22,14 @@ from planpilot.store.errors import DigestMismatchError
 
 @pytest.fixture
 def populated(fixtures):
-    """A store with two versions, one superseded, lifecycle records present."""
+    """A store with two versions, one superseded, lifecycle records present.
+
+    v2 is added with commit_new_version(), not put_content() — the latter now
+    refuses to add a version to an existing plan (audit finding P1-b), because
+    only commit_new_version() also retires the previous one. Passing ts=T3 keeps
+    the observable state this fixture always had: v1 SUPERSEDED at T3 still bound
+    to AS-001, one invalidation event, v2 DRAFT.
+    """
     v1_draft = fixtures.make_content(plan_version=1)
     v1 = fixtures.make_content(plan_version=1, digest=canonical_plan_digest(v1_draft))
 
@@ -35,12 +42,10 @@ def populated(fixtures):
 
     s = PlanStore()
     s.put_content(v1)
-    s.put_content(v2)
     s.create_lifecycle(v1["plan_id"], 1, v1["plan_digest"], ts=fixtures.T0)
     s.transition(v1["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
                  approval_set_id="AS-001")
-    s.create_lifecycle(v2["plan_id"], 2, v2["plan_digest"], ts=fixtures.T2)
-    s.supersede(v1["plan_id"], 1, ts=fixtures.T3)
+    s.commit_new_version(v2, ts=fixtures.T3)
     return s, v1, v2
 
 
@@ -93,25 +98,57 @@ class TestRoundTrip:
         store.dump_state(b)
         assert a.read_bytes() == b.read_bytes()
 
-    def test_dump_order_does_not_depend_on_insertion_order(self, populated, tmp_path):
-        """Same logical state, different insertion order -> same bytes."""
-        store, v1, v2 = populated
-        a = tmp_path / "a.json"
-        store.dump_state(a)
+    def test_dump_order_does_not_depend_on_insertion_order(self, fixtures, tmp_path):
+        """Same logical state, different insertion order -> same bytes.
 
-        reordered = PlanStore()
-        reordered.put_content(v2)          # v2 first this time
-        reordered.put_content(v1)
-        reordered.create_lifecycle(v2["plan_id"], 2, v2["plan_digest"],
-                                   ts="2026-09-14T13:00:00+08:00")
-        reordered.create_lifecycle(v1["plan_id"], 1, v1["plan_digest"],
+        This test used to write v2 before v1 for one plan. That construction is
+        gone with P1-b: put_content() will not add a version to an existing plan,
+        and commit_new_version() requires latest + 1, so a single plan's versions
+        can now only be inserted in ascending order.
+
+        The property under test is unchanged, so it is exercised the way that is
+        still reachable: two plans inserted in opposite order. dump_state() sorts
+        by (plan_id, plan_version), so interleaving differently must not change a
+        byte — and with two plans this now also covers ordering ACROSS plans,
+        which the single-plan version could not.
+        """
+        plans = []
+        for suffix, rate in (("001", 0.6), ("002", 0.7)):
+            v1 = fixtures.make_content(plan_version=1, plan_id=f"PLAN-2026-09-14-{suffix}")
+            v1 = fixtures.make_content(
+                plan_version=1, plan_id=f"PLAN-2026-09-14-{suffix}",
+                digest=canonical_plan_digest(v1),
+            )
+            d2 = fixtures.make_content(
+                plan_version=2, plan_id=f"PLAN-2026-09-14-{suffix}",
+                kpis=fixtures.make_kpis(on_time_rate=rate),
+            )
+            v2 = fixtures.make_content(
+                plan_version=2, plan_id=f"PLAN-2026-09-14-{suffix}",
+                kpis=fixtures.make_kpis(on_time_rate=rate),
+                digest=canonical_plan_digest(d2),
+            )
+            plans.append((v1, v2))
+
+        def build(order):
+            s = PlanStore()
+            for v1, v2 in order:
+                s.put_content(v1)
+                s.create_lifecycle(v1["plan_id"], 1, v1["plan_digest"],
                                    ts="2026-09-14T08:00:00+08:00")
-        reordered.transition(v1["plan_id"], 1, "AWAITING_APPROVAL",
+                s.transition(v1["plan_id"], 1, "AWAITING_APPROVAL",
                              ts="2026-09-14T10:30:00+08:00", approval_set_id="AS-001")
-        reordered.supersede(v1["plan_id"], 1, ts="2026-09-15T08:00:00+08:00")
+                s.commit_new_version(v2, ts="2026-09-15T08:00:00+08:00")
+            return s
+
+        a = tmp_path / "a.json"
+        build(plans).dump_state(a)
+
+        reordered = build(list(reversed(plans)))    # PLAN-...-002 first this time
         b = tmp_path / "b.json"
         reordered.dump_state(b)
 
+        assert len(reordered) == 4, "both stores hold two plans x two versions"
         assert a.read_bytes() == b.read_bytes()
 
 

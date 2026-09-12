@@ -23,8 +23,10 @@ validators are immutable once built).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -33,9 +35,11 @@ import jsonschema
 from jsonschema import Draft202012Validator
 
 __all__ = [
+    "ContractIntegrityError",
     "SchemaValidationError",
     "ValidationIssue",
     "contract_path",
+    "contract_sha256",
     "def_names",
     "errors_for",
     "is_valid",
@@ -161,22 +165,161 @@ def _repo_root(start: Path) -> Path:
     )
 
 
+# planpilot_agent_contract_v1.8.json -> (1, 8). Anchored, and the extension is
+# part of the pattern so "…_v1.8.json.bak" cannot be mistaken for a contract.
+_CONTRACT_NAME_RE = re.compile(r"^planpilot_agent_contract_v(\d+(?:\.\d+)*)\.json$")
+
+# Paths whose sha256 has already been checked. contract_path() is called on
+# every validator_for(), and the contract is 190KB, so hashing it per call would
+# dominate validation time. Keyed on the resolved path; a path is immutable
+# content-wise for the life of the process, and a swapped file under the same
+# path is not a threat this repo models (git tracks it and conftest re-checks).
+_VERIFIED: dict[str, str] = {}
+
+
+class ContractIntegrityError(RuntimeError):
+    """The contract this package was told to use is not the one it was built for.
+
+    Raised rather than logged, because every validator in the package is compiled
+    from this file: validating against a substituted contract would make every
+    downstream check meaningless while still reporting success. That is the same
+    failure shape as audit finding P0-1 — a gate that always says yes.
+
+    A plain Exception subclass, not a StoreError: this is a deployment/config
+    fault at import-or-first-use time, before any plan exists to report against,
+    and it has no tool_error mapping.
+    """
+
+
+def _contract_version(name: str) -> tuple[int, ...]:
+    """Parse a contract filename into a comparable version tuple.
+
+    Audit finding P2: the previous implementation took `sorted(matches)[-1]`,
+    which is LEXICOGRAPHIC. Measured, not assumed —
+
+        sorted(["…_v1.2.json", "…_v1.9.json", "…_v1.10.json"])[-1]
+        -> "…_v1.9.json"
+
+    because "1" < "9" and the comparison never reaches the "10". So the release
+    after v1.9 would silently have validated against v1.9, and the suite would
+    have stayed green: conftest pins the sha256 of whichever file the FIXTURES
+    resolve, and both resolvers would have agreed on the wrong file.
+
+    A file matching the contract glob but not the version pattern is refused
+    rather than skipped. Skipping it would let a mis-named contract sit in
+    contract/ unnoticed while an older one keeps being used.
+    """
+    m = _CONTRACT_NAME_RE.match(name)
+    if m is None:
+        raise ContractIntegrityError(
+            f"{name!r} matches the contract glob but not the expected name shape "
+            f"planpilot_agent_contract_v<numbers>.json; refusing to guess its version"
+        )
+    return tuple(int(part) for part in m.group(1).split("."))
+
+
+def contract_sha256(path: Path | None = None) -> str:
+    """The sha256 of the contract file, as hex.
+
+    Public so tools and the evidence pack can record the SAME value the
+    validators were compiled from, rather than re-hashing a path they resolved
+    themselves.
+    """
+    p = (path or contract_path()).resolve()
+    return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
 def contract_path() -> Path:
     """The authoritative contract this package validates against.
 
     Resolved from this file's location so it works installed, in-repo, and from
-    any cwd. The caller may override via PLANPILOT_CONTRACT_PATH for tests that
-    need a synthetic contract.
+    any cwd. Two properties, both added for audit finding P2:
+
+    1. Highest SEMANTIC version wins, not highest filename (see
+       _contract_version for the lexicographic counterexample).
+    2. The resolved file's sha256 must equal planpilot.CONTRACT_SHA256.
+
+    Property 2 is what makes property 1 safe. Picking "the newest contract in the
+    directory" is only correct if that file is the one this code was written
+    against; without the hash check, dropping any file into contract/ would
+    silently retarget every validator in the package. tests/conftest.py already
+    pinned the hash, but only for the fixtures' own resolution — the production
+    entry point was unpinned, so src/ and tests/ could have disagreed.
+
+    PLANPILOT_CONTRACT_PATH still overrides, for a synthetic contract in tests,
+    but now requires PLANPILOT_CONTRACT_SHA256 to name that file's digest. A bare
+    path is refused. That is deliberate: the override existed to let a test point
+    at a contract it constructed, and requiring its digest proves the caller
+    knows which contract it meant. It also closes the accidental case — an
+    override left in someone's shell can no longer silently retarget production
+    validation, since the digest will not match whatever is at that path.
+
+    A boolean "am I in test mode" flag was considered and rejected: it would
+    still let the override point at ANY file, so it gates the mode but not the
+    content.
     """
     override = os.environ.get("PLANPILOT_CONTRACT_PATH")
     if override:
-        return Path(override).resolve()
+        resolved = Path(override).resolve()
+        expected = os.environ.get("PLANPILOT_CONTRACT_SHA256")
+        if not expected:
+            raise ContractIntegrityError(
+                f"PLANPILOT_CONTRACT_PATH={override!r} requires "
+                f"PLANPILOT_CONTRACT_SHA256 to name that file's sha256; an "
+                f"unverified override could retarget every validator in this "
+                f"package at an unknown contract"
+            )
+        with _LOCK:
+            known = _VERIFIED.get(str(resolved))
+        if known is not None:
+            if known != expected:
+                raise ContractIntegrityError(
+                    f"PLANPILOT_CONTRACT_SHA256 changed for the same path "
+                    f"({resolved}): {known[:16]}… vs {expected[:16]}…"
+                )
+            return resolved
+        actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        if actual != expected:
+            raise ContractIntegrityError(
+                f"contract override digest mismatch for {resolved}: "
+                f"PLANPILOT_CONTRACT_SHA256 says {expected}, file hashes to {actual}"
+            )
+        with _LOCK:
+            _VERIFIED[str(resolved)] = actual
+        return resolved
+
     root = _repo_root(Path(__file__).resolve())
-    matches = sorted((root / "contract").glob("planpilot_agent_contract_v*.json"))
+    directory = root / "contract"
+    matches = list(directory.glob("planpilot_agent_contract_v*.json"))
     if not matches:
-        raise FileNotFoundError(f"no contract found in {root / 'contract'}")
-    # Highest version wins, so bumping the contract needs no code change here.
-    return matches[-1]
+        raise FileNotFoundError(f"no contract found in {directory}")
+    chosen = max(matches, key=lambda p: _contract_version(p.name))
+
+    key = str(chosen)
+    with _LOCK:
+        known = _VERIFIED.get(key)
+    if known is not None:
+        return chosen
+
+    # Imported here rather than at module level: this package is inside
+    # planpilot, and planpilot/__init__.py deliberately imports nothing, so a
+    # top-level `from planpilot import …` would be a cycle waiting to happen the
+    # day that file grows an import.
+    from planpilot import CONTRACT_SHA256
+
+    actual = hashlib.sha256(chosen.read_bytes()).hexdigest()
+    if actual != CONTRACT_SHA256:
+        raise ContractIntegrityError(
+            f"contract drift: {chosen.name} hashes to {actual}, but this "
+            f"implementation was written against {CONTRACT_SHA256}. Every "
+            f"validator in planpilot.validation is compiled from this file, so "
+            f"validating against a different revision would report success "
+            f"against the wrong rules. Update CONTRACT_SHA256 deliberately, or "
+            f"restore the contract."
+        )
+    with _LOCK:
+        _VERIFIED[key] = actual
+    return chosen
 
 
 def _load_contract(path: Path) -> dict:

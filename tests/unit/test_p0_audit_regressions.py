@@ -37,6 +37,7 @@ from planpilot.store.errors import (
     PlanNotFoundError,
     SchemaViolationError,
     VersionConflictError,
+    VersionRouteError,
 )
 
 
@@ -224,18 +225,30 @@ class TestP01LifecycleTimestampIsValidated:
 
 class TestP02StaleVersionCannotBePublished:
     def _store_with_two_versions(self, store, content):
-        """v1 APPROVED (approval set bound), then v2 stored as DRAFT."""
+        """v2 is active; v1 is stale but still carries a non-terminal record.
+
+        This fixture used to build "v1 APPROVED, then v2 stored as DRAFT" by
+        calling put_content(v2). That state is now UNREACHABLE through the live
+        API, and making it unreachable is the point of P1-b: commit_new_version()
+        supersedes v1 as it adds v2, and the authority gate refuses to approve a
+        version that is not active. Measured, not assumed — see
+        _audit_scratch/probe_reachability.py and probe_occ_reachable.py.
+
+        So the fixture builds the strongest stale state that IS still reachable.
+        v1 gets content but no lifecycle record, v2 is committed (supersede is
+        skipped because there is no status to move), and only then does v1 get a
+        DRAFT record. v1 is stale AND non-terminal, which is precisely what lets
+        the optimistic-concurrency check be exercised without the terminal check
+        firing first — the property the negative control depends on.
+        """
         store.put_content(content)
+        v2 = next_version(content, 2, on_time_rate=0.6)
+        store.commit_new_version(v2, ts=fixtures.T1)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
                                ts=fixtures.T0)
-        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
-                         approval_set_id="AS-001")
-        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T2)
 
-        v2 = next_version(content, 2, on_time_rate=0.6)
-        store.put_content(v2)
-        store.create_lifecycle(content["plan_id"], 2, v2["plan_digest"],
-                               ts=fixtures.T2)
+        assert store.current_active_version(content["plan_id"]) == 2
+        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "DRAFT"
         return v2
 
     def test_the_original_exploit_is_closed(self, store, content):
@@ -249,8 +262,8 @@ class TestP02StaleVersionCannotBePublished:
             store.transition(content["plan_id"], 1, "PUBLISHED", ts=fixtures.T3,
                              expected_plan_version=1)
         fixtures.validate(exc.value.details, "error_details_plan_version_conflict")
-        # v1 must still be APPROVED, not PUBLISHED.
-        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "APPROVED"
+        # v1 must be untouched — still DRAFT, never PUBLISHED.
+        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "DRAFT"
 
     def test_publishing_a_stale_version_is_refused_even_without_expected(self, store, content):
         """No `expected_plan_version` at all must not reopen the hole.
@@ -261,7 +274,7 @@ class TestP02StaleVersionCannotBePublished:
         self._store_with_two_versions(store, content)
         with pytest.raises(VersionConflictError):
             store.transition(content["plan_id"], 1, "PUBLISHED", ts=fixtures.T3)
-        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "APPROVED"
+        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "DRAFT"
 
     def test_approving_a_stale_version_is_refused(self, store, content):
         """APPROVED grants authority too, so it is gated the same way."""
@@ -342,7 +355,7 @@ class TestP02StaleVersionCannotBePublished:
         fixtures.validate(exc.value.details, "error_details_plan_version_conflict")
         assert exc.value.details["expected_plan_version"] == 1
         assert exc.value.details["actual_plan_version"] == 2
-        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "APPROVED"
+        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "DRAFT"
 
     def test_expected_version_against_the_active_version_is_accepted(self, store, content):
         """The mirror case: a correct expectation on a stale version is fine."""
@@ -459,26 +472,74 @@ class TestP02CommitNewVersionIsAtomic:
         assert store.versions(content["plan_id"]) == [1]
         assert store.get_lifecycle(content["plan_id"], 1)["status"] == "DRAFT"
 
-    def test_put_content_alone_still_does_not_supersede(self, store, content):
-        """DELIBERATE, and pinned so a refactor cannot "helpfully" change it.
+    def test_put_content_refuses_to_add_a_version_at_all(self, store, content):
+        """P1-b: put_content() writes the FIRST version only.
 
-        put_content is the low-level primitive: write-once content, nothing more.
-        Lifecycle and supersede are separate concerns. Only commit_new_version()
-        bundles them, because bundling is what makes the sequence atomic.
+        These two tests used to pin the opposite — that put_content() alone
+        neither supersedes nor enforces continuity — as a deliberate design
+        split. That split WAS the defect. Writing v2 through put_content() moved
+        current_active_version() to 2 while v1 kept its APPROVED status and its
+        live approval set, which is exactly the state plan_store.versioning
+        forbids, and it held only for callers who happened to pick
+        commit_new_version(). A "low-level primitive" that lets callers produce
+        a forbidden state is not a primitive, it is a hole.
+
+        Continuity is still enforced, in the one place that can enforce it
+        together with the supersede: test_a_skipped_version_number_is_refused.
+        """
+        store.put_content(content)
+        with pytest.raises(VersionRouteError) as exc:
+            store.put_content(next_version(content, 2, on_time_rate=0.6))
+        assert exc.value.existing_versions == [1]
+        assert exc.value.plan_version == 2
+        # nothing was written
+        assert store.versions(content["plan_id"]) == [1]
+        assert not store.has(content["plan_id"], 2)
+
+    def test_the_refusal_names_the_correct_route(self, store, content):
+        """The message must tell the caller what to do instead."""
+        store.put_content(content)
+        with pytest.raises(VersionRouteError) as exc:
+            store.put_content(next_version(content, 2, on_time_rate=0.6))
+        assert "commit_new_version" in str(exc.value)
+
+    def test_put_content_is_still_idempotent_for_the_version_it_wrote(self, store, content):
+        """Gate 4 must not break retries of the SAME version.
+
+        The route check sits after the idempotency branch on purpose: a retried
+        write of v1 finds its key present and returns the digest, never reaching
+        the "plan already has versions" refusal.
+        """
+        store.put_content(content)
+        assert store.put_content(content) == content["plan_digest"]
+        assert store.versions(content["plan_id"]) == [1]
+
+    def test_a_stale_version_can_never_hold_authority_through_the_live_api(
+        self, store, content
+    ):
+        """The invariant P1-b exists to guarantee, end to end.
+
+        Before the fix this was reachable: put_content(v2) made v2 active while
+        v1 stayed APPROVED. Now every route to a stale-but-authoritative version
+        is closed — commit_new_version() supersedes as it adds, and the authority
+        gate refuses to approve a non-active version.
         """
         store.put_content(content)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
                                ts=fixtures.T0)
-        store.put_content(next_version(content, 2, on_time_rate=0.6))
-        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "DRAFT"
-        assert store.drain_superseded() == []
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
+                         approval_set_id="AS-001")
+        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T2)
 
-    def test_put_content_alone_does_not_enforce_continuity(self, store, content):
-        """Same reasoning: continuity is a commit_new_version() rule, not a
-        content-storage rule. Pinned so the split stays intentional."""
-        store.put_content(content)
-        store.put_content(next_version(content, 42, on_time_rate=0.6))
-        assert store.versions(content["plan_id"]) == [1, 42]
+        store.commit_new_version(next_version(content, 2, on_time_rate=0.6),
+                                 ts=fixtures.T2)
+
+        assert store.current_active_version(content["plan_id"]) == 2
+        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "SUPERSEDED"
+        # and the invalidation event was recorded for the approval service
+        events = store.drain_superseded()
+        assert len(events) == 1
+        assert events[0]["approval_set_id"] == "AS-001"
 
 
 # ==================================================== P1: load_state integrity

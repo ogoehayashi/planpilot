@@ -51,7 +51,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .digest import assert_digest_consistent, canonical_json, canonical_plan_digest
+from .digest import (
+    _total_key,
+    assert_digest_consistent,
+    canonical_json,
+    canonical_plan_digest,
+)
 from .errors import (
     DigestMismatchError,
     IdempotencyConflictError,
@@ -61,6 +66,7 @@ from .errors import (
     SchemaViolationError,
     TransitionNotAllowedError,
     VersionConflictError,
+    VersionRouteError,
 )
 from .persistence_schema import STATE_SCHEMA
 from ..validation import (
@@ -69,7 +75,7 @@ from ..validation import (
     validate_shape as validate_shape_against_schema,
 )
 
-__all__ = ["PlanStore", "LIFECYCLE_STATUSES", "INVALIDATION_CAUSES"]
+__all__ = ["PlanStore", "LIFECYCLE_STATUSES", "INVALIDATION_CAUSES", "CREATION_STATUS"]
 
 # $defs.plan_lifecycle.properties.status.enum — mirrored so the store can reject
 # an unknown status without a jsonschema round trip. test_plan_store_invariants
@@ -102,6 +108,46 @@ _TERMINAL = frozenset({"SUPERSEDED"})
 # then blocks independently — this set is the belt for callers that write
 # versions by hand instead of going through commit_new_version().
 _AUTHORITY_STATUSES = frozenset({"APPROVED", "PUBLISHED"})
+
+# The only status create_lifecycle() may write (audit finding P0-bis).
+#
+# A named constant rather than a literal at the call site for two reasons. It
+# documents the invariant where the other status sets live, and it gives the
+# negative control a single-line mutation to remove: substituting a caller-
+# supplied status here reopens the authority bypass, and the suite must notice.
+#
+# DRAFT specifically, not "the first status in the enum": the contract's
+# workflow.transitions graph starts at DRAFT, and any other choice would be a
+# second copy of that graph — the orphan-spec defect class the V1.8 review found
+# eight instances of.
+CREATION_STATUS = "DRAFT"
+
+# Sort key for superseded_events in dump_state(), so the dump does not depend on
+# insertion order (see that method for the defect this closes).
+#
+# Reuses digest._total_key rather than re-declaring a rank table: that helper is
+# the F12 fix for exactly this problem — a sort key that must be TOTAL and must
+# not raise when a nullable field meets a string one. A second copy of the rank
+# table would be a second source of truth free to drift, which is the
+# orphan-spec defect class.
+#
+# Every field of the event participates, so two distinct events can never tie
+# and fall back to input order. plan_digest and superseded_at are strings and
+# approval_set_id is string|null, which is the pair that needs the type rank.
+_EVENT_SORT_FIELDS: tuple[str, ...] = (
+    "plan_id",
+    "plan_version",
+    "plan_digest",
+    "approval_set_id",
+    "superseded_at",
+    "invalidation_cause",
+)
+
+
+def _event_sort_key(event: dict) -> tuple:
+    """A total, insertion-order-independent key for one supersede event."""
+    return tuple(_total_key(event.get(field)) for field in _EVENT_SORT_FIELDS)
+
 
 # $defs.error_details_approval_set_invalidated.properties.invalidation_cause.enum
 # — mirrored, so a supersede event can only carry a registered cause. Pinned by
@@ -151,11 +197,16 @@ class PlanStore:
     def put_content(self, content: dict) -> str:
         """Store immutable plan content. Write-once per (plan_id, plan_version).
 
-        Three independent gates, in this order:
+        Writes the FIRST version of a plan. Adding a later version raises
+        VersionRouteError — use commit_new_version() for that (audit finding
+        P1-b, explained on that error class).
+
+        Four independent gates, in this order:
 
         1. key pre-flight — plan_id/plan_version must be a str and a non-bool int
         2. **schema validation against `$defs.plan_content`** (audit finding P0-1)
         3. both digest identities must hold
+        4. the plan must not already have versions (audit finding P1-b)
 
         Gates 2 and 3 are NOT redundant, and treating them as one check is exactly
         the P0-1 defect. The digest is content-addressed, so a caller who mutates
@@ -169,6 +220,16 @@ class PlanStore:
         an identical rewrite would make every retry path a bug.
 
         Returns the verified digest.
+        """
+        return self._store_content(content)
+
+    def _store_content(self, content: dict, *, allow_new_version: bool = False) -> str:
+        """The write path. `allow_new_version` is private on purpose.
+
+        Only commit_new_version() passes it, because only that method performs the
+        rest of the version transition (continuity, lifecycle, supersede,
+        approval-invalidation event) atomically. Exposing the flag would recreate
+        the P1-b bypass with an extra argument.
         """
         if not isinstance(content, dict):
             raise TypeError(f"content must be a dict, got {type(content).__name__}")
@@ -223,6 +284,19 @@ class PlanStore:
                 original_status=(self._lifecycle.get(key) or {}).get("status"),
             )
 
+        # Gate 4: this key is new, so if the plan already has versions this write
+        # would ADD one. Refuse unless the caller is commit_new_version().
+        #
+        # Checked AFTER the idempotency branch above, so a retry of an already
+        # stored version stays idempotent — gate 4 only fires on a genuinely new
+        # key. Without it, current_active_version() (the max stored version)
+        # would move to the new one while the previous version kept its APPROVED
+        # status and its live approval set.
+        if not allow_new_version:
+            existing_versions = sorted(v for (pid, v) in self._content if pid == plan_id)
+            if existing_versions:
+                raise VersionRouteError(plan_id, plan_version, existing_versions)
+
         # Deep copy on the way in and out, so a caller mutating its dict cannot
         # change stored state (and vice versa). Immutability is enforced, not
         # merely documented.
@@ -235,11 +309,32 @@ class PlanStore:
         plan_version: int,
         plan_digest: str,
         ts: str,
-        status: str = "DRAFT",
-        approval_set_id: str | None = None,
-        published_version: int | None = None,
     ) -> dict:
         """Create the mutable lifecycle record for an already-stored content version.
+
+        Always DRAFT, and that is a security property rather than a convenient
+        default (audit finding P0-bis). This signature used to accept `status`,
+        `approval_set_id` and `published_version`, so a caller could mint
+        authority without ever reaching transition()'s gates:
+
+            v1 and v2 stored, current_active_version() == 2
+            create_lifecycle(v1, status="PUBLISHED", published_version=1)
+            -> ACCEPTED
+
+        transition() refused the equivalent move with VersionConflictError, so
+        this bypassed an existing defence instead of covering an unimplemented
+        one — and it was wider than the stale-version case, since PUBLISHED could
+        be created for the active version too, letting the store manufacture
+        publication authority through no gate at all.
+
+        The record was schema-legal, which is why P0-1's contract validation
+        could not see it: contract validity and state invariants are different
+        questions, and satisfying the first says nothing about the second.
+
+        APPROVED and PUBLISHED are reachable only through transition(), which
+        compares against current_active_version(); SUPERSEDED only through
+        supersede() or commit_new_version(). Approval-set binding lives on
+        transition() for the same reason, so the version check can gate it.
 
         Requires the content to exist and its digest to match, so a lifecycle
         record can never point at content that is absent or different.
@@ -255,10 +350,6 @@ class PlanStore:
                 expected_plan_digest=plan_digest,
                 recomputed_plan_digest=stored["plan_digest"],
             )
-        if status not in LIFECYCLE_STATUSES:
-            raise ValueError(
-                f"status {status!r} is not in $defs.plan_lifecycle.properties.status.enum"
-            )
         if key in self._lifecycle:
             # A lifecycle record is mutable and may already have progressed past
             # DRAFT. Re-creating it would silently rewind status and the
@@ -272,19 +363,19 @@ class PlanStore:
             "plan_id": plan_id,
             "plan_version": plan_version,
             "plan_digest": plan_digest,
-            "status": status,
-            "approval_set_id": approval_set_id,
-            "published_version": published_version,
+            "status": CREATION_STATUS,
+            "approval_set_id": None,
+            "published_version": None,
             "updated_at": ts,
         }
         # Build the candidate, validate it, THEN write. Never write-then-check:
         # a failed check would leave a malformed record in the store of record.
         #
-        # This catches what the enum check above cannot (audit finding P0-1):
-        # `ts` was stored verbatim into `updated_at` with no format check, so
+        # This catches what a hardcoded status cannot (audit finding P0-1): `ts`
+        # was stored verbatim into `updated_at` with no format check, so
         # `ts='not a timestamp at all'`, `ts=''`, `ts=None` and `ts=12345` were
         # all accepted even though $defs.plan_lifecycle requires a date-time
-        # string. `published_version` had the same hole.
+        # string.
         self._validate_record(record, "plan_lifecycle", plan_id)
 
         self._lifecycle[key] = record
@@ -529,8 +620,8 @@ class PlanStore:
         saved_events = list(self._superseded)
 
         try:
-            # Step 1 + 3: put_content validates the schema and both digest
-            # identities before writing, so steps 2 and 4 run against content
+            # Step 1 + 3: the write path validates the schema and both digest
+            # identities before storing, so steps 2 and 4 run against content
             # that is already known legal.
             known = [v for (pid, v) in self._content if pid == plan_id]
             previous = max(known) if known else None
@@ -540,7 +631,11 @@ class PlanStore:
                 # explain, and reusing one would collide with write-once content.
                 raise VersionConflictError(plan_id, previous + 1, plan_version)
 
-            digest = self.put_content(content)
+            # allow_new_version is what lets THIS method add a version at all:
+            # put_content() refuses to (P1-b), because only here are continuity,
+            # lifecycle, supersede and the invalidation event performed together.
+            # Harmless for a first version, where `previous is None`.
+            digest = self._store_content(content, allow_new_version=True)
 
             # Step 4: lifecycle for the new version, DRAFT until approved.
             record = self.create_lifecycle(plan_id, plan_version, digest, ts=ts)
@@ -574,6 +669,19 @@ class PlanStore:
 
         LF newlines, sorted keys, no whitespace — the same canonical form the
         digest uses, and the same rule .gitattributes enforces on the contract.
+
+        `superseded_events` is sorted here rather than emitted in insertion
+        order, and that was a real defect (audit finding P1-b, found while
+        rewriting the insertion-order test). content and lifecycle are keyed by
+        (plan_id, plan_version) and were already sorted; the events were
+        `list(self._superseded)`, so two stores holding the same plans in a
+        different insertion order dumped different bytes. A single-plan test
+        cannot see this — with one plan there is exactly one event — which is why
+        it survived until the test covered two plans. The evidence pack hashes
+        these bytes, so an order-dependent dump is an order-dependent hash.
+
+        Sort key mirrors the F12 discipline: total, and type-ranked so a null
+        approval_set_id cannot raise TypeError when compared with a string.
         """
         state = {
             "content": [
@@ -582,7 +690,7 @@ class PlanStore:
             "lifecycle": [
                 self._lifecycle[k] for k in sorted(self._lifecycle)
             ],
-            "superseded_events": list(self._superseded),
+            "superseded_events": sorted(self._superseded, key=_event_sort_key),
         }
         text = canonical_json(state)
         Path(path).write_bytes((text + "\n").encode("utf-8"))
@@ -667,6 +775,7 @@ class PlanStore:
                 raise InvalidContentError(
                     str(rec["plan_id"]), rec["plan_version"],
                     json_path="lifecycle",
+                    entity_type="plan_lifecycle",
                     reason=f"duplicate (plan_id, plan_version) {key} in the dump; "
                            f"loading it would silently keep only the last record",
                 )
@@ -690,6 +799,16 @@ class PlanStore:
         # Supersede events must describe something in this dump. An event for an
         # unknown plan is a fabricated invalidation, and the approval service
         # would act on it.
+        #
+        # Audit finding P1-a: checking the event against CONTENT is not enough.
+        # The event's whole purpose is to tell the approval service which
+        # approval set to invalidate, so it has to agree with the lifecycle
+        # record that actually held that binding. Without these checks a
+        # hand-edited dump could rebind an event to a different approval set,
+        # duplicate an event so one set is invalidated twice while another is
+        # never touched, or flip a superseded lifecycle back to APPROVED and keep
+        # the event — resurrecting authority the event claims was withdrawn.
+        event_count: dict[tuple[str, int], int] = {}
         for event in events:
             key = (event["plan_id"], event["plan_version"])
             if key not in content_by_key:
@@ -705,6 +824,108 @@ class PlanStore:
                     expected_plan_digest=event["plan_digest"],
                     recomputed_plan_digest=bound["plan_digest"],
                 )
+
+            # (1) the event must bind to a lifecycle record for the same version
+            lc = lifecycle_by_key.get(key)
+            if lc is None:
+                raise InvalidContentError(
+                    str(event["plan_id"]), event["plan_version"],
+                    json_path="superseded_events",
+                    entity_type="superseded_event",
+                    reason="a supersede event has no lifecycle record for the same "
+                           "(plan_id, plan_version); nothing was superseded",
+                )
+            # (2) and that record must actually be superseded
+            if lc["status"] != "SUPERSEDED":
+                raise InvalidContentError(
+                    str(event["plan_id"]), event["plan_version"],
+                    json_path="superseded_events",
+                    entity_type="superseded_event",
+                    reason=f"supersede event exists but the lifecycle record is "
+                           f"{lc['status']!r}, not SUPERSEDED; the event would "
+                           f"invalidate approvals for a version that was never retired",
+                )
+            # (3) digest and approval-set binding must agree exactly
+            if event["approval_set_id"] != lc["approval_set_id"]:
+                raise InvalidContentError(
+                    str(event["plan_id"]), event["plan_version"],
+                    json_path="superseded_events",
+                    entity_type="superseded_event",
+                    reason=f"supersede event names approval_set_id "
+                           f"{event['approval_set_id']!r} but the lifecycle record "
+                           f"binds {lc['approval_set_id']!r}; the approval service "
+                           f"would invalidate the wrong set",
+                )
+            # (4) at most one event per version — drain_superseded() is
+            # exactly-once by design, so a duplicate in a dump is a forgery
+            event_count[key] = event_count.get(key, 0) + 1
+            if event_count[key] > 1:
+                raise InvalidContentError(
+                    str(event["plan_id"]), event["plan_version"],
+                    json_path="superseded_events",
+                    entity_type="superseded_event",
+                    reason=f"{event_count[key]} supersede events for the same "
+                           f"(plan_id, plan_version); drain_superseded() is "
+                           f"exactly-once, so a second event is fabricated",
+                )
+
+        # (5) the converse: a superseded lifecycle that held an approval set must
+        # have exactly one event, or the approvals stay live against a plan that
+        # is no longer current — the inconsistency plan_store.versioning forbids.
+        for key, lc in lifecycle_by_key.items():
+            if lc["status"] == "SUPERSEDED" and lc["approval_set_id"] is not None:
+                if event_count.get(key, 0) != 1:
+                    raise InvalidContentError(
+                        str(key[0]), key[1],
+                        json_path="lifecycle",
+                        entity_type="plan_lifecycle",
+                        reason=f"lifecycle is SUPERSEDED with approval_set_id "
+                               f"{lc['approval_set_id']!r} but has "
+                               f"{event_count.get(key, 0)} supersede events; the "
+                               f"approval set would never be invalidated",
+                    )
+
+        # ---- layer 3: version authority ------------------------------------
+        # Audit finding P1-b, second half. put_content() now refuses to add a
+        # version to a plan that already has one, so the live API can no longer
+        # produce a stale version that still holds APPROVED or PUBLISHED —
+        # commit_new_version() supersedes the previous one as it adds the next.
+        #
+        # A dump is the other way in, and it was wide open: appending a v2
+        # content record to a dump whose v1 is APPROVED loaded cleanly, giving
+        # current_active_version() == 2 with v1 still APPROVED and its approval
+        # set still live. Measured, not assumed — that is the state this layer
+        # refuses.
+        #
+        # The rule reuses _AUTHORITY_STATUSES rather than requiring SUPERSEDED,
+        # and that distinction was also measured. Requiring SUPERSEDED refused
+        # four states the live API legitimately produces — a stale version left
+        # in DRAFT, PROPOSED, AWAITING_APPROVAL or BLOCKED — so dump/load lost
+        # round-trip fidelity, and it encoded a STRICTER authority policy than
+        # transition() does: a second copy of the policy, free to drift, which is
+        # the orphan-spec defect class. _AUTHORITY_STATUSES' own comment is why
+        # those four are legal: they request authority rather than confer it, and
+        # commit_new_version() skips supersede when the previous version has no
+        # lifecycle record, so a stale record can exist without being retired.
+        versions_by_plan: dict[str, list[int]] = {}
+        for pid, ver in content_by_key:
+            versions_by_plan.setdefault(pid, []).append(ver)
+        for pid, versions in versions_by_plan.items():
+            active = max(versions)
+            for ver in versions:
+                if ver == active:
+                    continue
+                lc = lifecycle_by_key.get((pid, ver))
+                if lc is not None and lc["status"] in _AUTHORITY_STATUSES:
+                    raise InvalidContentError(
+                        pid, ver,
+                        json_path="lifecycle",
+                        entity_type="plan_lifecycle",
+                        reason=f"v{ver} is stale (active version is v{active}) but "
+                               f"its lifecycle status is {lc['status']!r}; a stale "
+                               f"version holding authority is what "
+                               f"commit_new_version() exists to prevent",
+                    )
 
         # ---- commit: every check passed ------------------------------------
         self._content = {k: copy.deepcopy(v) for k, v in content_by_key.items()}

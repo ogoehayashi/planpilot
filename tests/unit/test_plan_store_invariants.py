@@ -16,7 +16,12 @@ import copy
 
 import pytest
 
-from planpilot.store import LIFECYCLE_STATUSES, PlanStore, canonical_plan_digest
+from planpilot.store import (
+    CREATION_STATUS,
+    LIFECYCLE_STATUSES,
+    PlanStore,
+    canonical_plan_digest,
+)
 from planpilot.store.errors import (
     DigestMismatchError,
     IdempotencyConflictError,
@@ -114,17 +119,26 @@ class TestWriteOnce:
             store.put_content(other)
         assert exc.value.details["idempotency_key"] == f"{content['plan_id']}:1"
 
-    def test_a_new_version_of_the_same_plan_is_allowed(self, store, content):
-        """versioning: plan_version increments on every regeneration."""
+    def test_a_new_version_of_the_same_plan_is_allowed(self, store, content, fixtures):
+        """versioning: plan_version increments on every regeneration.
+
+        This test used to add v2 with put_content() and assert the store held
+        [1, 2]. That assertion encoded the P1-b defect: put_content() moved the
+        active version to 2 while leaving v1 exactly as it was, so a plan could
+        have two live versions and an approval set bound to one that was no
+        longer current. Adding a version is commit_new_version()'s job, because
+        that is the only method that does the rest of the transition too.
+        """
         v2 = copy.deepcopy(content)
         v2["plan_version"] = 2
         v2["kpis"]["on_time_rate"] = 0.6
         d = canonical_plan_digest(v2)
         v2["plan_digest"] = d
         v2["engine"]["canonical_plan_hash"] = d
-        store.put_content(v2)
+        store.commit_new_version(v2, ts=fixtures.T0)
         assert store.versions(content["plan_id"]) == [1, 2]
         assert store.latest_version(content["plan_id"]) == 2
+        assert store.current_active_version(content["plan_id"]) == 2
 
 
 class TestDigestVerifiedOnWrite:
@@ -232,10 +246,64 @@ class TestLifecycle:
         with pytest.raises(DigestMismatchError):
             store.create_lifecycle(content["plan_id"], 1, "f" * 64, ts="2026-09-14T08:00:00+08:00")
 
-    def test_create_rejects_an_unknown_status(self, store, content):
-        with pytest.raises(ValueError):
-            store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
-                                   ts="2026-09-14T08:00:00+08:00", status="PUBLISHING")
+    def test_create_lifecycle_cannot_mint_an_authority_status(self, store, content, fixtures):
+        """P0-bis: create_lifecycle() takes no status, so it cannot grant authority.
+
+        This test replaced `test_create_rejects_an_unknown_status`, which asserted
+        that `status="PUBLISHING"` was refused. That assertion became meaningless
+        when the parameter was removed — but removing the parameter is the fix,
+        and a fix that nothing pins will be reverted by anyone who finds the
+        signature inconvenient.
+
+        So this pins the signature itself, and the three ways it could be
+        weakened: re-adding `status`, re-adding `published_version`, or
+        re-adding `approval_set_id`. Each of those reopens the bypass, because
+        the store would again be able to write an authority-bearing lifecycle
+        record through a path that never consults current_active_version().
+
+        Unknown-status rejection is still covered, on the path that can still
+        receive a status: test_transition_rejects_an_unknown_status.
+        """
+        import inspect
+
+        params = set(inspect.signature(PlanStore.create_lifecycle).parameters)
+        assert params == {"self", "plan_id", "plan_version", "plan_digest", "ts"}, (
+            f"create_lifecycle grew parameters {params - {'self','plan_id','plan_version','plan_digest','ts'}}; "
+            f"a status/approval parameter here bypasses transition()'s version gate (P0-bis)"
+        )
+
+        rec = store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
+                                     ts=fixtures.T0)
+        assert rec["status"] == "DRAFT"
+        assert rec["status"] == CREATION_STATUS
+        assert rec["approval_set_id"] is None, "creation must not bind an approval set"
+        assert rec["published_version"] is None, "creation must not publish"
+        fixtures.validate(rec, "plan_lifecycle")
+
+    def test_creating_lifecycle_on_a_stale_version_still_grants_nothing(self, store, content, fixtures):
+        """The P0-bis exploit, replayed: v2 exists, so v1 is stale.
+
+        Before the fix, `create_lifecycle(v1, status="PUBLISHED",
+        published_version=1)` was ACCEPTED while transition() refused the same
+        move. Now creation cannot express that move at all, and the record it
+        does create carries no authority.
+        """
+        # Build v2 the way this file builds content elsewhere: make_content()
+        # then re-sign, since a v2 whose digest still described v1 would fail the
+        # digest gate and prove nothing about the version gate.
+        draft2 = fixtures.make_content(plan_version=2)
+        v2 = fixtures.make_content(plan_version=2,
+                                   digest=canonical_plan_digest(draft2))
+        store.commit_new_version(v2, ts=fixtures.T1)
+        assert store.current_active_version(content["plan_id"]) == 2
+
+        rec = store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
+                                     ts=fixtures.T0)
+        assert rec["status"] == "DRAFT"
+        assert rec["published_version"] is None
+        # and the authority route is still closed
+        with pytest.raises(VersionConflictError):
+            store.transition(content["plan_id"], 1, "PUBLISHED", ts=fixtures.T1)
 
     def test_created_record_conforms_to_the_schema(self, store, content, fixtures):
         rec = store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
@@ -295,11 +363,14 @@ class TestOptimisticConcurrency:
     def test_stale_approval_cannot_publish_a_regenerated_plan(self, store, content, fixtures):
         """security_controls.approvals_bound_to_plan_version_and_digest, exercised.
 
-        v2 needs a lifecycle record for this to test CONCURRENCY rather than
-        existence: transition() checks that a lifecycle record exists before it
-        checks any version gate, because you cannot transition a record that is
-        not there. The first version of this test omitted create_lifecycle for v2
-        and so was passing for the wrong reason once that ordering was corrected.
+        A caller holding `expected_plan_version=1` cannot drive the plan once v2
+        is the active version. The expectation is compared with the store's own
+        notion of which version is live, which is what P0-2 fixed.
+
+        v1 ends SUPERSEDED here rather than APPROVED, and that is the fix rather
+        than a loss: commit_new_version() retires the version it replaces, so a
+        stale version holding authority is no longer reachable through the live
+        API at all (audit finding P1-b).
         """
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
         store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1,
@@ -311,29 +382,37 @@ class TestOptimisticConcurrency:
         d2 = canonical_plan_digest(v2)
         v2["plan_digest"] = d2
         v2["engine"]["canonical_plan_hash"] = d2
-        store.put_content(v2)
-        store.create_lifecycle(content["plan_id"], 2, d2, ts=fixtures.T2)
+        store.commit_new_version(v2, ts=fixtures.T2)
 
         # a caller still holding version 1 cannot drive version 2
         with pytest.raises(VersionConflictError):
             store.transition(content["plan_id"], 2, "PUBLISHED", ts=fixtures.T2,
                              expected_plan_version=1)
-        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "APPROVED"
+        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "SUPERSEDED"
+        assert store.get_lifecycle(content["plan_id"], 2)["status"] == "DRAFT"
 
     def test_transition_needs_a_lifecycle_record_before_it_checks_versions(self, store, content, fixtures):
-        """The ordering the test above depends on, pinned on its own terms."""
-        store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
+        """The ordering the test above depends on, pinned on its own terms.
+
+        Reached by giving v1 content but no lifecycle record, then committing v2:
+        commit_new_version() skips the supersede when the previous version has no
+        record (there is no status to move), so v1 keeps content and gains
+        nothing else. transition() must then report the missing record rather
+        than a version conflict, because you cannot transition what is not there.
+        """
         v2 = copy.deepcopy(content)
         v2["plan_version"] = 2
         v2["kpis"]["on_time_rate"] = 0.6
         d2 = canonical_plan_digest(v2)
         v2["plan_digest"] = d2
         v2["engine"]["canonical_plan_hash"] = d2
-        store.put_content(v2)          # content exists, lifecycle does not
+        store.commit_new_version(v2, ts=fixtures.T1)   # v1: content only, no lifecycle
+        assert (content["plan_id"], 1) not in store._lifecycle
+        assert store.current_active_version(content["plan_id"]) == 2
 
         with pytest.raises(PlanNotFoundError):
-            store.transition(content["plan_id"], 2, "PUBLISHED", ts=fixtures.T2,
-                             expected_plan_version=2)
+            store.transition(content["plan_id"], 1, "PUBLISHED", ts=fixtures.T2,
+                             expected_plan_version=1)
 
 
 class TestSupersede:

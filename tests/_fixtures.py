@@ -12,73 +12,79 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 
-import jsonschema
-from jsonschema import Draft202012Validator
+# THE PRODUCTION ENTRY POINT. These fixtures used to compile their own
+# Draft202012Validator over `_CONTRACT["$defs"]` and keep a second `_SCOPED`
+# cache. Two consequences, both bad:
+#
+# 1. The suite could pass while production failed. A test asserting
+#    `not fixtures.is_valid(polluted, "plan_content")` proved the FIXTURE
+#    compiler rejected it, which is not the same fact as the store rejecting it.
+#    That is precisely the shape of audit finding P0-1 — and
+#    src/planpilot/validation/schema.py already claimed, in its module docstring,
+#    that this module delegated here. The claim was false until this change.
+#
+# 2. The two resolvers could pick different FILES. _find_contract() hardcoded
+#    planpilot_agent_contract_v1.8.json; production contract_path() selects the
+#    highest SEMANTIC version and verifies its sha256. With only v1.8 on disk
+#    they agreed, so nothing caught it — but on the day v1.9 lands, the tests
+#    would validate against v1.8 while src/ validated against v1.9, and the suite
+#    would stay green.
+#
+# Delegating leaves one resolver, one compiler and one cache, so "the contract
+# says X" cannot mean two different things in one repo.
+from planpilot.validation import (
+    contract_path as _production_contract_path,
+    contract_sha256,
+    is_valid as _production_is_valid,
+    validate as _production_validate,
+    validation_issues_for,
+    validator_for as _production_validator_for,
+)
 
-# Locate the repo root by searching upward for the contract, rather than counting
-# parent levels. This file may be imported from tests/ or tests/unit/ or
-# tests/negative_control/, and a hardcoded parents[N] silently breaks when it
-# moves — the exact class of bug that made the earlier copies of this suite
-# depend on absolute V1.5 paths.
-def _find_contract() -> Path:
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        candidate = parent / "contract" / "planpilot_agent_contract_v1.8.json"
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(
-        "planpilot_agent_contract_v1.8.json not found in any parent of "
-        f"{here}; expected <repo>/contract/planpilot_agent_contract_v1.8.json"
-    )
-
-
-CONTRACT_PATH = _find_contract()
+CONTRACT_PATH = _production_contract_path()
 REPO_ROOT = CONTRACT_PATH.parent.parent
 
 _CONTRACT = json.loads(CONTRACT_PATH.read_bytes().decode("utf-8"))
 
-# Bundle root $defs so "#/$defs/x" refs resolve, exactly as verify_contract.py does.
-_VALIDATOR = Draft202012Validator(
-    {"$defs": _CONTRACT["$defs"]},
-    format_checker=jsonschema.FormatChecker(),
-)
-# Per-$def scoped validators, built lazily by _validator_for and cached.
-_SCOPED: dict[str, Draft202012Validator] = {}
 
-
-def _validator_for(def_name: str) -> Draft202012Validator:
-    """Validator scoped to one $defs entry, cached.
-
-    Uses evolve() rather than passing a schema to validate()/is_valid()/
-    iter_errors(): that second-argument form is deprecated in jsonschema and
-    will be removed. This code has to still run after the hackathon, so the
-    deprecation is fixed now rather than left to surface later.
-    """
-    if def_name not in _SCOPED:
-        _SCOPED[def_name] = _VALIDATOR.evolve(schema={"$ref": f"#/$defs/{def_name}"})
-    return _SCOPED[def_name]
+def _validator_for(def_name: str):
+    """Validator scoped to one $defs entry — the production one, not a copy."""
+    return _production_validator_for(def_name)
 
 
 def validate(instance: dict, def_name: str) -> None:
-    """Validate against $defs/<def_name>, raising on the first problem."""
-    _validator_for(def_name).validate(instance)
+    """Validate against $defs/<def_name>, raising on the first problem.
+
+    Raises `planpilot.validation.SchemaValidationError` (a ValueError) rather
+    than a bare jsonschema.ValidationError. No test in this repo catches the
+    fixtures' exception type — all 25 call sites assert success — so the change
+    is invisible to them, and the richer error is what makes a fixture failure
+    readable.
+    """
+    _production_validate(instance, def_name, def_name, None)
 
 
 def is_valid(instance: dict, def_name: str) -> bool:
-    return _validator_for(def_name).is_valid(instance)
+    return _production_is_valid(instance, def_name)
 
 
 def errors_for(instance: dict, def_name: str) -> list[str]:
     """All validation errors as readable strings (for negative tests)."""
-    return sorted(e.message for e in _validator_for(def_name).iter_errors(instance))
+    issues = validation_issues_for(instance, def_name, def_name, None)
+    return sorted(i.message for i in issues)
 
 
 def contract() -> dict:
     """The loaded contract, for tests that assert against non-$defs sections
     (e.g. tool_execution_contract.retryability_registry)."""
     return _CONTRACT
+
+
+def contract_hash() -> str:
+    """The sha256 of the contract these fixtures were built from."""
+    return contract_sha256(CONTRACT_PATH)
+
 
 
 # ---------------------------------------------------------------------------

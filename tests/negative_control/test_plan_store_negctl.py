@@ -397,6 +397,190 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
         ),
         "test_errors_schema.py",
     ),
+    # ---- third audit: P0-bis, P1-a, P1-b, P2, and the two defects found fixing
+    # them. One mutation per defence, so removing any single one fails the suite.
+    #
+    # P0-bis: creation may not mint authority. The defence is the constant, so the
+    # mutation substitutes an authority status for it.
+    (
+        "create_lifecycle mints PUBLISHED instead of DRAFT",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '            "status": CREATION_STATUS,',
+            '            "status": "PUBLISHED",  # MUTATION: authority at creation',
+            "CREATION_STATUS in the lifecycle record",
+        ),
+        "test_plan_store_invariants.py",
+    ),
+    # P1-b: put_content may not add a version to an existing plan.
+    (
+        "put_content route gate removed",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "        if not allow_new_version:",
+            "        if False:  # MUTATION: any caller may add a version",
+            "allow_new_version gate",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    # P1-b second half: a dump may not resurrect stale authority.
+    (
+        "load_state layer-3 stale-authority check removed",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '                if lc is not None and lc["status"] in _AUTHORITY_STATUSES:',
+            "                if False:  # MUTATION",
+            "layer-3 authority check",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    # P1-a: the five event<->lifecycle relationships.
+    (
+        "P1-a(1): event no longer needs a lifecycle record",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "            if lc is None:",
+            "            if False:  # MUTATION",
+            "event needs lifecycle",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    (
+        "P1-a(3): event approval_set_id no longer compared",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '            if event["approval_set_id"] != lc["approval_set_id"]:',
+            "            if False:  # MUTATION",
+            "approval_set_id agreement",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    (
+        "P1-a(4): duplicate supersede events allowed",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "            if event_count[key] > 1:",
+            "            if False:  # MUTATION: exactly-once lost",
+            "exactly-once events",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    (
+        "P1-a(5): superseded record no longer needs an event",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "            if event_count.get(key, 0) != 1:",
+            "            if False:  # MUTATION: approvals never invalidated",
+            "converse event check",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    # P1-a(2) is covered TWICE: an event whose record is not SUPERSEDED is also a
+    # stale version holding authority, so layer 3 refuses it independently. Both
+    # were measured, so this asserts the redundancy rather than a single catch.
+    (
+        "P1-a(2): event no longer requires status SUPERSEDED",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '            if lc["status"] != "SUPERSEDED":',
+            "            if False:  # MUTATION",
+            "event requires SUPERSEDED",
+        ),
+        None,
+    ),
+    # Incidental: dump_state must sort superseded_events, or the evidence hash
+    # depends on insertion order (F4/F12 class).
+    (
+        "dump_state emits superseded_events in insertion order",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '            "superseded_events": sorted(self._superseded, key=_event_sort_key),',
+            '            "superseded_events": list(self._superseded),  # MUTATION',
+            "event sort in dump_state",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    # P2: semantic selection, pinned hash, verified override.
+    (
+        "contract selection reverts to lexicographic",
+        "src/planpilot/validation/schema.py",
+        lambda s: _sub_once(
+            s,
+            "    chosen = max(matches, key=lambda p: _contract_version(p.name))",
+            "    chosen = sorted(matches)[-1]  # MUTATION: v1.9 beats v1.10",
+            "semantic max",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    (
+        "contract hash pin not enforced",
+        "src/planpilot/validation/schema.py",
+        lambda s: _sub_once(
+            s,
+            "    if actual != CONTRACT_SHA256:",
+            "    if False:  # MUTATION: any contract on disk is trusted",
+            "CONTRACT_SHA256 comparison",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    (
+        "contract override accepted without a digest",
+        "src/planpilot/validation/schema.py",
+        lambda s: _sub_once(
+            s,
+            "        if not expected:",
+            "        if False:  # MUTATION: bare PLANPILOT_CONTRACT_PATH allowed",
+            "override requires digest",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    (
+        "contract override digest not compared",
+        "src/planpilot/validation/schema.py",
+        lambda s: _sub_once(
+            s,
+            "        if actual != expected:",
+            "        if False:  # MUTATION: a tampered contract is trusted",
+            "override digest comparison",
+        ),
+        "test_audit3_regressions.py",
+    ),
+    # Single-compiler guarantee: the fixtures must not carry a second validator.
+    # Reintroducing one is the mutation; both the identity test and the
+    # "no _SCOPED/_VALIDATOR" test catch it.
+    (
+        "tests/_fixtures.py grows a second schema compiler",
+        "tests/_fixtures.py",
+        lambda s: _sub_once(
+            s,
+            'def _validator_for(def_name: str):\n'
+            '    """Validator scoped to one $defs entry — the production one, not a copy."""\n'
+            '    return _production_validator_for(def_name)',
+            '_SCOPED = {}  # MUTATION: a second compiler is back\n'
+            '\n'
+            '\n'
+            'def _validator_for(def_name: str):\n'
+            '    """MUTATION: compiles its own validator."""\n'
+            '    if def_name not in _SCOPED:\n'
+            '        import jsonschema\n'
+            '        _SCOPED[def_name] = jsonschema.Draft202012Validator(\n'
+            '            {"$defs": _CONTRACT["$defs"]},\n'
+            '            format_checker=jsonschema.FormatChecker(),\n'
+            '        ).evolve(schema={"$ref": f"#/$defs/{def_name}"})\n'
+            '    return _SCOPED[def_name]',
+            "_validator_for delegation",
+        ),
+        "test_audit3_regressions.py",
+    ),
 ]
 
 
@@ -407,6 +591,31 @@ def _run_suite(test_file: str | None) -> subprocess.CompletedProcess:
         cwd=ROOT, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=600,
     )
+
+
+def _mutate_target(name: str) -> Path:
+    """Where a mutation's file lives.
+
+    A bare basename means `src/planpilot/store/<name>`, which is how every
+    original entry was written. Anything else is ROOT-relative, so a mutation can
+    also reach `src/planpilot/validation/schema.py` (audit finding P2) or
+    `tests/_fixtures.py` (the second-compiler guarantee) without a second
+    hardwired directory.
+
+    Resolved by checking the store directory first rather than guessing from the
+    string: a file existing in both places would otherwise be silently mutated in
+    the wrong one, and the mutation would report "no change" or — worse — change
+    something the suite does not cover.
+    """
+    candidate = STORE / name
+    if candidate.exists():
+        return candidate
+    resolved = ROOT / name
+    if not resolved.exists():
+        raise AssertionError(
+            f"mutation target {name!r} is neither in {STORE} nor at {resolved}"
+        )
+    return resolved
 
 
 @pytest.fixture(scope="module")
@@ -426,10 +635,15 @@ def test_mutations_are_detected(baseline):
     # layer must NOT break the suite, because the other layer still holds.
     still_held = []
 
-    pristine = {name: (STORE / name).read_bytes() for name in ("digest.py", "plan_store.py", "errors.py")}
+    pristine_names = (
+        "digest.py", "plan_store.py", "errors.py",
+        "src/planpilot/validation/schema.py", "tests/_fixtures.py",
+    )
+    pristine = {name: _mutate_target(name).read_bytes() for name in pristine_names}
 
     try:
         for label, filename, mutate, expected_suite in MUTATIONS:
+            path = _mutate_target(filename)
             original = pristine[filename].decode("utf-8")
             try:
                 mutated = mutate(original)
@@ -440,11 +654,11 @@ def test_mutations_are_detected(baseline):
                 broken.append(f"[{label}] mutation produced no change")
                 continue
 
-            (STORE / filename).write_bytes(mutated.replace("\r\n", "\n").encode("utf-8"))
+            path.write_bytes(mutated.replace("\r\n", "\n").encode("utf-8"))
             try:
                 result = _run_suite(expected_suite)
             finally:
-                (STORE / filename).write_bytes(pristine[filename])
+                path.write_bytes(pristine[filename])
 
             failed = result.returncode != 0
 
@@ -461,7 +675,7 @@ def test_mutations_are_detected(baseline):
                     escaped.append(f"{label} (suite passed — the guard did not detect it)")
     finally:
         for name, data in pristine.items():
-            (STORE / name).write_bytes(data)
+            _mutate_target(name).write_bytes(data)
 
     # ---- the sources must be exactly the bytes we captured at start
     #
@@ -471,9 +685,14 @@ def test_mutations_are_detected(baseline):
     # progress — twice already, and the message claimed the sources were not
     # restored when in fact they were. The real invariant is byte equality against
     # `pristine`, which is what the finally-block above restores.
+    #
+    # It now covers files outside store/ as well, since a mutation can reach
+    # tests/_fixtures.py and src/planpilot/validation/schema.py — and leaving
+    # either mutated would corrupt every later test in the session, not just this
+    # one.
     not_restored = [
         name for name, data in pristine.items()
-        if (STORE / name).read_bytes() != data
+        if _mutate_target(name).read_bytes() != data
     ]
     restored = not not_restored
 

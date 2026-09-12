@@ -29,6 +29,7 @@ __all__ = [
     "IdempotencyConflictError",
     "TransitionNotAllowedError",
     "LifecycleAlreadyExistsError",
+    "VersionRouteError",
     "PlanNotFoundError",
     "RETRYABILITY",
     "LOOKUP_KINDS",
@@ -141,19 +142,20 @@ class InvalidContentError(StoreError):
     code = "INVALID_INPUT"
 
     def __init__(self, plan_id: str, plan_version: int, *,
-                 json_path: str = "plan_digest", reason: str = "malformed") -> None:
+                 json_path: str = "plan_digest", reason: str = "malformed",
+                 entity_type: str = "plan_content") -> None:
         msg = (f"plan {plan_id} v{plan_version} has a structurally invalid "
                f"{json_path}: {reason}")
         super().__init__(msg, {
             "field_errors": [{
                 "code": "INVALID_VALUE",
                 "severity": "ERROR",
-                "entity_type": "plan_content",
+                "entity_type": entity_type,
                 "entity_id": plan_id,
                 "field": json_path,
                 "message": msg,
             }],
-            "rejected_entity_type": "plan_content",
+            "rejected_entity_type": entity_type,
             "rejected_entity_id": plan_id,
         })
         self.plan_id = plan_id
@@ -360,6 +362,48 @@ class LifecycleAlreadyExistsError(StoreInvariantError):
         self.plan_id = plan_id
         self.plan_version = plan_version
         self.existing_status = existing_status
+
+
+class VersionRouteError(StoreInvariantError):
+    """put_content() was asked to add a version to a plan that already has one.
+
+    Audit finding P1-b. Before this class existed the store had TWO ways to add
+    a version, and only one of them honoured the contract:
+
+        commit_new_version(v2)  -> validate, continuity, write, lifecycle,
+                                   supersede v1, record invalidation event
+        put_content(v2)         -> write. Nothing else.
+
+    So `put_content(v2)` left v1 sitting at APPROVED with its approval set still
+    live, while `current_active_version()` had already moved to v2 — exactly the
+    state `plan_store.versioning` forbids ("a superseded version moves to
+    lifecycle.status=SUPERSEDED and its approval sets are invalidated"). The
+    invariant held only for callers who happened to pick the right method.
+
+    Enforcing continuity inside put_content() would NOT have closed this: v2 ==
+    latest + 1 is satisfiable while v1 is still APPROVED and still bound. And
+    put_content() must not supersede on its own — that was an explicit
+    instruction, because a caller left holding two live versions when the
+    supersede step fails is the same inconsistency from the other direction.
+    Refusing the write is therefore the only option that keeps one method
+    responsible for the whole transition.
+
+    No contract code, per the StoreInvariantError rationale (F-STORE-01): none of
+    the 18 registered codes describes "you called the wrong method". This is a
+    caller bug with no user-facing remedy, so it must never be rendered as a
+    tool_error.
+    """
+
+    def __init__(self, plan_id: str, plan_version: int, existing_versions: list[int]) -> None:
+        super().__init__(
+            f"plan {plan_id} already has version(s) {existing_versions}; "
+            f"put_content() cannot add v{plan_version} to it. "
+            f"Use commit_new_version(), which supersedes the previous version "
+            f"and invalidates its approval sets atomically."
+        )
+        self.plan_id = plan_id
+        self.plan_version = plan_version
+        self.existing_versions = existing_versions
 
 
 class PlanNotFoundError(StoreError):
