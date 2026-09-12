@@ -27,6 +27,8 @@ than accidental.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -586,11 +588,42 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
 
 def _run_suite(test_file: str | None) -> subprocess.CompletedProcess:
     target = UNIT_TESTS if test_file is None else UNIT_TESTS / test_file
+    # PYTHONDONTWRITEBYTECODE is load-bearing, not a tidy-up. CPython validates a
+    # cached .pyc against the source mtime TRUNCATED TO WHOLE SECONDS plus its
+    # size, so when two mutations are written within the same second and happen to
+    # produce the same byte length, the child process imports the PREVIOUS
+    # mutation's stale bytecode and runs the wrong code. That made this control
+    # intermittent: P1-a(2) — an equal-length `if …:` -> `if False:` swap —
+    # reported a false escape inside the control while passing 7/7 in isolation.
+    # Reproduced deterministically in _audit_scratch/probe_pyc_stale.py.
+    #
+    # Disabling bytecode writing means every child compiles from source, so a
+    # mutation can never be masked by a stale .pyc. The cost is recompiling src/
+    # per child, which is a few files.
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run(
         [*PYTEST, str(target)],
         cwd=ROOT, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=600,
+        encoding="utf-8", errors="replace", timeout=600, env=env,
     )
+
+
+def _clear_pycache() -> int:
+    """Remove every __pycache__ under src/ and tests/ so no stale .pyc survives.
+
+    The baseline fixture runs the suite WITHOUT the env override above if it is
+    ever invoked directly, and any earlier manual test run leaves bytecode behind.
+    Clearing once before the mutation loop, combined with PYTHONDONTWRITEBYTECODE
+    on every child, guarantees the loop never reads a .pyc from before it started.
+    Only src/ and tests/ are touched — never the venv.
+    """
+    removed = 0
+    for base in (ROOT / "src", ROOT / "tests"):
+        for cache in base.rglob("__pycache__"):
+            if cache.is_dir():
+                shutil.rmtree(cache, ignore_errors=True)
+                removed += 1
+    return removed
 
 
 def _mutate_target(name: str) -> Path:
@@ -641,6 +674,14 @@ def test_mutations_are_detected(baseline):
     )
     pristine = {name: _mutate_target(name).read_bytes() for name in pristine_names}
 
+    # Clear any bytecode left by an earlier run BEFORE mutating, so the first
+    # child cannot read a .pyc that predates this control. Every child also runs
+    # with PYTHONDONTWRITEBYTECODE (see _run_suite), so nothing is rewritten
+    # during the loop either. Belt and braces: the env var alone would suffice for
+    # children, but a stale .pyc on disk could still be read by any process that
+    # does NOT set it, so removing them costs nothing and closes that hole.
+    _clear_pycache()
+
     try:
         for label, filename, mutate, expected_suite in MUTATIONS:
             path = _mutate_target(filename)
@@ -665,7 +706,24 @@ def test_mutations_are_detected(baseline):
             if expected_suite is None:
                 # defence in depth: the suite must STILL PASS
                 if failed:
-                    escaped.append(f"{label} (expected the other layer to hold, but the suite failed)")
+                    # Record WHICH tests failed, not just that the suite did. This
+                    # control once reported an escape here that could not be
+                    # reproduced by applying the same mutation in isolation (six
+                    # runs, all green), so the failure depended on the control's
+                    # own sequential context. Without the failing test ids the
+                    # report is unactionable — the same defect class as D5, where
+                    # an unreliable verdict was worse than none.
+                    import re as _re
+                    failed_ids = _re.findall(r"^FAILED (\S+)", result.stdout, _re.M)
+                    err_ids = _re.findall(r"^ERROR (\S+)", result.stdout, _re.M)
+                    summary = _re.findall(r"=+ (.*?\d+ (?:failed|error).*?) =+",
+                                          result.stdout)
+                    detail = (f"; failing tests: {failed_ids or err_ids}"
+                              if (failed_ids or err_ids) else
+                              f"; no FAILED/ERROR line found, summary={summary[-1:] }")
+                    escaped.append(
+                        f"{label} (expected the other layer to hold, but the suite "
+                        f"failed{detail})")
                 else:
                     still_held.append(label)
             else:

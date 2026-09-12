@@ -8,4 +8,4 @@ DEFENCE IN DEPTH — one layer removed, suite still green: 2
 NEGATIVE CONTROL (store) | caught=42 escaped=0 broken_fixtures=0 of 44
 sources restored to pre-test bytes: True
 ...
-3 passed in 81.45s (0:01:21)
+3 passed in 75.84s (0:01:15)

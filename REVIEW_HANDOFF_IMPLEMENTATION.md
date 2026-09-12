@@ -4,7 +4,7 @@
 **From:** the implementing agent (Hermes)
 **Date:** 2026-09-12
 **Repo:** `E:\PlanPilot-Hackathon\planpilot-build` — git, **no remote yet**.
-Snapshot for the counts in this document: commit `cd5219f` (16 commits, 55 files tracked, working tree clean at
+Snapshot for the counts in this document: commit `8ddbb2d` (19 commits, 56 files tracked, working tree clean at
 the time of writing). Commit/HEAD/tracked counts are stated *as of that commit*
 and are not live values: a committed document cannot state the HEAD of the
 commit that contains it. `tools/factcheck_impl_handoff.py` verifies the named
@@ -21,7 +21,7 @@ made a judgement call, the call is named so it can be attacked.
 
 **Read in this order:**
 1. this file
-2. `IMPLEMENTATION_NOTES.md` — the 13 defects found while building (D1–D13), the
+2. `IMPLEMENTATION_NOTES.md` — the defects found while building (D1–D20), the
    external audit findings (F1–F15), and finding F-STORE-01
 3. `.kiro/specs/plan-store-and-digest/design.md` — what the module is supposed to do
 4. `.kiro/specs/plan-store-and-digest/tasks.md` — the task list it was built against
@@ -51,26 +51,31 @@ supported; the count is now taken from the README's own table.)
 fact that the test suite runs in a clean venv with only `jsonschema`, `ortools`
 (transitively) and `pytest` installed — verified in §3.
 
-Scale: **6,942 lines** across 25 Python files (the subject; the factcheck tool that
+Scale: **8,480 lines** across 26 Python files (the subject; the factcheck tool that
 measures them is excluded to avoid self-reference); tracked-file count is as of the
 snapshot commit.
 
 | layer | lines | files |
 |---|---|---|
-| `src/planpilot/` — store + validation packages + top-level init | 2,037 | 8 |
-| `tests/unit/` — 9 test modules + init | 2,933 | 10 |
-| `tests/negative_control/` | 521 | 2 |
-| `tests/_fixtures.py`, `conftest.py`, `__init__.py` | 403 | 3 |
+| `src/planpilot/` — store + validation packages + top-level init | 2,457 | 8 |
+| `tests/unit/` — 10 test modules + init | 3,768 | 11 |
+| `tests/negative_control/` | 798 | 2 |
+| `tests/_fixtures.py`, `conftest.py`, `__init__.py` | 409 | 3 |
 | `tools/check_closed_vocabularies.py` | 734 | 1 |
 | `tools/write_evidence_plan_store.py` | 314 | 1 |
-| **subject total** | **6,942** | **25** |
+| **subject total** | **8,480** | **26** |
 
-`tools/factcheck_impl_handoff.py` (289 lines) checks the table above, so it is
+`tools/factcheck_impl_handoff.py` (361 lines) checks the table above, so it is
 **deliberately excluded from the total** — the same reason `canonical_plan_digest`
 excludes `plan_digest` and `engine.canonical_plan_hash` from the hashed payload. A
 checker that counts itself makes the figure move every time the checker is edited,
-which is a circular dependency, not a measurement. (All 29 Python files together are
-8,522 lines, including the 289-line factcheck tool.)
+which is a circular dependency, not a measurement.
+
+The repo holds 30 Python files totalling 10,132 lines. The four not in the table are
+`factcheck_impl_handoff.py` (361, excluded for the circularity reason above) and three
+tools that belong to the Kiro workspace rather than to this spec:
+`generate_kiro_workspace.py` (1,014), `validate_kiro_workspace.py` (189) and
+`negative_control_workspace.py` (88). 8,480 + 361 + 1,291 = 10,132.
 
 ---
 
@@ -85,20 +90,41 @@ set PY=E:\PlanPilot-Hackathon\contract-review\.venv\Scripts\python.exe
 
 | # | command | result |
 |---|---|---|
-| 1 | `%PY% -m pytest tests/unit -q` | **334 passed** |
-| 2 | `%PY% -m pytest tests/negative_control -q` | **3 passed** (30 mutations) |
+| 1 | `%PY% -m pytest tests/unit -q` | **381 passed** |
+| 2 | `%PY% -m pytest tests/negative_control -q` | **3 passed** (44 mutations) |
 | 3 | `%PY% tools/check_closed_vocabularies.py --self-test` | **SELF-TEST \| PASS** (17 cases) |
-| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 29 modules scanned |
+| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 30 modules scanned |
 | 5 | `%PY% tools/validate_kiro_workspace.py` | **ok=190 fail=0** |
 | 6 | `%PY% tools/negative_control_workspace.py` | **caught=14 escaped=0 of 14** |
 | 7 | `sha256sum contract/planpilot_agent_contract_v1.8.json` | `b92e53f4ff054105…` unchanged |
 
-Negative-control detail (from the run): **29 caught / 0 escaped / 0 broken
-fixtures of 30**, sources restored to their pre-test bytes. The restore check
+Negative-control detail (from the run): **42 caught / 0 escaped / 0 broken
+fixtures of 44**, sources restored to their pre-test bytes. The restore check
 used to compare `git status --porcelain`, which wrongly failed whenever legitimate
 uncommitted work existed; it now compares against the pristine bytes captured at
-test start (the actual invariant). The one non-"caught" case is intentional and is
-the only genuine defence-in-depth demonstration — see §5.
+test start (the actual invariant), and it covers files outside `store/` too.
+Two non-"caught" cases are intentional defence-in-depth demonstrations — see §5.
+
+**One escape was reported once and could not be reproduced.** A single `factcheck`
+run printed `caught=42 escaped=1 broken_fixtures=0 of 44`. Five subsequent direct
+runs of the control — three with bytecode caching on, two with
+`PYTHONDONTWRITEBYTECODE=1` — all printed `escaped=0`. The escape was not reproduced
+and its cause is NOT claimed here; stating a mechanism I did not demonstrate would
+be the same failure as the ghost test this repo keeps finding.
+
+What that run DID expose is two real bugs in the checker, both now fixed and both
+independent of the escape:
+
+- `nc_actual` used `re.search(r"(\d+) passed", out)`, the FIRST match. The control's
+  baseline fixture embeds up to 3000 chars of the UNIT suite's output in its failure
+  message, so "381 passed" appears before the control's own "3 passed" — the checker
+  compared the doc's negative-control count against the unit count. It now takes the
+  LAST match (pytest writes its summary last).
+- The tally check hardcoded `caught == total - 1`, assuming exactly one
+  defence-in-depth case. A second was added with this audit, so the correct value is
+  `total - held`. It now reads `held` from the runner's own output and additionally
+  asserts `caught + escaped + held == total`, so an incoherent tally fails loudly
+  rather than being silently reported.
 
 Evidence pack: `tests/evidence/plan-store-and-digest/EVIDENCE.json` plus three raw
 logs. It records reference digests, package versions, and a `scope_statement`
@@ -118,7 +144,7 @@ cleanenv\Scripts\python.exe -m pytest tests/ -q
 temp venv was deleted afterwards and is not in the repo.
 
 That run predates later additions (the filename-reference pins in §3.1, both
-audits' fixes, and the ghost test). The suite is now **337 tests** (334 unit + 3 negative
+audits' fixes, and the ghost test). The suite is now **384 tests** (381 unit + 3 negative
 control). The clean-environment claim is about the two requirements files being
 sufficient, which is unaffected — but it was last measured at 152 tests, so
 re-run it for the current count rather than trusting either number. The last
@@ -271,8 +297,9 @@ mutations for the new defences, one **escaped**: reverting
 suite green. Every P0-2 test I had written used `PUBLISHED` or `APPROVED`, which
 the *other* new gate blocks on its own — so the OCC check itself was untested.
 Defence in depth hid a hole in one of the layers. Pinned with a `BLOCKED`
-transition, which only OCC can catch. Now 30 mutations, 29 caught / 0 escaped /
-0 broken.
+transition, which only OCC can catch. At the close of that audit: 30 mutations,
+29 caught / 0 escaped / 0 broken. (The third audit added 14 more; §2 and §5 carry
+the current tally.)
 
 **Two audit claims I checked and corrected.** It said a malformed lifecycle could
 be created directly with `status="PUBLISHED"`. Half right: the status enum *was*
@@ -285,11 +312,97 @@ These P0s are **not** in the F-series numbering: they come from a separate audit
 with separate findings, and `IMPLEMENTATION_NOTES.md` records them as P0-1/P0-2
 to keep the two audits distinguishable.
 
----
+### 2.4 A third audit, which found an authority bypass and three persistence gaps
+
+This ran against commit `651ab5e`, after the two P0s above were fixed and this
+document already claimed the store was sound. It found four things the first two
+audits missed. All four were reproduced against a clean tree with a standalone
+probe (`_audit_scratch/verify_audit3.py`, kept as the pre-fix baseline) before any
+fix was written, and re-verified closed afterwards (`verify_audit3_after.py`: 29
+checks, 0 still open).
+
+| # | finding | mechanism | fix |
+|---|---|---|---|
+| P0-bis | `create_lifecycle()` could mint an authority status | it accepted `status=`, `approval_set_id=`, `published_version=`, so a caller wrote a `PUBLISHED` record without ever reaching `transition()`'s version gate | those three parameters removed; creation always writes `CREATION_STATUS` ("DRAFT") |
+| P1-b | `put_content()` could add a version without retiring the previous one | `put_content(v2)` moved `current_active_version()` to 2 while v1 kept `APPROVED` and its live approval set | `put_content()` refuses to add a version (`VersionRouteError`); `commit_new_version()` is the only route |
+| P1-a | `load_state()` did not relate supersede events to lifecycle records | it checked each event against the CONTENT record, never the lifecycle record it exists to invalidate | five event↔lifecycle constraints added |
+| P2 | contract selection was lexicographic; the override was unpinned | `sorted(glob)[-1]` picks v1.9 over v1.10; `PLANPILOT_CONTRACT_PATH` trusted any file | `max()` by parsed semantic version; override requires a matching `PLANPILOT_CONTRACT_SHA256`; resolved contract checked against the `CONTRACT_SHA256` pin |
+
+P0-bis was **wider than the audit stated**: `PUBLISHED` could be created for the
+ACTIVE version too, so the store could manufacture publication authority through
+no gate at all. The record was schema-legal, which is why P0-1's contract
+validation could not see it — contract validity and state invariants are different
+questions.
+
+P1-b had a **second way in** the audit did not mention: appending a v2 content
+record to a dump whose v1 is APPROVED loaded cleanly, because `load_state()` had
+no version-authority check. Fixing `put_content()` alone would have left the
+persistence route open, so `load_state()` gained a layer-3 check reusing
+`_AUTHORITY_STATUSES` (see D15 — my first version of that check required
+`SUPERSEDED`, which was too strict and broke round-trip fidelity for four states
+the live API legitimately produces).
+
+Two more defects surfaced while fixing the four:
+
+- `dump_state()` emitted `superseded_events` in **insertion order** while content
+  and lifecycle were sorted. Two stores holding the same plans in a different
+  insertion order dumped different bytes, and the evidence pack hashes these bytes.
+  Invisible to a single-plan test (one plan has exactly one event); found by
+  rewriting the insertion-order test to cover two plans. Same class as F4/F12.
+- `tests/_fixtures.py` carried a **second schema compiler** and hardcoded v1.8 by
+  filename, while `src/planpilot/validation/schema.py` claimed in its docstring
+  that the fixtures delegated to it — the claim was false. So `not
+  fixtures.is_valid(...)` proved the fixture compiler rejected a payload, not that
+  the store did. The fixtures now delegate; pinned by an object-identity test,
+  since a second compiler would still compare equal on valid input.
+
+**What the negative control then caught in itself.** Adding 14 mutations took the
+control to 44. One escaped on the first run, and the escape was a real hole in a
+test, not a missing defence: `test_a_bare_path_override_is_refused` asserted only
+that the error mentioned `PLANPILOT_CONTRACT_SHA256`, which BOTH branches of the
+override check emit. Removing the missing-digest check fell through to the digest
+comparison and still raised, so the suite stayed green while the defence was gone.
+This is the same shape as the P0-2 escape in §2.3 — defence in depth masking an
+untested layer — and it is the second time the control found that exact class in a
+fix I had just written. The test now pins the phrase only that branch emits.
+
+**A second escape, and the wrong first account of it.** `P1-a(2)` was reported
+escaped (suite failed) on two runs, yet the same mutation passed 7/7 in isolation.
+My first write-up of this said direct runs could not reproduce it and blamed two
+parsing bugs in `factcheck` — and those bugs were real (a first-match
+`re.search(r"(\d+) passed")` that read the unit suite's "381 passed" as the
+negative control's count; a hardcoded `total - 1` for the defence-in-depth tally).
+But they explained the checker's *inconsistent numbers*, not the *escape*. I had
+merged two unrelated things and shipped "no mechanism is claimed" as though
+agnosticism were honesty.
+
+The escape was real and intermittent, and the mechanism is now reproduced
+deterministically (`_audit_scratch/probe_pyc_stale.py`): CPython validates a cached
+`.pyc` against the source mtime **truncated to whole seconds** plus its **size**. The
+control rewrites `plan_store.py` per mutation and spawns a fresh pytest child each
+time, so two mutations written in the same second at the same byte length make the
+second child import the **first mutation's bytecode** and run the wrong code.
+`P1-a(2)` is an equal-length `if <cond>:` → `if False:` swap, so inheriting a
+preceding must-fail mutation's `.pyc` turned the suite red and logged a false escape,
+while isolation — with no preceding mutation — stayed green. Fixed deductively: every
+child runs with `PYTHONDONTWRITEBYTECODE=1` and `__pycache__` under `src/` and `tests/`
+is cleared before the loop, so no `.pyc` is written and none can be read stale. Three
+consecutive runs then gave 42 caught / 0 escaped / 0 broken of 44, restored. Recorded
+as D20 — the control's own lesson (a verdict you cannot explain is one you cannot
+trust) applied to the control.
+
+These findings are numbered separately (P0-bis, P1-a, P1-b, P2) from both F1–F15
+and P0-1/P0-2, so each defence can be traced to the audit that forced it.
+`IMPLEMENTATION_NOTES.md` §"Third external audit" has the full account.
+
+**Three audits, three different sets of findings, each after the previous round's
+docs claimed completeness.** That is the single most important thing a reviewer
+should take from this section: it is evidence about the review process, not a
+reason to believe a fourth round would find nothing.
 
 ## 3. The closed-vocabulary guard (the part I would most like attacked)
 
-`tools/check_closed_vocabularies.py`, 620 lines.
+`tools/check_closed_vocabularies.py`, 734 lines.
 
 **Why it exists.** `verify_contract.py` runs 600 assertions — against the
 *contract*. Nothing checked the *implementation*. The `PreTaskExec` hook in
@@ -485,12 +598,20 @@ the opposite choice is safer?
 
 ## 5. Negative control — including the defect it exposed in itself
 
-`tests/negative_control/test_plan_store_negctl.py`, 19 mutations.
+`tests/negative_control/test_plan_store_negctl.py`, 44 mutations across five
+files: `digest.py`, `plan_store.py`, `errors.py`,
+`src/planpilot/validation/schema.py` and `tests/_fixtures.py`. The last two were
+added with the third audit — the runner had been hardwired to `store/`, so no
+mutation could reach the validator or the fixtures, and both are where that
+audit's findings were fixed.
 
 **Method.** Each mutation is written into the **real** source file, the **real**
 pytest suite runs as a subprocess, and the mutation counts as caught only if that
 suite **fails**. The file is restored in `finally`, and the test ends by asserting
-`git status --porcelain src/planpilot/store` is empty.
+every mutated file still equals the pristine bytes captured at start. It used to
+assert `git status --porcelain src/planpilot/store` was empty instead, which
+conflated "did the test undo its own mutations" with "is the working tree
+committed" and produced two false failures while legitimate work was in progress.
 
 **The first draft did the opposite** (defect **D5**, the most serious one): it
 imported the mutated module, asked "did the protection hold?", and recorded `True`
@@ -514,7 +635,7 @@ valid `tool_error`. So the control now probes **three** ways: layer 1 removed
 demonstration in the set — and `test_layer1_error_is_not_the_same_as_layer2` pins
 the difference so nobody "simplifies" layer 1 away as redundant.
 
-**Reviewer question:** the 18 "must fail" mutations each name one suite. Is any
+**Reviewer question:** the 42 "must fail" mutations each name one suite. Is any
 mutation caught by a test that would *also* fail for an unrelated reason? That
 would be a false catch. I did not check for this systematically.
 
@@ -585,7 +706,7 @@ refused, (c) is wrong.
 
 ---
 
-## 8. What I got wrong (all 13, not a curated subset)
+## 8. What I got wrong (all 20, not a curated subset)
 
 `IMPLEMENTATION_NOTES.md` has the full list with mechanism and fix. Summary:
 
@@ -604,6 +725,21 @@ refused, (c) is wrong.
 | D11 | `write_text(s.encode())` — bytes to a text API | crash |
 | D12 | redundant local import with a false comment ("errors imports nothing here") | reading it back |
 | D13 | the guard flagged six **filename** stems (`IMPLEMENTATION_NOTES.md` etc.) as fabricated identifiers, blocking the whole suite via `test_the_repository_passes_its_own_guard`; fixed with a `(?!\.\w)` lookahead (§3.1) | the handoff factcheck run |
+| D14 | a test asserted `len(store) == 0` when the `store` fixture is pre-populated with v1, so it failed for a reason unrelated to the defect it pinned | running it |
+| D15 | my first `load_state` version-authority check required `SUPERSEDED`, which refused four states the live API legitimately produces and encoded a second copy of the authority policy | `probe_roundtrip.py` |
+| D16 | the meaningless-ternary defect (D10) recurred in a test | reading it back |
+| D17 | a probe's final route printed `True`/`False` values I had typed in, not measured — stale by the time it ran, and indistinguishable from a measuring probe | reading the output against the earlier routes |
+| D18 | an evidence-reading script used `negative_control.mutation_counters`, a field that does not exist; it returned `null`, which reads as "no evidence" rather than "wrong key" | opening `EVIDENCE.json` |
+| D19 | ran two `factcheck` processes at once; their negative-control subprocesses mutated the same files concurrently and one restored the MUTATED bytes, leaving `digest.py` at `sort_keys=False` and failing three tests — one step after writing a helper whose docstring forbids exactly this | `git status` after the run |
+| D20 | the negative control read **stale `.pyc`** bytecode (CPython keys cache validity on mtime-to-the-second + size), so an equal-length mutation inherited a preceding mutation's bytecode and ran the wrong code — a false `escaped=1`; my first write-up misattributed it to factcheck parsing bugs and claimed "no mechanism", which was wrong | reproducing the mechanism in `probe_pyc_stale.py` |
+
+D14–D20 were all found and fixed inside the third audit's work, before the
+commit that carries it. All seven were caught by running the code, reading it
+back, or watching `git status` — never by review alone, which is the same
+distribution as D1–D13 and the reason the negative control and the factcheck
+tool exist. D19 was caught by the factcheck's own sources-restored assertion,
+firing on corruption the factcheck run itself had caused; D20 by refusing to
+accept an intermittent verdict until its mechanism was reproduced.
 
 **One process failure worth naming separately:** commit `e2dea98` stated the
 defects were "all recorded in REVIEW notes" when no such file existed. The claim

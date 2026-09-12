@@ -1,6 +1,6 @@
 {
   "spec": "plan-store-and-digest",
-  "generated_at_utc": "2026-09-12T18:28:15+00:00",
+  "generated_at_utc": "2026-09-12T20:14:37+00:00",
   "contract": {
     "schema_version": "1.8.0",
     "sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
@@ -88,7 +88,7 @@
     },
     "negative_control": {
       "exit_code": 0,
-      "summary": "3 passed in 81.45s (0:01:21)",
+      "summary": "3 passed in 75.84s (0:01:15)",
       "ok": true,
       "caught": 42,
       "escaped": 0,

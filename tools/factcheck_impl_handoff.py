@@ -166,17 +166,69 @@ unit_claimed = _claimed_passed("pytest tests/unit")
 ck(unit_claimed is not None, "doc states a unit-test pass count")
 ck(unit_claimed == unit_actual, f"unit tests: doc claims {unit_claimed}, pytest reports {unit_actual}")
 
+def _passed_count(out: str) -> int | None:
+    """The N in pytest's own summary line, i.e. the LAST "N passed" in the output.
+
+    Taking the first match is wrong, and it produced a real misreading: the
+    negative control's `baseline` fixture embeds up to 3000 characters of the
+    UNIT suite's output in its assertion message, so a run that got as far as
+    printing that message yields "381 passed" before the negative control's own
+    "3 passed". The check then compared the doc's negative-control count against
+    the unit count and reported nonsense.
+
+    pytest writes its summary last, so the last match is the authoritative one.
+    Returns None when there is no summary at all (a collection error, or a run
+    that died), which callers must treat as a failure rather than as zero.
+    """
+    found = re.findall(r"(\d+) passed", out)
+    return int(found[-1]) if found else None
+
+
+def _single_negctl_run():
+    """Run the negative control, refusing to interpret a run that did not finish.
+
+    Two negative-control runs must never overlap: each writes mutations into the
+    real source files and restores them in `finally`, so concurrent runs corrupt
+    each other's bytes and both report garbage. This helper is the only place the
+    control is invoked, and the caller is expected to have nothing else running.
+    """
+    rc, out = run([PY, "-m", "pytest", "tests/negative_control", "-q",
+                   "--no-header", "-s", "-p", "no:cacheprovider"])
+    return rc, out
+
+
 # negative-control row + the mutation tally in its body
-rc, out = run([PY, "-m", "pytest", "tests/negative_control", "-q", "--no-header", "-s", "-p", "no:cacheprovider"])
+rc, out = _single_negctl_run()
+ck(rc == 0, f"negative control exited 0 (actual {rc})")
+ck("baseline suite is not green" not in out,
+   "negative control's baseline fixture passed (a failed baseline makes every "
+   "mutation result meaningless)")
 neg = re.search(r"caught=(\d+) escaped=(\d+) broken_fixtures=(\d+) of (\d+)", out)
 ck(neg is not None, "negative control reports its tally")
 if neg:
     caught, escaped, broken, total = (int(g) for g in neg.groups())
     ck(escaped == 0 and broken == 0, f"negative control: 0 escaped / 0 broken (actual {escaped}/{broken})")
-    ck(caught == total - 1, f"caught {caught} == total {total} minus the one defence-in-depth case")
+    # `held` is the count of defence-in-depth mutations — the ones registered with
+    # expected_suite=None, where the suite MUST stay green because another layer
+    # still holds. Read out of the runner's own output rather than hardcoded:
+    # this line used to assert `caught == total - 1`, assuming exactly one such
+    # case. A second was added with the third audit (P1-a(2), where the layer-3
+    # stale-authority check independently refuses the same tampering), and the
+    # hardcoded -1 then reported a false failure.
+    held = re.search(r"DEFENCE IN DEPTH[^\n]*: (\d+)", out)
+    n_held = int(held.group(1)) if held else 0
+    ck(n_held > 0, "negative control reports its defence-in-depth count")
+    ck(caught == total - n_held,
+       f"caught {caught} == total {total} minus {n_held} defence-in-depth case(s)")
+    # The tally must be internally consistent, which is what exposed a
+    # mis-parsed run: caught + escaped + held has to equal total.
+    ck(caught + escaped + n_held == total,
+       f"tally is self-consistent: {caught} caught + {escaped} escaped + "
+       f"{n_held} held == {total}")
     for token in (f"{caught} caught", "0 escaped", "0 broken", f"of {total}"):
         ck(token in text, f"doc states {token!r}")
-nc_actual = int(re.search(r"(\d+) passed", out).group(1))
+nc_actual = _passed_count(out)
+ck(nc_actual is not None, "negative control printed a pytest summary")
 nc_claimed = _claimed_passed("pytest tests/negative_control")
 ck(nc_claimed == nc_actual, f"negative-control tests: doc claims {nc_claimed}, pytest reports {nc_actual}")
 ck("sources restored to pre-test bytes: true" in out.lower() or "restored: true" in out.lower(),
@@ -184,7 +236,8 @@ ck("sources restored to pre-test bytes: true" in out.lower() or "restored: true"
 
 # full suite: the doc cites a historical 152 (clean-env) and a current total
 rc, out = run([PY, "-m", "pytest", "tests/", "-q", "--no-header", "-p", "no:cacheprovider"])
-full_actual = int(re.search(r"(\d+) passed", out).group(1))
+full_actual = _passed_count(out)
+ck(full_actual is not None, "full suite printed a pytest summary")
 ck(full_actual == unit_actual + nc_actual, f"full {full_actual} == unit {unit_actual} + negctl {nc_actual}")
 m = re.search(r"now \*\*(\d+) tests\*\*", text)
 ck(m is not None, "doc states the current full-suite size")
@@ -252,16 +305,35 @@ ck(not missing, f"every test named in the doc exists (missing: {missing})")
 
 print("\n=== H. defect and finding ids are all documented in the notes ===")
 notes = (ROOT / "IMPLEMENTATION_NOTES.md").read_text(encoding="utf-8")
-for did in [f"D{i}" for i in range(1, 14)] + ["F-STORE-01", "F-STORE-02"]:
+# The D-series count is DERIVED, never hardcoded. This block used to assert
+# `== 13` and `range(1, 14)`, which broke the moment D14 was added — the same
+# brittleness as the hardcoded `total - 1` in the negative-control tally above.
+# What actually matters is that the document is INTERNALLY consistent: the §8
+# heading count, the number of table rows, and the highest D number must all
+# agree, and the rows must be D1..DN with no gaps or duplicates. That catches a
+# real drift (heading says one thing, table another) without failing on every
+# legitimate addition.
+rows = re.findall(r"^\| \*{0,2}(D\d+)\*{0,2} \|", text, re.M)
+n_defects = len(rows)
+ck(n_defects > 0, "section 8 table has D-rows")
+expected_rows = [f"D{i}" for i in range(1, n_defects + 1)]
+ck(rows == expected_rows,
+   f"section 8 rows are D1..D{n_defects} in order, no gaps/dups "
+   f"(actual {rows})")
+m = re.search(r"## 8\. What I got wrong \(all (\d+)", text)
+ck(m is not None, "section 8 heading states a defect count")
+if m:
+    ck(int(m.group(1)) == n_defects,
+       f"section 8 heading count {m.group(1)} == table rows {n_defects}")
+# every D must appear in the handoff AND be documented in the notes
+for did in expected_rows:
     ck(did in text, f"{did} mentioned in the handoff")
     ck(did in notes, f"{did} documented in IMPLEMENTATION_NOTES.md")
-ck("13 defects" in text or "all 13" in text, "doc states the defect count as 13")
-m = re.search(r"## 8\. What I got wrong \(all (\d+)", text)
-ck(m and int(m.group(1)) == 13, f"section 8 heading says 13 (actual {m.group(1) if m else '?'})")
-# the D5 row is bolded (**D5**), so the cell may carry markdown emphasis
-rows = re.findall(r"^\| \*{0,2}(D\d+)\*{0,2} \|", text, re.M)
-ck(len(rows) == 13, f"section 8 table has 13 rows (actual {len(rows)}): {rows}")
-ck(rows == [f"D{i}" for i in range(1, 14)], f"rows are D1..D13 in order: {rows}")
+for did in ("F-STORE-01", "F-STORE-02"):
+    ck(did in text, f"{did} mentioned in the handoff")
+    ck(did in notes, f"{did} documented in IMPLEMENTATION_NOTES.md")
+ck(f"all {n_defects}" in text or f"D1–D{n_defects}" in text,
+   f"doc states the defect count consistently ({n_defects})")
 
 print("\n=== I. honesty claims ===")
 ck("no such file existed" in text, "doc admits the REVIEW-notes claim preceded the artefact")

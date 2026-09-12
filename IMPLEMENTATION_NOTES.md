@@ -14,11 +14,11 @@ written. The claim was made before the artefact existed. It exists now.
 
 | | |
 |---|---|
-| unit tests | **334 passed** |
-| negative control (store) | **29 caught / 0 escaped / 0 broken fixtures** of 30 |
-| full suite (`pytest tests/`) | **337 passed** |
+| unit tests | **381 passed** |
+| negative control (store) | **42 caught / 0 escaped / 0 broken fixtures** of 44 |
+| full suite (`pytest tests/`) | **384 passed** |
 | closed-vocabulary guard self-test | **17/17 PASS** |
-| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 29 modules) |
+| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 30 modules) |
 | workspace validation | **190 checks / 0 fail** |
 | workspace negative control | **14 caught / 0 escaped** |
 | LLM / network / credentials / dataset used | **none** |
@@ -210,6 +210,144 @@ cannot be removed as "simplification" without a test failing.
 **General lesson:** a guard that cries wolf gets overridden, and then it guards
 nothing. Its precision is a functional requirement, not a nicety.
 
+### D14 — a test asserted the wrong fixture precondition
+
+While rewriting `test_unknown_field_is_rejected_by_the_schema` to actually call
+the store (finding P0-1's hiding place, see §"A gap found afterwards"), I added
+`assert len(store) == 0` after a refused write. The `store` fixture is
+**pre-populated** with v1, so `len(store)` is 1, never 0. The test failed for a
+reason unrelated to the defect it was written to pin.
+
+Caught by running it, not by review. The fix was to assert the refusal did not
+CHANGE the store (`get_content(...)` still returns the original v1) rather than
+that it was empty — which is both correct and a stronger statement of the
+property.
+
+**General lesson:** an assertion about a fixture's state must match the fixture.
+When a test and its fixture disagree, the test fails, and a failure that is not
+about the defect under test is indistinguishable from a real regression unless
+you read the fixture.
+
+### D15 — my first `load_state` version-authority check was too strict
+
+The P1-b fix refuses a stale version holding authority. My first implementation
+required every stale version to be `SUPERSEDED`. That was wrong twice over, and
+`probe_roundtrip.py` caught both:
+
+- It refused four states the **live API legitimately produces** — a stale version
+  left in `DRAFT`, `PROPOSED`, `AWAITING_APPROVAL` or `BLOCKED`. `commit_new_version()`
+  skips the supersede when the previous version has no lifecycle record, and
+  `create_lifecycle()` can then attach one, so a stale non-authority record is
+  reachable. Requiring `SUPERSEDED` broke dump/load round-trip fidelity.
+- It encoded a **second copy** of the authority policy, stricter than
+  `transition()`'s own `_AUTHORITY_STATUSES`. Two definitions of "which statuses
+  grant authority" in one module is the orphan-spec defect class the V1.8 review
+  found eight instances of.
+
+The fix reuses `_AUTHORITY_STATUSES` rather than naming statuses again, so there
+is one definition. Pinned by
+`test_a_stale_version_without_authority_still_loads`, parametrised over the four
+statuses, which fails if anyone tightens the check back.
+
+**General lesson:** a validation rule added to a persistence path must not be
+stricter than the rule the live path enforces, or legitimate states stop
+round-tripping. Reusing the existing predicate is not laziness — it is the only
+way to keep one source of truth.
+
+### D16 — the meaningless-ternary defect (D10) recurred
+
+A test carried `with pytest.raises(InvalidContentError, DigestMismatchError) if False else \
+pytest.raises(Exception) as exc:` — dead-branch noise identical in kind to D10.
+Caught by reading the file back before committing; replaced with a plain
+`pytest.raises(VersionConflictError)`. That D10's lesson did not stop D16 is the
+reason both are recorded separately.
+
+### D17 — a probe whose Route 4 reported hardcoded literals
+
+`probe_reachability.py`'s final route enumerated which paths reach a
+stale-authoritative state — and printed `True`/`False` values I had **typed in**,
+not measured. Two of the three were stale by the time the script ran. A probe
+that prints literals looks exactly like one that measures. Caught by reading the
+output against the earlier routes; the follow-up `probe_occ_reachable.py` measures
+every verdict.
+
+**General lesson:** a verification script that hardcodes its own conclusions is
+worse than no script — it manufactures the appearance of evidence. This is the
+probe-level twin of the ghost test.
+
+### D18 — an evidence-reading script used a field name that does not exist
+
+`collect_numbers_audit3.py` read `negative_control.mutation_counters`, which is
+not a field; the real keys are `caught` / `escaped` / `broken_fixtures` / `total`.
+The result was `null`, which reads as "no evidence recorded" rather than "wrong
+key". Caught by opening `EVIDENCE.json` directly. Fixed to read the real fields.
+
+### D19 — two concurrent factcheck runs left a source file mutated
+
+`tools/factcheck_impl_handoff.py` runs the negative control, which writes
+mutations into the **real** source files and restores them in a `finally`. I had
+just added a `_single_negctl_run` helper to that tool whose docstring says, in
+terms, that two negative-control runs must never overlap because they corrupt each
+other's bytes. On the next step I ran two factcheck processes at once — a
+background one whose output redirect silently produced an empty file, and a
+foreground one to "get the real result".
+
+Their negative-control subprocesses mutated `digest.py`, `plan_store.py` and the
+others concurrently. One process captured its pristine snapshot *after* the other
+had already mutated a file, so when it restored, it wrote the mutated bytes back.
+`digest.py` was left at `sort_keys=False` — the very first mutation in the list —
+and three digest tests failed. The handoff factcheck then reported
+"sources restored after mutations: FAIL", which is the check earning its keep: it
+caught the corruption I had just caused.
+
+Found by `git status` showing `digest.py` modified when only docs should have
+changed; fixed with `git checkout -- src/planpilot/store/digest.py`, then
+confirmed by re-running the unit suite (381 again) and a single, unshared
+factcheck.
+
+**General lesson:** a rule written into a docstring is not a guardrail. The
+`_single_negctl_run` helper documents the constraint but cannot enforce it across
+processes — nothing stops a second invocation. The only real protections are a
+lock or not starting the second run; I had neither, and wrote the rule one step
+before breaking it.
+
+### D20 — the negative control read stale bytecode, so it ran the wrong mutation
+
+The control reported `P1-a(2)` as escaped (suite failed) on two runs, yet applying
+that same mutation in isolation passed 7/7. Identical source bytes, different
+verdict — so the control was intermittent, and an intermittent control cannot
+support the claim "every defence is pinned".
+
+My **first written account of this was wrong**, and that is the part worth keeping.
+I told the documents that direct runs could not reproduce the escape and that the
+cause was two parsing bugs in `factcheck`. Those parsing bugs were real and are
+fixed, but they explained the checker's *inconsistent numbers*, not the *escape*. I
+had conflated two unrelated things and shipped "no mechanism is claimed" as if
+agnosticism were honesty. It is not: an unexplained verdict is an untrustworthy one.
+
+**The real mechanism, reproduced deterministically** (`_audit_scratch/probe_pyc_stale.py`):
+CPython judges a cached `.pyc` valid from the source mtime **truncated to whole
+seconds** plus its **size**. The control rewrites `plan_store.py` per mutation and
+spawns a fresh pytest child each time; when two mutations land in the same second at
+the same byte length, the second child imports the **first mutation's bytecode** and
+runs the wrong code. `P1-a(2)` is an equal-length `if <cond>:` → `if False:` swap, so
+inheriting a preceding "must-fail" mutation's `.pyc` turned the suite red and logged a
+false escape — while isolation, with no preceding mutation, stayed green. The probe
+shows the mechanism outright: overwriting source B onto source A at the same
+whole-second mtime and identical size makes a child import A.
+
+**Fixed deductively, not statistically:** every child runs with
+`PYTHONDONTWRITEBYTECODE=1` and `__pycache__` under `src/` and `tests/` is cleared
+before the loop, so no `.pyc` is ever written and none can be read stale. Three
+consecutive full runs then reported 42 caught / 0 escaped / 0 broken of 44, restored.
+The green streak is corroboration; the elimination of the mechanism is the proof.
+
+**General lesson:** this is the third ordering/identity assumption in this repo that
+held until a second case appeared (F4/F12 sorting, the P0-2 escape, now this). And it
+is the control's own rule turned on the control: when a result is intermittent,
+reproduce the mechanism before writing down a cause — and never record "could not
+reproduce" as a substitute for finding out why.
+
 ---
 
 ## External audit — findings F1–F15
@@ -365,8 +503,9 @@ After adding ten mutations for the new defences, one **escaped**: reverting
 green. Every P0-2 test I had written used `PUBLISHED` or `APPROVED`, which the
 *other* new gate blocks on its own — so the OCC check was never tested alone.
 Defence in depth hid a hole in one of the layers. Pinned with a `BLOCKED`
-transition that only OCC can catch. Now 30 mutations, 29 caught / 0 escaped /
-0 broken.
+transition that only OCC can catch. At the close of that audit: 30 mutations,
+29 caught / 0 escaped / 0 broken. (The third audit later added 14 more — see the
+Status table at the top for the current tally.)
 
 This is the strongest argument in the project for the negative control existing at
 all: it found a gap in the fix for a defect the tests were written to close.
@@ -397,6 +536,181 @@ carries a verification record with the evidence numbers and how each task was
 checked.
 
 ---
+
+## Third external audit — findings P0-bis, P1-a, P1-b, P2
+
+A third independent review ran against the tree at commit `651ab5e`, after the two
+P0s were fixed and the docs claimed the module was sound. It found one authority
+bypass and three persistence/consistency gaps. All four were reproduced against a
+clean tree with a standalone probe (`_audit_scratch/verify_audit3.py`, kept as the
+pre-fix baseline) before any fix was written, and all four were re-verified closed
+afterwards (`verify_audit3_after.py`: 29 checks, 0 still open).
+
+The pattern across all three audits is now the headline finding: **each audit
+found things the previous one missed, and the previous one's docs claimed
+completeness.** Three rounds is evidence about the review process, not a reason to
+believe a fourth round would find nothing.
+
+### P0-bis — `create_lifecycle()` could mint an authority status
+
+`transition()` enforced the version gate (P0-2), but `create_lifecycle()` accepted
+`status=`, `approval_set_id=` and `published_version=` directly, so a caller could
+write an authority-bearing lifecycle record without ever reaching that gate:
+
+```text
+v1 and v2 stored, current_active_version() == 2
+create_lifecycle(v1, status="PUBLISHED", published_version=1)   -> ACCEPTED
+transition(v1, "PUBLISHED")                                     -> VersionConflictError
+```
+
+It bypassed an existing defence rather than covering an unimplemented one, and was
+wider than the stale-version case: `PUBLISHED` could be created for the ACTIVE
+version too, so the store could manufacture publication authority through no gate
+at all. The record was schema-legal, which is why P0-1's contract validation could
+not see it — contract validity and state invariants are different questions.
+
+Fixed by removing the three parameters. Creation always writes `CREATION_STATUS`
+("DRAFT"); APPROVED and PUBLISHED are reachable only through `transition()`,
+SUPERSEDED only through `supersede()` or `commit_new_version()`. Only one existing
+test passed `status=`, and it now pins the signature itself, so re-adding a
+parameter fails.
+
+### P1-b — `put_content()` could add a version without retiring the previous one
+
+The store had two ways to add a version and only one honoured the contract:
+`commit_new_version()` supersedes and records the invalidation event; `put_content()`
+wrote the content and nothing else. So `put_content(v2)` moved
+`current_active_version()` to 2 while v1 kept `APPROVED` and its live approval set —
+exactly the state `plan_store.versioning` forbids, holding only for callers who
+happened to pick the right method.
+
+Two options were rejected on measurement, not preference:
+
+- Enforcing continuity inside `put_content()` would **not** close it — `v2 ==
+  latest + 1` is satisfiable while v1 stays APPROVED and bound.
+- Making `put_content()` supersede was explicitly forbidden (an earlier
+  instruction), because a caller left with two live versions when the supersede
+  step fails is the same inconsistency from the other direction.
+
+So `put_content()` now refuses to add a version to a plan that already has one;
+`commit_new_version()` is the only route. New `VersionRouteError`, a
+`StoreInvariantError` — none of the 18 registered codes describes "you called the
+wrong method" (F-STORE-01), and it is a caller bug with no user-facing remedy, so
+it must crash rather than be rendered as a tool_error. `commit_new_version()`
+reaches the same write path through a private `_store_content(allow_new_version=True)`;
+the flag is private so it cannot become a second public bypass.
+
+The dump was a second way in and was wide open: appending a v2 content record to a
+dump whose v1 is APPROVED loaded cleanly. `load_state()` now refuses a stale
+version holding an authority status (its layer-3 check, reusing `_AUTHORITY_STATUSES`
+— see D15 for why it does not require SUPERSEDED).
+
+### P1-a — `load_state()` did not relate supersede events to lifecycle records
+
+`load_state()` checked each supersede event against the CONTENT record it named,
+never against the lifecycle record the event exists to invalidate. Five
+relationships were missing; all five were measured ACCEPTED before the fix:
+
+| # | tampering | consequence if loaded |
+|---|---|---|
+| 1 | event's `approval_set_id` rebound to another set | approval service invalidates the WRONG set |
+| 2 | same event duplicated | one set invalidated twice, another never touched (drain is exactly-once) |
+| 3 | lifecycle flipped back to APPROVED, event kept | resurrects authority the event claims was withdrawn |
+| 4 | event kept, its lifecycle record deleted | event describes nothing — a fabrication |
+| 5 | event deleted, SUPERSEDED record with a bound set kept | approvals never invalidated against a retired plan |
+
+All five now raise `InvalidContentError`. Cases 3 is caught twice (also by P1-b's
+layer-3 check), which is registered as defence-in-depth in the negative control
+rather than claimed as two independent catches.
+
+### P2 — contract selection was lexicographic and the override was unpinned
+
+`contract_path()` took `sorted(glob)[-1]`, which is lexicographic:
+
+```text
+sorted(["…_v1.2.json", "…_v1.9.json", "…_v1.10.json"])[-1]  ->  "…_v1.9.json"
+```
+
+because "1" < "9" and the comparison never reaches the "10". The release after v1.9
+would have silently validated against v1.9, with the suite green: conftest pinned
+the hash of whichever file the FIXTURES resolved, and both resolvers agreed on the
+wrong file. Now `max()` by parsed semantic version, with a malformed name refused
+rather than skipped.
+
+`PLANPILOT_CONTRACT_PATH` previously pointed production validation at any file with
+no digest check. It now requires `PLANPILOT_CONTRACT_SHA256` naming that file's
+digest, and the resolved contract is verified against the existing
+`planpilot.CONTRACT_SHA256` pin. A "test mode" boolean was considered and rejected:
+it gates the mode but not the content.
+
+### Two defects found while fixing the four findings
+
+- **`dump_state()` emitted `superseded_events` in insertion order.** `content` and
+  `lifecycle` were sorted; the events were `list(self._superseded)`. Two stores
+  holding the same plans in a different insertion order dumped different bytes, and
+  the evidence pack hashes these bytes. Found by rewriting the insertion-order test
+  to cover two plans — a single plan has exactly one event, so the defect was
+  invisible. Same class as F4/F12. Now sorted with a total key reusing
+  `digest._total_key` (approval_set_id is string|null; `None < "AS-001"` raises).
+- **`tests/_fixtures.py` carried a SECOND schema compiler.** It compiled its own
+  `Draft202012Validator` and hardcoded v1.8 by filename, while
+  `src/planpilot/validation/schema.py` claimed in its docstring that the fixtures
+  delegated to it — the claim was false. So a test asserting
+  `not fixtures.is_valid(...)` proved the FIXTURE compiler rejected a payload, not
+  that the store did. The fixtures now delegate, leaving one resolver, one compiler
+  and one cache; pinned by an object-identity test, since a second compiler would
+  still compare equal on valid input.
+
+### What the negative control caught in its own tooling
+
+Adding the 14 new mutations took the control to 44. One escaped on the first full
+run — and the escaped one was correct behaviour, not a missing defence: my
+`test_a_bare_path_override_is_refused` asserted only that the message mentions
+`PLANPILOT_CONTRACT_SHA256`, which BOTH branches of the override check emit, so
+removing the missing-digest check fell through to the digest comparison and still
+raised. The suite stayed green while the defence was gone. This is the same shape
+as the P0-2 escape two rounds earlier (defence-in-depth masking an untested layer).
+The test now pins the phrase only that branch emits and asserts the other branch's
+phrase is absent.
+
+A **second, separate** `escaped=1` appeared later, on P1-a(2), and my first account
+of it in this document was wrong. I wrote that direct runs could not reproduce it and
+that the cause was two parsing bugs in the factcheck checker, claiming no mechanism
+for the escape itself. That conflated two unrelated things, and "no mechanism is
+claimed" was a cop-out I should not have shipped.
+
+The factcheck parsing bugs were real and are fixed (a first-match `re.search` that
+picked up the unit suite's "381 passed" as the negative control's count, and a
+hardcoded `total - 1` for the defence-in-depth tally; the checker now takes the last
+match and asserts `caught + escaped + held == total`). But those explained the
+checker's *inconsistent numbers*, not the *escape*. The escape was real,
+intermittent, and had a different cause.
+
+**The mechanism, reproduced deterministically** (`_audit_scratch/probe_pyc_stale.py`):
+CPython decides whether a cached `.pyc` is still valid from the source file's mtime
+**truncated to whole seconds** plus its **size**. The negative control rewrites
+`plan_store.py` once per mutation and spawns a fresh pytest subprocess for each. When
+two mutations are written within the same second and produce the same byte length,
+the second subprocess loads the **first mutation's stale bytecode** and runs the wrong
+code. P1-a(2) is an equal-length `if <cond>:` to `if False:` swap; if it inherited a
+preceding "must-fail" mutation's `.pyc`, the suite went red and the control recorded
+a false escape — while the same mutation passed 7/7 in isolation, which has no
+preceding mutation. That is exactly the observed pattern: intermittent red inside the
+control, stable green alone. The probe demonstrates it directly — writing source B
+over source A at the same whole-second mtime and identical size makes a child import
+A — so this is a shown mechanism, not a probabilistic guess.
+
+**The fix** is deductive rather than statistical: every child now runs with
+`PYTHONDONTWRITEBYTECODE=1`, and `__pycache__` under `src/` and `tests/` is cleared
+before the loop. With no `.pyc` ever written, none can be read stale, so the
+mechanism cannot occur. Three consecutive full control runs then reported 42 caught /
+0 escaped / 0 broken of 44, each with sources restored — consistent with the cause
+being gone, though the real proof is the elimination, not the green streak.
+
+Recorded as **D20**, and it is the third time this repo has been bitten by an
+ordering-or-identity assumption that looked fine until a second case appeared (F4/F12
+sorting, the P0-2 escape, now this). The negative control's own lesson applies to its
+own tooling: a verdict you cannot explain is a verdict you cannot trust.
 
 ## Design decisions worth challenging in review
 
@@ -464,11 +778,11 @@ cleanenv/Scripts/python.exe -m pytest tests/ -q
 Result at the time of that run: **152 passed in 27.71s**, exit code 0.
 
 **That result is now stale and must not be cited as evidence for the current
-tree.** The suite has grown to 337 tests (334 unit + 3 negative control) through
-two audits' fixes, the ghost test, and the P0 work — and the clean-environment run
-has **not** been repeated since. A later attempt to re-run it was stopped part-way
-(only dependencies installed, no tests executed), so no clean-environment result
-exists for the current code.
+tree.** The suite has grown to 384 tests (381 unit + 3 negative control) through
+three audits' fixes, the ghost test, and the P0 work — and the clean-environment
+run has **not** been repeated since. A later attempt to re-run it was stopped
+part-way (only dependencies installed, no tests executed), so no clean-environment
+result exists for the current code.
 
 What the 152-test run does still establish is narrower and worth keeping: the two
 requirements files were *sufficient* to build a working environment, since the
