@@ -14,11 +14,11 @@ written. The claim was made before the artefact existed. It exists now.
 
 | | |
 |---|---|
-| unit tests | **259 passed** |
-| negative control (store) | **18 caught / 0 escaped / 0 broken fixtures** of 19 |
-| full suite (`pytest tests/`) | **262 passed** |
+| unit tests | **334 passed** |
+| negative control (store) | **29 caught / 0 escaped / 0 broken fixtures** of 30 |
+| full suite (`pytest tests/`) | **337 passed** |
 | closed-vocabulary guard self-test | **17/17 PASS** |
-| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 25 modules) |
+| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 29 modules) |
 | workspace validation | **190 checks / 0 fail** |
 | workspace negative control | **14 caught / 0 escaped** |
 | LLM / network / credentials / dataset used | **none** |
@@ -231,7 +231,7 @@ of that concurrency, not store defects. The store findings are independent of it
 satisfies its contract schema. **That file had never been written.** It was the
 exact mechanism that would have caught F2 and F5 on the first run — and it did
 not exist. Cited-but-absent tests are the same orphan-spec class the V1.8
-contract review found eight instances of. The file is now real (39 tests), and a
+contract review found eight instances of. The file is now real (54 tests), and a
 negative control proves it FAILS (6 tests, then 8) when F2 and F5 are
 reintroduced, restoring byte-identical afterward.
 
@@ -277,11 +277,152 @@ digest). No document hardcodes the old value, so nothing else drifted.
 
 ---
 
+## Second external audit — findings P0-1, P0-2, P1
+
+Numbered separately from F1–F15 because this was a **different audit** with its
+own findings, and merging the numbering would make it impossible to tell which
+defence each test pins. It ran against a moving target (it reported the tree
+becoming dirty mid-run, which was me editing concurrently), so its F1/F2/F5/F11
+re-reports were already stale — but the two P0s were new and neither I nor the
+first audit had seen them.
+
+**Both were reproduced against a clean tree with a standalone probe before any
+fix.** A subagent report is a claim, not a fact; that rule applies to the second
+audit exactly as it did to the first.
+
+### P0-1 — the store never validated content against the contract
+
+`put_content` checked id/version presence and digest self-consistency, and nothing
+else. The probe re-signed five schema-invalid plans and all five were accepted and
+readable. See design decision 1 above, which this falsified.
+
+Also found by the probe, and worse than the audit stated: the lifecycle `ts`
+argument had **no** validation, so five garbage values were stored verbatim into
+`updated_at` against a field the contract types `format: date-time`.
+
+**Root cause worth more than the defect.** `tasks.md` 3.1 has said "Validate
+stored content against `$defs.plan_content`" since the spec was written. The
+requirement was in the plan, the task was ticked, and the validation did not
+exist. And the test cited as covering it —
+`test_unknown_field_is_rejected_by_the_schema` — asserted only
+`not fixtures.is_valid(polluted, "plan_content")` and never called `PlanStore`.
+Its name described store behaviour; its body tested a validator. That is the
+ghost-test failure mode (F13) one layer down: not an absent file, but a present
+test that proves something other than what it is cited for.
+
+Fix: new `src/planpilot/validation/` package as the single production validator,
+compiled once per `$defs` entry and memoised, `format_checker` enabled (without it
+jsonschema treats `format` as an annotation and accepts garbage timestamps).
+`tests/_fixtures.py` is no longer on any production path. Errors are wrapped into
+`SchemaViolationError` so the store keeps one exception root for the tool layer.
+`transition` and `create_lifecycle` build a candidate, validate, then replace —
+the old code mutated the stored record in place, so a rejected write could leave
+it half-changed.
+
+### P0-2 — `expected_plan_version` was a tautology
+
+It was compared against the caller's own `plan_version` argument, so both sides
+came from the caller and the check could only catch a caller contradicting itself.
+Reproduced: v1 `APPROVED` with approval set bound, v2 stored, then
+`transition(pid, 1, "PUBLISHED", expected_plan_version=1)` published v1.
+
+The docstring claimed this "is what stops a stale approval set from publishing a
+regenerated plan", citing
+`security_controls.approvals_bound_to_plan_version_and_digest`. The claim was
+false. A documentation defect on top of a behavioural one — the same pairing as
+F12, and the same lesson: prose that asserts a safety property is not evidence of
+it.
+
+Fix: compared against `current_active_version()`. `APPROVED` and `PUBLISHED`
+additionally require the target to be the active version, so omitting
+`expected_plan_version` no longer bypasses the protection. The terminal check runs
+**first**: reporting "wrong version" for a superseded record would advise a retry
+that can never succeed, and the first ordering I shipped had that bug — my own new
+pin test caught it.
+
+New `commit_new_version()` does validate → continuity → write content → create
+lifecycle → supersede previous → record invalidation event, rolling back entirely
+on any failure. `put_content()` deliberately stays a primitive that does **not**
+supersede: writing content and retiring a version are separate concerns, and
+bundling them would let an idempotent retry path invalidate approvals. Both halves
+of that split are pinned so a refactor cannot reunite them. Supersede events now
+carry `invalidation_cause` from the contract's closed enum.
+
+### P1 — `load_state` integrity
+
+Duplicate `(plan_id, plan_version)` records were silently collapsed to the last by
+a dict comprehension — a swap, not a load, where the survivor is whichever
+appeared later in the file. `superseded_events` were restored with no validation,
+so a fabricated event for a nonexistent plan would have reached the approval
+service and invalidated a real approval set. Now: envelope validated against a
+closed module-owned schema (`store/persistence_schema.py`), duplicates refused,
+and every event must reference content present in the dump with a matching digest.
+
+### What the negative control then caught in my own fix
+
+After adding ten mutations for the new defences, one **escaped**: reverting
+`expected_plan_version != active` to the tautological `!= version` left the suite
+green. Every P0-2 test I had written used `PUBLISHED` or `APPROVED`, which the
+*other* new gate blocks on its own — so the OCC check was never tested alone.
+Defence in depth hid a hole in one of the layers. Pinned with a `BLOCKED`
+transition that only OCC can catch. Now 30 mutations, 29 caught / 0 escaped /
+0 broken.
+
+This is the strongest argument in the project for the negative control existing at
+all: it found a gap in the fix for a defect the tests were written to close.
+
+### Audit claims I checked and corrected
+
+It said a malformed lifecycle could be created directly with `status="PUBLISHED"`.
+Half right — the status enum *was* already validated, and `PUBLISHED` is a legal
+member, so that is not a schema violation; real publication authority belongs to
+the later `publish_plan` tool gate. Its claim about unvalidated timestamps was
+right, and worse than stated.
+
+### A gap found afterwards while verifying tasks.md
+
+Checking all 13 tasks against their substantive requirements (not against file
+existence) found four that were only nominally complete. Two of them are the same
+defect shape as the ghost test:
+
+| task | what was actually missing |
+|---|---|
+| 2.2 | The required negative half — "an extra details field must fail validation, proving the test can fail" — was absent, so every assertion was positive-only |
+| 3.2 | `test_unknown_field_is_rejected_by_the_schema` never called `PlanStore` (this is P0-1's hiding place) |
+| 4.2 | Used other contract members as samples instead of the two tokens the task names |
+| 5.1 | 28 mutations omitted two defect classes the task names: "clock read internally" and "fabricated code accepted" |
+
+Existence is not completion, and a ticked box is not evidence. `tasks.md` now
+carries a verification record with the evidence numbers and how each task was
+checked.
+
+---
+
 ## Design decisions worth challenging in review
 
-1. **Digest verified on write, not on read.** A fabricated plan never enters the
-   store. Costs one SHA-256 per write; buys the property that everything in the
-   store is already consistent.
+1. **Content validated on write, not on read.** Costs one SHA-256 plus one schema
+   validation per write; buys the property that everything in the store is already
+   both consistent and legal.
+
+   **This decision was originally stated as "digest verified on write", with the
+   claim that a fabricated plan never enters the store. Audit finding P0-1
+   falsified it.** Verifying the digest does not stop a fabricated plan, because
+   the digest is content-addressed: a caller who fabricates content can always
+   re-sign it. Digest consistency proves content was not altered *after* signing;
+   only contract schema validation proves the content is *legal*. Five re-signed
+   payloads — an unknown top-level field, `plan_version=True`, a string KPI, a
+   deleted required `kpis` block, and an unknown nested operation field — were all
+   accepted. The lifecycle `ts` argument was likewise stored verbatim, so
+   `"not a timestamp at all"`, `None` and `12345` all became `updated_at`.
+
+   There are now three write gates: key pre-flight (including an explicit `bool`
+   refusal, because `hash(True) == hash(1)` would collide with version 1 as a dict
+   key), contract schema validation via `src/planpilot/validation/`, and the two
+   digest identities. Gates 2 and 3 are not redundant and treating them as one
+   check was the defect.
+
+   The second half of the decision — validate on write rather than on read — is
+   unchanged and still correct.
 2. **`supersede()` is deliberately non-idempotent.** A second call raises.
    `drain_superseded()` is an exactly-once hand-off to the approval service; a
    duplicated event would invalidate the same set twice.
@@ -320,15 +461,25 @@ cleanenv/Scripts/python.exe -m pip install -r requirements.txt -r requirements-d
 cleanenv/Scripts/python.exe -m pytest tests/ -q
 ```
 
-Result at the time of that run: **152 passed in 27.71s**, exit code 0. The suite
-has since grown (audit fixes + the ghost test) to 262 unit + 6 negative control;
-re-run `pytest tests/` for the current count rather than trusting this number. The install pulled only what the two requirements files
-declare (plus their transitive deps), so a teammate cloning this repo can
-reproduce it.
+Result at the time of that run: **152 passed in 27.71s**, exit code 0.
+
+**That result is now stale and must not be cited as evidence for the current
+tree.** The suite has grown to 337 tests (334 unit + 3 negative control) through
+two audits' fixes, the ghost test, and the P0 work — and the clean-environment run
+has **not** been repeated since. A later attempt to re-run it was stopped part-way
+(only dependencies installed, no tests executed), so no clean-environment result
+exists for the current code.
+
+What the 152-test run does still establish is narrower and worth keeping: the two
+requirements files were *sufficient* to build a working environment, since the
+install pulled only what they declare plus transitive deps. That property is
+unaffected by added tests. But "a teammate cloning this repo can reproduce it" is
+currently an inference from an old run, not a measured fact — re-run the three
+commands above before relying on it.
 
 This is the answer to "can someone else run my agent's tests" — a recorded result
-rather than a claim. Note the temp venv was deleted afterwards; it is not part of
-the repo.
+rather than a claim, with the limits of what it still proves stated plainly. Note
+the temp venv was deleted afterwards; it is not part of the repo.
 
 ---
 

@@ -7,8 +7,15 @@
 
 You are doing an **adversarial code review** of one module of a hackathon
 production-planning agent. Your job is to find defects, not to confirm quality.
-A previous independent audit already found 15 issues (F1–F15), all reproduced and
-fixed; treat that as the bar to beat, not as evidence the code is now clean.
+Two independent audits have already run. The first found 15 issues (F1–F15);
+every one was reproduced against a clean tree and fixed or formally accepted.
+The second found **two P0 defects the first missed** — the store never validated
+content against the contract at all, and its optimistic-concurrency check was a
+tautology. Both were reproduced, both are fixed, both are pinned by regression
+tests and by negative-control mutations.
+
+Read that as the bar, not as a clean bill of health. Two audits missing
+different things is evidence that a third can still find more.
 
 ## Repo and how to run it
 
@@ -24,7 +31,7 @@ this module is pure deterministic Python. You should never have to install anyth
 Verify the baseline before you start (all should pass; if any fails, stop and say so):
 
 ```
-%PY% -m pytest tests/ -q                          # 268 passed
+%PY% -m pytest tests/ -q                          # 337 passed
 %PY% tools/check_closed_vocabularies.py           # CLOSED VOCABULARY CHECK | PASS
 %PY% tools/factcheck_impl_handoff.py              # HANDOFF FACT-CHECK | fails=0
 sha256sum contract/planpilot_agent_contract_v1.8.json   # b92e53f4ff054105...
@@ -32,8 +39,14 @@ sha256sum contract/planpilot_agent_contract_v1.8.json   # b92e53f4ff054105...
 
 ## What the module is
 
-`src/planpilot/store/` — the plan store and canonical digest. Four files:
-`digest.py`, `errors.py`, `plan_store.py`, `__init__.py` (~1,130 lines).
+`src/planpilot/store/` — the plan store and canonical digest. Five files:
+`digest.py`, `errors.py`, `plan_store.py`, `persistence_schema.py`, `__init__.py`
+(1,609 lines).
+
+`src/planpilot/validation/` — the production contract validator the store now
+calls at every write boundary (410 lines, added to fix P0-1). It is the single
+validation entry point for both `src/` and `tests/`; `tests/_fixtures.py` is no
+longer on any production path.
 
 It is the foundation every later module depends on. Its whole reason to exist is
 one property: **a plan's digest is a pure function of its content**, so a
@@ -49,8 +62,9 @@ The contract it implements is `contract/planpilot_agent_contract_v1.8.json`
 
 1. `REVIEW_HANDOFF_IMPLEMENTATION.md` — the implementer's own sceptical handoff,
    including §2.2 (the prior audit) and §10 (suggested attack order)
-2. `IMPLEMENTATION_NOTES.md` — 13 self-found defects (D1–D13), the F1–F15 audit
-   disposition table, and design decisions
+2. `IMPLEMENTATION_NOTES.md` — self-found defects (D-series), the F1–F15 audit
+   disposition table, the P0-1/P0-2 findings from the second audit, and design
+   decisions
 3. `.kiro/specs/plan-store-and-digest/design.md` and `tasks.md`
 4. the code itself
 
@@ -111,6 +125,8 @@ useful evidence.
   for a demo.
 - **`ortools` is installed but unused by this spec** — it is pinned because the
   contract requires it; no test here exercises CP-SAT.
-- **8 of 15 specs are untouched.** There is no scheduler, validation layer,
-  approval service, audit chain, tool layer, inference client, or UI. This module
-  is the foundation, not the agent.
+- **14 of the 15 specs listed in `.kiro/specs/README.md` do not exist yet** —
+  there is no spec directory for them, let alone code. No scheduler, approval
+  service, audit chain, tool layer, inference client, dataset migration, or UI.
+  This module is the foundation, not the agent. (An earlier version of this
+  document said "8 of 15", which was unsupported by anything on disk.)

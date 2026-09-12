@@ -4,11 +4,16 @@
 **From:** the implementing agent (Hermes)
 **Date:** 2026-09-12
 **Repo:** `E:\PlanPilot-Hackathon\planpilot-build` — git, **no remote yet**.
-Snapshot for the counts in this document: commit `79777fc` (10 commits, 50 files tracked, working tree clean at
+Snapshot for the counts in this document: commit `cd5219f` (16 commits, 55 files tracked, working tree clean at
 the time of writing). Commit/HEAD/tracked counts are stated *as of that commit*
 and are not live values: a committed document cannot state the HEAD of the
 commit that contains it. `tools/factcheck_impl_handoff.py` verifies the named
 snapshot commit exists and is an ancestor of HEAD rather than equal to it.
+
+The line counts and test totals describe that same snapshot. An earlier revision
+named `79777fc` while carrying numbers measured on a later tree, which made the
+document internally inconsistent — the snapshot reference has to move with the
+numbers, not stay pinned to the commit where the document was first written.
 
 This document is deliberately sceptical of its own subject. Where a claim could be
 verified mechanically, it was, and the command is given. Where the implementer
@@ -35,34 +40,37 @@ Built: the `plan-store-and-digest` spec — canonical digest, contract-shaped st
 errors, and the write-once content / mutable lifecycle store. Phases 1–5 of
 `tasks.md`, all checked off.
 
-**Not built:** everything else. There is no scheduler, no validation layer, no
-approval service, no audit chain, no tool layer, no inference client, no UI, no
-dataset access. 8 of the 15 specs in `.kiro/specs/README.md` are untouched.
+**Not built:** everything else. There is no scheduler, no approval service, no
+audit chain, no tool layer, no inference client, no UI, no dataset access.
+`.kiro/specs/README.md` lists 15 specs and exactly one of them has a directory,
+so **14 of the 15 do not exist yet** — not merely untouched, but unstarted.
+(An earlier revision of this document said "8 of the 15", which nothing on disk
+supported; the count is now taken from the README's own table.)
 
 **No LLM, network, credential or dataset was involved.** This is enforced by the
 fact that the test suite runs in a clean venv with only `jsonschema`, `ortools`
 (transitively) and `pytest` installed — verified in §3.
 
-Scale: **5,023 lines** across 21 Python files (the subject; the factcheck tool that
+Scale: **6,942 lines** across 25 Python files (the subject; the factcheck tool that
 measures them is excluded to avoid self-reference); tracked-file count is as of the
 snapshot commit.
 
 | layer | lines | files |
 |---|---|---|
-| `src/planpilot/` — store package + top-level init | 1,150 | 5 |
-| `tests/unit/` — 8 test modules + init | 2,102 | 9 |
-| `tests/negative_control/` | 386 | 2 |
+| `src/planpilot/` — store + validation packages + top-level init | 2,037 | 8 |
+| `tests/unit/` — 9 test modules + init | 2,933 | 10 |
+| `tests/negative_control/` | 521 | 2 |
 | `tests/_fixtures.py`, `conftest.py`, `__init__.py` | 403 | 3 |
 | `tools/check_closed_vocabularies.py` | 734 | 1 |
-| `tools/write_evidence_plan_store.py` | 248 | 1 |
-| **subject total** | **5,023** | **21** |
+| `tools/write_evidence_plan_store.py` | 314 | 1 |
+| **subject total** | **6,942** | **25** |
 
-`tools/factcheck_impl_handoff.py` (269 lines) checks the table above, so it is
+`tools/factcheck_impl_handoff.py` (289 lines) checks the table above, so it is
 **deliberately excluded from the total** — the same reason `canonical_plan_digest`
 excludes `plan_digest` and `engine.canonical_plan_hash` from the hashed payload. A
 checker that counts itself makes the figure move every time the checker is edited,
-which is a circular dependency, not a measurement. (All 22 Python files together are
-5,310 lines, including the 287-line factcheck tool.)
+which is a circular dependency, not a measurement. (All 29 Python files together are
+8,522 lines, including the 289-line factcheck tool.)
 
 ---
 
@@ -77,16 +85,16 @@ set PY=E:\PlanPilot-Hackathon\contract-review\.venv\Scripts\python.exe
 
 | # | command | result |
 |---|---|---|
-| 1 | `%PY% -m pytest tests/unit -q` | **265 passed** |
-| 2 | `%PY% -m pytest tests/negative_control -q` | **3 passed** (19 mutations) |
+| 1 | `%PY% -m pytest tests/unit -q` | **334 passed** |
+| 2 | `%PY% -m pytest tests/negative_control -q` | **3 passed** (30 mutations) |
 | 3 | `%PY% tools/check_closed_vocabularies.py --self-test` | **SELF-TEST \| PASS** (17 cases) |
-| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 25 modules scanned |
+| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 29 modules scanned |
 | 5 | `%PY% tools/validate_kiro_workspace.py` | **ok=190 fail=0** |
 | 6 | `%PY% tools/negative_control_workspace.py` | **caught=14 escaped=0 of 14** |
 | 7 | `sha256sum contract/planpilot_agent_contract_v1.8.json` | `b92e53f4ff054105…` unchanged |
 
-Negative-control detail (from the run): **18 caught / 0 escaped / 0 broken
-fixtures of 19**, sources restored to their pre-test bytes. The restore check
+Negative-control detail (from the run): **29 caught / 0 escaped / 0 broken
+fixtures of 30**, sources restored to their pre-test bytes. The restore check
 used to compare `git status --porcelain`, which wrongly failed whenever legitimate
 uncommitted work existed; it now compares against the pristine bytes captured at
 test start (the actual invariant). The one non-"caught" case is intentional and is
@@ -109,11 +117,13 @@ cleanenv\Scripts\python.exe -m pytest tests/ -q
 **152 passed in 27.71s, exit 0.** Only the two requirements files were used. The
 temp venv was deleted afterwards and is not in the repo.
 
-That run predates later additions (the filename-reference pins in §3.1, the audit
-fixes, and the ghost test). The suite is now **268 tests** (265 unit + 3 negative
+That run predates later additions (the filename-reference pins in §3.1, both
+audits' fixes, and the ghost test). The suite is now **337 tests** (334 unit + 3 negative
 control). The clean-environment claim is about the two requirements files being
-sufficient, which is unaffected — but re-run it for the current count rather than
-trusting this number.
+sufficient, which is unaffected — but it was last measured at 152 tests, so
+re-run it for the current count rather than trusting either number. The last
+attempt to re-run it was stopped before it finished, so no clean-environment
+result exists for the current tree.
 
 This matters because of defect **D8**: `pytest` was imported by the tests but
 declared nowhere — it had been installed by hand. A fresh clone would not have
@@ -152,7 +162,7 @@ summary here:
 of F2 and F5.** `errors.py` and `tasks.md` both cited
 `tests/unit/test_errors_schema.py` as the schema-validating guard. **That file had
 never been written.** A cited-but-absent test cannot fail, so F2 and F5 ran green
-the whole time. The file is now real (39 tests) and a negative control proves it
+the whole time. The file is now real (54 tests) and a negative control proves it
 FAILS (6, then 8) when F2 and F5 are reintroduced. This is the same orphan-spec
 class the V1.8 contract review found eight instances of — and I committed it
 again, in prose, in two files.
@@ -171,6 +181,109 @@ changed `sort_operations`, so the canonical digest output changed. The baseline
 `plan_content` digest is now `b9aa87e27b0e2c513d23…`. `EVIDENCE.json` shows
 `baseline_plan_content.digest == shuffled_operations_10_seeds.digest` — the direct
 proof F4 is fixed. No document hardcodes the old value.
+
+### 2.3 A second audit, which found two P0 defects the first missed
+
+A second independent audit ran against the same module and found **two defects
+neither I nor the first audit had seen**, both P0, both poisoning the safety
+premises of every module that would be built on this one. I reproduced both
+against a clean tree with a standalone probe before fixing anything — same
+discipline as §2.2. A subagent report is still a claim.
+
+**P0-1 — the store never validated content against the contract.**
+
+`put_content` checked that `plan_id`/`plan_version` were present and that both
+digest identities held. That was all. The digest is content-addressed, so anyone
+who fabricates a plan can re-sign it, which means digest consistency proves
+content was not altered *after* signing and never proves the content is *legal*.
+
+Five payloads, each mutated and then **re-signed so the digest check passed**,
+were all accepted and readable via `get_content`:
+
+| injected | contract verdict | store (before) |
+|---|---|---|
+| unknown top-level field | `Additional properties are not allowed` | accepted |
+| `plan_version=True` | `True is not of type 'integer'` | accepted |
+| `kpis.on_time_delivery="high"` | same | accepted |
+| required `kpis` block deleted | `'kpis' is a required property` | accepted |
+| unknown field in `operations[0]` | `Additional properties are not allowed` | accepted |
+
+Worse, the lifecycle `ts` argument was stored verbatim into `updated_at` with no
+format check, so `"not a timestamp at all"`, `""`, `None`, `12345` and
+`"2026-99-99T99:99:99Z"` all passed — against a field the contract types as
+`format: date-time`.
+
+**The test that should have caught this existed and was green.**
+`test_unknown_field_is_rejected_by_the_schema` asserted only
+`not fixtures.is_valid(polluted, "plan_content")`. It never called `PlanStore`.
+Its name claimed the store rejects unknown fields; the store accepted them. That
+is the ghost-test failure mode again, one layer down: not a missing file this
+time, but a test that proves something other than what it is cited for.
+
+Fix: new `src/planpilot/validation/` package — one production validator, compiled
+once per `$defs` entry and memoised, with `format_checker` enabled (without it,
+jsonschema treats `format` as an annotation and accepts garbage timestamps).
+Every store write boundary now validates through it, and `tests/_fixtures.py` is
+no longer on any production path. `bool` versions are refused explicitly:
+`hash(True) == hash(1)`, so a bool would have collided with version 1 as a dict
+key. `transition` and `create_lifecycle` build a candidate, validate it, then
+replace — the old code mutated the stored record in place, so a rejected write
+could leave it half-changed.
+
+**P0-2 — `expected_plan_version` was a tautology.**
+
+It was compared against the caller's own `plan_version` argument. Both values
+came from the caller, so the check could only ever catch a caller contradicting
+itself. Reproduced: with v1 `APPROVED` (approval set `APR-1` bound) and v2
+stored, `transition(pid, 1, "PUBLISHED", expected_plan_version=1)` **published
+v1**. The docstring claimed this "is what stops a stale approval set from
+publishing a regenerated plan" and cited
+`security_controls.approvals_bound_to_plan_version_and_digest` as authority. The
+claim was false — a documentation defect on top of the behavioural one, the same
+pairing as F12.
+
+Fix: compared against `current_active_version()`, the store's own view. `APPROVED`
+and `PUBLISHED` additionally require the target to be the active version, so
+omitting `expected_plan_version` no longer bypasses the protection. The terminal
+check runs *first*: reporting "wrong version" for a superseded record would
+advise a retry that can never succeed.
+
+New `commit_new_version()` performs validate → continuity → write content →
+create lifecycle → supersede previous → record invalidation event, rolling back
+entirely on any failure. `put_content()` deliberately stays a low-level primitive
+that does **not** supersede — writing content and retiring a version are separate
+concerns, and bundling them inside `put_content` would make an idempotent retry
+path able to invalidate approvals. Both halves of that split are pinned by test
+so a refactor cannot "helpfully" reunite them. Supersede events now carry
+`invalidation_cause` from the contract's closed enum.
+
+**P1 — `load_state` hardened.** Duplicate `(plan_id, plan_version)` records were
+silently collapsed to the last by a dict comprehension, which is a swap rather
+than a load; `superseded_events` were restored with no validation at all, so a
+fabricated event for a nonexistent plan would have been handed to the approval
+service to act on. Now: the envelope is validated against a closed module-owned
+schema, duplicates are refused, and every event must reference content present in
+the dump with a matching digest.
+
+**What the negative control then caught in my own fix.** After adding ten
+mutations for the new defences, one **escaped**: reverting
+`expected_plan_version != active` back to the tautological `!= version` left the
+suite green. Every P0-2 test I had written used `PUBLISHED` or `APPROVED`, which
+the *other* new gate blocks on its own — so the OCC check itself was untested.
+Defence in depth hid a hole in one of the layers. Pinned with a `BLOCKED`
+transition, which only OCC can catch. Now 30 mutations, 29 caught / 0 escaped /
+0 broken.
+
+**Two audit claims I checked and corrected.** It said a malformed lifecycle could
+be created directly with `status="PUBLISHED"`. Half right: the status enum *was*
+already validated, and `PUBLISHED` is a legal enum member, so this is not a
+schema violation — real publication authority is meant to be gated later by the
+`publish_plan` tool, not by the store. Its claim about unvalidated timestamps was
+right, and worse than stated.
+
+These P0s are **not** in the F-series numbering: they come from a separate audit
+with separate findings, and `IMPLEMENTATION_NOTES.md` records them as P0-1/P0-2
+to keep the two audits distinguishable.
 
 ---
 
