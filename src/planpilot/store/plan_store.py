@@ -45,6 +45,7 @@ from .digest import assert_digest_consistent, canonical_json, canonical_plan_dig
 from .errors import (
     DigestMismatchError,
     IdempotencyConflictError,
+    InvalidContentError,
     LifecycleAlreadyExistsError,
     PlanNotFoundError,
     TransitionNotAllowedError,
@@ -102,8 +103,14 @@ class PlanStore:
         plan_id = content.get("plan_id")
         plan_version = content.get("plan_version")
         if not isinstance(plan_id, str) or not isinstance(plan_version, int):
-            raise PlanNotFoundError(
-                plan_id=str(plan_id), plan_version=None, lookup_kind="plan_content_key"
+            # Malformed content is structurally invalid, NOT a lookup failure.
+            # STATE_NOT_FOUND would be the wrong code (nothing was looked up);
+            # "plan_content_key" was never in the lookup_kind enum anyway (F2).
+            raise InvalidContentError(
+                str(plan_id), plan_version if isinstance(plan_version, int) else -1,
+                json_path="plan_id" if not isinstance(plan_id, str) else "plan_version",
+                reason=f"plan_id/plan_version must be str/int, got "
+                       f"{type(plan_id).__name__}/{type(plan_version).__name__}",
             )
 
         # Verify before storing. Raises DigestMismatchError with contract-shaped
@@ -113,8 +120,13 @@ class PlanStore:
         key = (plan_id, plan_version)
         if key in self._content:
             existing = self._content[key]
-            if canonical_json(existing) == canonical_json(content):
-                return digest  # identical bytes: idempotent retry
+            # Compare DIGESTS, not canonical_json. The digest sorts operations
+            # (canonical_serialization), canonical_json does not — so two plans
+            # differing only in operation order hash identically and ARE the same
+            # content. Comparing canonical_json would wrongly raise an idempotency
+            # conflict on a reordered-but-equivalent retry (audit F3).
+            if existing["plan_digest"] == digest:
+                return digest  # identical content: idempotent retry
             # Same key, different content: exactly what IDEMPOTENCY_CONFLICT is
             # registered for. PLAN_VERSION_CONFLICT would be wrong here — it
             # means "you expected another version", and expected==actual here.
@@ -233,7 +245,7 @@ class PlanStore:
     def transition(
         self,
         plan_id: str,
-        plan_version: int | None,
+        plan_version: int,
         new_status: str,
         ts: str,
         approval_set_id: str | None = None,
@@ -241,6 +253,14 @@ class PlanStore:
         expected_plan_version: int | None = None,
     ) -> dict:
         """Change lifecycle status.
+
+        `plan_version` is REQUIRED and must be an int — never None. Audit finding
+        F11: with `plan_version=None` this resolved to `max(versions)`, so
+        `transition(pid, None, "PUBLISHED")` would publish whatever version
+        happened to be newest, which may be a regenerated-but-unapproved one.
+        Publishing must name the exact version an approval set is bound to
+        (security_controls.approvals_bound_to_plan_version_and_digest). Reads may
+        still default to latest; a state MUTATION may not.
 
         `expected_plan_version` is optimistic concurrency control: if supplied and
         it does not match the resolved version, PLAN_VERSION_CONFLICT is raised and
@@ -250,6 +270,14 @@ class PlanStore:
         The transition GRAPH is not re-implemented here — workflow.transitions owns
         it. Only the status enum is checked.
         """
+        if not isinstance(plan_version, int) or isinstance(plan_version, bool):
+            raise InvalidContentError(
+                str(plan_id), plan_version if isinstance(plan_version, int) else -1,
+                json_path="plan_version",
+                reason=f"a state mutation must name an explicit int version, got "
+                       f"{plan_version!r}; None would publish the latest version, "
+                       f"which may be unapproved",
+            )
         version = self._resolve_version(plan_id, plan_version)
         if expected_plan_version is not None and expected_plan_version != version:
             raise VersionConflictError(plan_id, expected_plan_version, version)
@@ -339,23 +367,65 @@ class PlanStore:
         return text
 
     def load_state(self, path: str | Path) -> None:
-        """Restore a dumped state, re-verifying every digest.
+        """Restore a dumped state, re-verifying every digest AND every lifecycle record.
 
         A dump whose content no longer hashes to its declared digest is refused —
         loading it would resurrect a corrupted plan into the store of record.
+
+        Audit finding F1: the first version validated content records but restored
+        lifecycle records with NO checks, so a hand-edited dump could inject a
+        lifecycle whose status is not in the enum, or whose plan_digest disagrees
+        with the content it points at — resurrecting a plan as PUBLISHED/APPROVED
+        when its content was never approved. Lifecycle is now validated: status
+        against the enum, and plan_digest against the content record it binds to.
+
+        Nothing is written until every record passes, so a bad dump cannot
+        half-load and leave the store inconsistent.
         """
         raw = Path(path).read_bytes().decode("utf-8")
         state = json.loads(raw)
 
         content_records = state.get("content", [])
+        lifecycle_records = state.get("lifecycle", [])
+
+        # Pass 1: verify every content record BEFORE anything is inserted.
         for record in content_records:
-            # verify BEFORE inserting, so a bad dump cannot half-load
             assert_digest_consistent(record)
 
-        self._content = {(r["plan_id"], r["plan_version"]): copy.deepcopy(r) for r in content_records}
+        # Pass 2: verify every lifecycle record against the enum and against the
+        # content it binds to. Done before insertion so a bad dump cannot
+        # half-load.
+        content_by_key = {(r["plan_id"], r["plan_version"]): r for r in content_records}
+        for rec in lifecycle_records:
+            status = rec.get("status")
+            if status not in LIFECYCLE_STATUSES:
+                raise InvalidContentError(
+                    str(rec.get("plan_id")), rec.get("plan_version", -1),
+                    json_path="lifecycle.status",
+                    reason=f"{status!r} is not in $defs.plan_lifecycle.properties.status.enum",
+                )
+            key = (rec.get("plan_id"), rec.get("plan_version"))
+            bound = content_by_key.get(key)
+            if bound is None:
+                # A lifecycle record pointing at absent content is exactly the
+                # inconsistency create_lifecycle forbids on the live path.
+                raise PlanNotFoundError(
+                    str(rec.get("plan_id")), rec.get("plan_version"),
+                    lookup_kind="plan_content",
+                )
+            if rec.get("plan_digest") != bound.get("plan_digest"):
+                raise DigestMismatchError(
+                    plan_id=str(rec.get("plan_id")),
+                    plan_version=rec.get("plan_version", -1),
+                    expected_plan_digest=rec.get("plan_digest"),
+                    recomputed_plan_digest=bound.get("plan_digest"),
+                )
+
+        # Pass 3: both passes clean — commit the load.
+        self._content = {k: copy.deepcopy(v) for k, v in content_by_key.items()}
         self._lifecycle = {
             (r["plan_id"], r["plan_version"]): copy.deepcopy(r)
-            for r in state.get("lifecycle", [])
+            for r in lifecycle_records
         }
         self._superseded = list(state.get("superseded_events", []))
 

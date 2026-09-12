@@ -6,7 +6,7 @@ Every exception here maps to exactly one code in
 that schema at construction time, so the tool layer can emit a `tool_error`
 without re-deriving or re-validating anything.
 
-All three codes are non-retryable in the registry. That is asserted in
+All codes raised here are non-retryable in the registry. That is asserted in
 tests/unit/test_errors_schema.py rather than assumed here.
 
 No new error code may be invented. If none of these fits, that is a contract
@@ -16,10 +16,13 @@ rule 3.
 
 from __future__ import annotations
 
+import re
+
 __all__ = [
     "StoreError",
     "StoreInvariantError",
     "CanonicalizationError",
+    "InvalidContentError",
     "DigestMismatchError",
     "VersionConflictError",
     "IdempotencyConflictError",
@@ -27,6 +30,8 @@ __all__ = [
     "LifecycleAlreadyExistsError",
     "PlanNotFoundError",
     "RETRYABILITY",
+    "LOOKUP_KINDS",
+    "DIGEST_RE",
 ]
 
 # Mirror of tool_execution_contract.retryability_registry for the codes this
@@ -39,6 +44,23 @@ RETRYABILITY: dict[str, bool] = {
     "PLAN_DIGEST_MISMATCH": False,
     "IDEMPOTENCY_CONFLICT": False,
 }
+
+# Mirror of $defs.error_details_state_not_found.properties.lookup_kind.enum.
+# A PlanNotFoundError built with any other value produces details that FAIL the
+# schema, i.e. an unemittable tool_error. Mirrored + pinned by test, exactly like
+# RETRYABILITY and LIFECYCLE_STATUSES. The first version of this module defaulted
+# to "plan" and plan_store passed "plan_content_key" — neither is a member, so
+# every STATE_NOT_FOUND from those paths was an invalid tool_error (audit F2).
+LOOKUP_KINDS: frozenset[str] = frozenset(
+    {"state", "plan_content", "plan_lifecycle", "approval_set", "audit_record"}
+)
+
+# $defs.plan_content.properties.plan_digest.pattern — a digest is 64 lowercase hex.
+# error_details_plan_digest_mismatch requires BOTH sides to match it, so a
+# mismatch error can only be constructed from two well-formed digests. A content
+# whose declared digest is missing or malformed is structurally invalid, not a
+# mismatch, and must raise InvalidContentError instead (audit F5).
+DIGEST_RE = re.compile(r"^[a-f0-9]{64}$")
 
 
 class StoreError(Exception):
@@ -96,6 +118,47 @@ class CanonicalizationError(StoreError):
         self.json_path = json_path
 
 
+class InvalidContentError(StoreError):
+    """Content is structurally invalid, not merely mismatched.
+
+    Raised when a plan_content's declared digest is missing or malformed (not 64
+    lowercase hex). This is DISTINCT from DigestMismatchError:
+
+      DigestMismatchError  = two well-formed digests disagree
+      InvalidContentError  = the content was never validly addressable
+
+    Forcing the second into the first produces details that FAIL
+    $defs.error_details_plan_digest_mismatch — `expected_plan_digest` has
+    pattern ^[a-f0-9]{64}$, and str(None) == "None" does not match. That would be
+    an unemittable tool_error. This is audit finding F5.
+
+    Maps to INVALID_INPUT (the content handed to the store was not valid).
+    details schema: $defs.error_details_invalid_input
+      required: field_errors, rejected_entity_type, rejected_entity_id
+    """
+
+    code = "INVALID_INPUT"
+
+    def __init__(self, plan_id: str, plan_version: int, *,
+                 json_path: str = "plan_digest", reason: str = "malformed") -> None:
+        msg = (f"plan {plan_id} v{plan_version} has a structurally invalid "
+               f"{json_path}: {reason}")
+        super().__init__(msg, {
+            "field_errors": [{
+                "code": "INVALID_VALUE",
+                "severity": "ERROR",
+                "entity_type": "plan_content",
+                "entity_id": plan_id,
+                "field": json_path,
+                "message": msg,
+            }],
+            "rejected_entity_type": "plan_content",
+            "rejected_entity_id": plan_id,
+        })
+        self.plan_id = plan_id
+        self.plan_version = plan_version
+
+
 class DigestMismatchError(StoreError):
     """Stored/declared digest does not match the recomputed digest.
 
@@ -117,6 +180,20 @@ class DigestMismatchError(StoreError):
         expected_plan_digest: str,
         recomputed_plan_digest: str,
     ) -> None:
+        # The schema requires BOTH to match ^[a-f0-9]{64}$. Constructing this
+        # error with anything else (most commonly str(None) == "None") yields an
+        # unemittable tool_error, so it is refused at construction rather than
+        # discovered by a validator downstream. Audit finding F5.
+        for name, value in (
+            ("expected_plan_digest", expected_plan_digest),
+            ("recomputed_plan_digest", recomputed_plan_digest),
+        ):
+            if not isinstance(value, str) or not DIGEST_RE.match(value):
+                raise InvalidContentError(
+                    plan_id, plan_version, json_path=name,
+                    reason=f"{value!r} is not a 64-char lowercase hex digest",
+                )
+
         super().__init__(
             f"plan {plan_id} v{plan_version} digest mismatch: "
             f"declared {expected_plan_digest[:16]}… != recomputed {recomputed_plan_digest[:16]}…",
@@ -259,7 +336,17 @@ class PlanNotFoundError(StoreError):
 
     code = "STATE_NOT_FOUND"
 
-    def __init__(self, plan_id: str, plan_version: int | None = None, lookup_kind: str = "plan") -> None:
+    def __init__(self, plan_id: str, plan_version: int | None = None, lookup_kind: str = "plan_content") -> None:
+        # lookup_kind is a closed enum in the schema. A value outside it produces
+        # an unemittable tool_error, so it is refused here rather than at emit
+        # time. Audit finding F2: the first version defaulted to "plan" and
+        # plan_store passed "plan_content_key" — neither is a member.
+        if lookup_kind not in LOOKUP_KINDS:
+            raise InvalidContentError(
+                str(plan_id), plan_version if isinstance(plan_version, int) else -1,
+                json_path="lookup_kind",
+                reason=f"{lookup_kind!r} is not one of {sorted(LOOKUP_KINDS)}",
+            )
         detail = f" v{plan_version}" if plan_version is not None else " (latest)"
         super().__init__(
             f"no {lookup_kind} {plan_id}{detail} in store",

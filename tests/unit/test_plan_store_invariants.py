@@ -20,6 +20,7 @@ from planpilot.store import LIFECYCLE_STATUSES, PlanStore, canonical_plan_digest
 from planpilot.store.errors import (
     DigestMismatchError,
     IdempotencyConflictError,
+    InvalidContentError,
     LifecycleAlreadyExistsError,
     PlanNotFoundError,
     StoreError,
@@ -381,5 +382,15 @@ class TestLookupErrors:
             PlanStore().put_content("not a dict")
 
     def test_put_content_rejects_a_missing_key(self):
-        with pytest.raises(PlanNotFoundError):
+        """Malformed content is INVALID_INPUT, not STATE_NOT_FOUND (audit F2).
+
+        The first version raised PlanNotFoundError with lookup_kind
+        "plan_content_key" — a value outside the schema enum, so an unemittable
+        tool_error. Nothing was looked up; the payload was simply invalid.
+        """
+        with pytest.raises(InvalidContentError) as exc:
             PlanStore().put_content({"plan_id": "X"})
+        d = exc.value.details  # must satisfy $defs.error_details_invalid_input
+        assert d["rejected_entity_type"] == "plan_content"
+        assert exc.value.code == "INVALID_INPUT"
+        assert exc.value.retryable is False

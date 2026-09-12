@@ -29,7 +29,7 @@ import json
 import math
 from typing import Any
 
-from .errors import CanonicalizationError, DigestMismatchError
+from .errors import DIGEST_RE, CanonicalizationError, DigestMismatchError, InvalidContentError
 
 __all__ = [
     "OPERATION_SORT_KEY_FIELDS",
@@ -104,16 +104,26 @@ def canonical_json(obj: Any, *, _path: str = "", _entity_id: str | None = None) 
 
 
 def sort_operations(operations: list[dict]) -> list[dict]:
-    """Return operations ordered by the contract's sort key.
+    """Return operations ordered by the contract's sort key, as a TOTAL order.
 
-    The key is `(start_time, machine_id, order_id, lot_no, operation_no)`.
+    The contract key is `(start_time, machine_id, order_id, lot_no, operation_no)`.
     `start_time` is RFC 3339 with a fixed `+08:00` offset, so lexicographic
     comparison of the string equals chronological comparison — no parsing, and
     therefore no dependence on the host locale or timezone database.
 
-    Python's sort is stable, so operations that tie on the full key keep their
-    input order. Ties on all five fields mean genuinely identical placement,
-    which the contract permits.
+    Audit finding F4/F12: the contract key alone is NOT a total order. Two
+    operations can tie on all five fields yet differ in other fields (duration,
+    worker, material allocation). Python's sort is stable, so such ties kept their
+    INPUT order — which made the digest depend on input order and broke
+    plan_store.retention ("digests are recomputable from stored content at any
+    time"). Measured before fixing: reordering two tied ops changed the digest.
+
+    Fix: after the five contract fields, break remaining ties with the canonical
+    JSON of the whole operation. That is a deterministic function of content, not
+    of position, so the result is now a total order and the digest is
+    input-order-independent. The contract's five-field key still governs the
+    primary order; the tiebreaker only decides among operations the contract
+    already considers equivalent.
 
     Missing keys sort as empty string / 0 rather than raising: the digest layer
     must not re-implement schema validation (that is validation/factory_state.py
@@ -121,10 +131,14 @@ def sort_operations(operations: list[dict]) -> list[dict]:
     digest; schema rejection happens elsewhere.
     """
     def key(op: dict) -> tuple:
-        return tuple(
+        primary = tuple(
             op.get(f, "" if f in ("start_time", "machine_id", "order_id") else 0)
             for f in OPERATION_SORT_KEY_FIELDS
         )
+        # Tiebreaker: canonical JSON of the operation. canonical_json is itself
+        # deterministic (sorted keys, no whitespace), so equal content always
+        # sorts equal and the order no longer depends on input position.
+        return primary + (canonical_json(op),)
 
     return sorted(operations, key=key)
 
@@ -157,6 +171,18 @@ def canonical_plan_digest(content: dict) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _safe_version(content: dict) -> int:
+    """plan_version for error reporting only — never for keys or logic.
+
+    The first version called int(content.get("plan_version", -1)) inline, which
+    raises ValueError on a non-numeric version and MASKS the DigestMismatchError
+    the caller actually needed (audit finding F6). Reporting a version must not
+    be able to fail.
+    """
+    v = content.get("plan_version")
+    return v if isinstance(v, int) and not isinstance(v, bool) else -1
+
+
 def assert_digest_consistent(content: dict) -> str:
     """Verify both digest identities and return the recomputed digest.
 
@@ -168,7 +194,11 @@ def assert_digest_consistent(content: dict) -> str:
 
     Raises DigestMismatchError with the contract-shaped details
     ($defs.error_details_plan_digest_mismatch: expected_plan_digest,
-    recomputed_plan_digest).
+    recomputed_plan_digest) when two WELL-FORMED digests disagree.
+
+    Raises InvalidContentError when a declared digest is missing or malformed:
+    that is not a mismatch, and PLAN_DIGEST_MISMATCH's schema requires both sides
+    to be 64-hex, so forcing it would build an unemittable tool_error (audit F5).
 
     A plan whose digest does not recompute is exactly what a fabricated or
     corrupted tool result looks like, so this is checked on write, not on read.
@@ -176,21 +206,35 @@ def assert_digest_consistent(content: dict) -> str:
     recomputed = canonical_plan_digest(content)
     declared = content.get("plan_digest")
 
+    if not isinstance(declared, str) or not DIGEST_RE.match(declared):
+        raise InvalidContentError(
+            str(content.get("plan_id", "")),
+            _safe_version(content),
+            json_path="plan_digest",
+            reason=f"declared digest {declared!r} is not 64-char lowercase hex",
+        )
     if declared != recomputed:
         raise DigestMismatchError(
             plan_id=str(content.get("plan_id", "")),
-            plan_version=int(content.get("plan_version", -1)),
-            expected_plan_digest=str(declared),
+            plan_version=_safe_version(content),
+            expected_plan_digest=declared,
             recomputed_plan_digest=recomputed,
         )
 
     engine = content.get("engine") or {}
     canonical_hash = engine.get("canonical_plan_hash") if isinstance(engine, dict) else None
+    if not isinstance(canonical_hash, str) or not DIGEST_RE.match(canonical_hash):
+        raise InvalidContentError(
+            str(content.get("plan_id", "")),
+            _safe_version(content),
+            json_path="engine.canonical_plan_hash",
+            reason=f"engine hash {canonical_hash!r} is not 64-char lowercase hex",
+        )
     if canonical_hash != recomputed:
         raise DigestMismatchError(
             plan_id=str(content.get("plan_id", "")),
-            plan_version=int(content.get("plan_version", -1)),
-            expected_plan_digest=str(canonical_hash),
+            plan_version=_safe_version(content),
+            expected_plan_digest=canonical_hash,
             recomputed_plan_digest=recomputed,
         )
 

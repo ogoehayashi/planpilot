@@ -194,9 +194,12 @@ _NEGATIVE_TEST_DIR = "tests/unit/test_closed_vocabularies.py"
 # The bypass-regression module pins the ten bypasses an independent attack
 # found, so it must contain the same fabricated tokens as fixtures.
 _BYPASS_TEST_FILE = "tests/unit/test_guard_bypass_regressions.py"
-# Both files are SCANNED (neither is in NEGATIVE_FIXTURE_PATHS), so the
+# The audit-fix pin module injects a fabricated lifecycle status to prove
+# load_state refuses it (finding F1), so it carries one fixture token.
+_PIN_TEST_FILE = "tests/unit/test_audit_fixes_pinned.py"
+# All three files are SCANNED (none is in NEGATIVE_FIXTURE_PATHS), so the
 # allowlist mechanism itself is exercised on every run.
-_FIXTURE_FILES = (_NEGATIVE_TEST_DIR, _BYPASS_TEST_FILE)
+_FIXTURE_FILES = (_NEGATIVE_TEST_DIR, _BYPASS_TEST_FILE, _PIN_TEST_FILE)
 
 # Deliberately MINIMAL. Three entries were removed after the self-checks proved
 # them dead:
@@ -268,6 +271,14 @@ ALLOWED_LOCAL: dict[str, tuple[str, tuple[str, ...]]] = {
     "ANOTHER_ONE": (
         "asserts __all__ export names are not treated as vocabulary claims",
         (_NEGATIVE_TEST_DIR,),
+    ),
+    # A fabricated lifecycle status injected into a dumped state to prove
+    # load_state refuses it (audit finding F1). Not a contract status, by design:
+    # the test's whole point is that an out-of-enum status is rejected on load.
+    "HACKED_PUBLISHED": (
+        "fabricated lifecycle status proving load_state rejects out-of-enum "
+        "records (audit F1)",
+        (_PIN_TEST_FILE,),
     ),
 }
 
