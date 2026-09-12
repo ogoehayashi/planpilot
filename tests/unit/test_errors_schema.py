@@ -109,6 +109,35 @@ class TestEveryErrorCarriesSchemaValidDetails:
         d["expected_plan_version"] = 999
         assert err.details["expected_plan_version"] == 3
 
+    @pytest.mark.parametrize("cls,args,kwargs", CONCRETE_ERRORS,
+                             ids=lambda v: getattr(v, "__name__", None) or "")
+    def test_an_extra_details_field_fails_validation(self, cls, args, kwargs):
+        """Task 2.2: prove these schema tests CAN fail.
+
+        A test that only ever asserts `is valid` is theatre — it would stay green
+        against a schema with additionalProperties: true, or against a validator
+        that was silently never wired up. Every $defs.error_details_* entry closes
+        its object, so injecting one unknown key must flip each to invalid. If any
+        of these passes (i.e. the polluted details stay valid), the schema is not
+        actually closed and the positive assertions above mean nothing.
+
+        This is the exact assertion task 2.2 asked for and that the first version
+        of this file omitted — the file existed, but this half of the requirement
+        did not, which is the same shape as the ghost-test defect (F13).
+        """
+        err = cls(*args, **kwargs)
+        def_name = _def_name_for_code(err.code)
+        # precondition: the details are valid as emitted
+        assert fixtures.is_valid(err.details, def_name), \
+            f"{cls.__name__}.details were invalid before pollution"
+        polluted = dict(err.details)
+        polluted["__field_that_is_not_in_the_contract"] = "x"
+        assert not fixtures.is_valid(polluted, def_name), (
+            f"{cls.__name__}: adding an unknown field did NOT fail validation, so "
+            f"$defs/{def_name} is not closed (additionalProperties: false) and the "
+            f"positive assertions in this class are not proving anything"
+        )
+
 
 class TestLookupKindIsClosed:
     """F2 specifically: lookup_kind must be a contract enum member, always."""
