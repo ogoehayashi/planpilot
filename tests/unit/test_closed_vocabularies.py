@@ -230,23 +230,45 @@ class TestAllowlistHygiene:
             assert paths, f"{token} has no path scope"
 
     def test_allowlist_is_path_scoped_not_global(self, guard):
-        """The whole point: a token allowed in tests/ is still caught in src/."""
+        """The whole point: a token allowed in a fixture file is still caught in src/.
+
+        Asserts the real invariant rather than a hardcoded filename: every entry is
+        scoped to at least one fixture file under tests/, and classify() — which
+        knows nothing about paths — still flags the token. If classify() ever
+        returned None for an allowlisted token, the allowlist would have leaked into
+        a global exemption.
+        """
         for token, (_reason, paths) in guard.ALLOWED_LOCAL.items():
-            # permitted under its declared path
-            assert any(p == "tests/unit/test_closed_vocabularies.py" for p in paths), token
-            # ...but classify() knows nothing about paths, so it still flags it
+            assert paths, f"{token} has no path scope"
+            assert all(p.startswith("tests/") for p in paths), (
+                f"{token} is scoped outside tests/ ({paths}); a production-code "
+                f"exemption would defeat the guard"
+            )
             assert guard.classify(token) is not None, f"{token} is globally exempted"
 
-    def test_the_three_fixtures_are_used_by_this_file(self, guard):
-        """Guards against the allowlist rotting into dead entries again."""
-        source = Path(__file__).read_text(encoding="utf-8")
-        for token in guard.ALLOWED_LOCAL:
-            assert token in source, f"{token} is allowlisted but unused here"
+    def test_every_allowlisted_token_appears_in_a_file_it_is_scoped_to(self, guard):
+        """Guards against the allowlist rotting into dead entries again.
 
-    def test_negative_fixture_paths_do_not_include_this_file(self, guard):
-        """This file must stay scanned, or the allowlist is never exercised."""
-        rel = Path(__file__).resolve().relative_to(guard.ROOT).as_posix()
-        assert not any(rel == p or rel.startswith(p) for p in guard.NEGATIVE_FIXTURE_PATHS)
+        Each token must actually appear in at least one of the files its entry
+        names — otherwise the entry can never fire (the D3 defect class).
+        """
+        for token, (_reason, paths) in guard.ALLOWED_LOCAL.items():
+            found_in = [p for p in paths if (guard.ROOT / p).exists()
+                        and token in (guard.ROOT / p).read_text(encoding="utf-8")]
+            assert found_in, (
+                f"{token} is allowlisted for {paths} but appears in none of them"
+            )
+
+    def test_negative_fixture_paths_do_not_include_the_fixture_files(self, guard):
+        """The fixture modules must stay SCANNED, or the allowlist is never exercised."""
+        for rel in (
+            Path(__file__).resolve().relative_to(guard.ROOT).as_posix(),
+            "tests/unit/test_closed_vocabularies.py",
+            "tests/unit/test_guard_bypass_regressions.py",
+        ):
+            assert not any(rel == p or rel.startswith(p) for p in guard.NEGATIVE_FIXTURE_PATHS), (
+                f"{rel} is skipped entirely, so its allowlist entries are never tested"
+            )
 
 
 class TestGuardRunsCleanOnTheRepository:

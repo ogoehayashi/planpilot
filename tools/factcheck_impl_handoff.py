@@ -51,11 +51,30 @@ def run(args, cwd=ROOT):
 
 PY = r"E:\PlanPilot-Hackathon\contract-review\.venv\Scripts\python.exe"
 
-print("=== A. git claims ===")
-rc, out = run(["git", "log", "--oneline"])
-commits = [l for l in out.strip().splitlines() if l.strip()]
-ck(len(commits) == 6, f"6 commits (actual {len(commits)})")
-ck("98ee9a8" in text and commits[0].startswith("98ee9a8"), f"HEAD is 98ee9a8 (actual {commits[0][:7]})")
+print("=== A. git claims (snapshot-based, not live) ===")
+# The doc names a snapshot commit and states counts AS OF it. A committed document
+# cannot state the HEAD of its own commit, so equality against the live tip is
+# unsatisfiable by construction — the same self-reference a digest avoids by
+# excluding itself. Verify instead that the named snapshot is real and is an
+# ancestor of (or equal to) HEAD, and that the stated counts match that snapshot.
+m = re.search(r"Snapshot for the counts in this document: commit `([0-9a-f]{7,40})`", text)
+ck(m is not None, "doc names a snapshot commit")
+if m:
+    snap = m.group(1)
+    rc_full, full = run(["git", "rev-parse", snap])
+    ck(rc_full == 0, f"snapshot {snap[:7]} resolves to a real commit")
+    rc_anc, _ = run(["git", "merge-base", "--is-ancestor", snap, "HEAD"])
+    ck(rc_anc == 0, f"snapshot {snap[:7]} is an ancestor of (or equal to) HEAD")
+    rc_n, n_out = run(["git", "rev-list", "--count", snap])
+    snap_commits = int(n_out) if rc_n == 0 else -1
+    mc = re.search(r"\((\d+) commits,", text)
+    ck(mc and int(mc.group(1)) == snap_commits,
+       f"doc's commit count {mc.group(1) if mc else '?'} == {snap_commits} at the snapshot")
+    rc_t, t_out = run(["git", "ls-tree", "-r", "--name-only", snap])
+    snap_tracked = len([l for l in t_out.splitlines() if l.strip()]) if rc_t == 0 else -1
+    mt = re.search(r"(\d+) files tracked", text)
+    ck(mt and int(mt.group(1)) == snap_tracked,
+       f"doc's tracked count {mt.group(1) if mt else '?'} == {snap_tracked} at the snapshot")
 rc, out = run(["git", "status", "--porcelain", "src/planpilot/store"])
 # Scope is src/planpilot/store on purpose, NOT the whole repo. The point of this
 # check is that the negative control restores every mutation it injects into the
@@ -65,10 +84,10 @@ extra = [l for l in out.strip().splitlines() if l.strip()]
 ck(not extra, f"store sources clean — negative control restored them (dirty: {extra})")
 rc, out = run(["git", "remote", "-v"])
 ck(out.strip() == "" and "no remote yet" in text, "no remote configured")
+# live tracked count is informational only; the doc states the SNAPSHOT count,
+# which section A already verified. Do not assert equality against the live tip.
 rc, out = run(["git", "ls-files"])
 tracked = [l for l in out.strip().splitlines() if l.strip()]
-ck(f"{len(tracked)} files tracked in git" in text,
-   f"doc states the tracked file count {len(tracked)}")
 
 print("\n=== B. line-count claims (table parsed from the doc, recomputed from disk) ===")
 # Parse the markdown table rows rather than hardcoding labels: a checker that
@@ -125,9 +144,8 @@ ck(m is not None, "Scale sentence is present and well-formed")
 if m:
     ck(int(m.group(1).replace(",", "")) == doc_total_lines, f"Scale lines {m.group(1)} == subject total {doc_total_lines}")
     ck(int(m.group(2)) == doc_total_files, f"Scale files {m.group(2)} == subject total {doc_total_files}")
-mt = re.search(r"(\d+) files tracked in git", text)
-ck(mt is not None and int(mt.group(1)) == len(tracked),
-   f"Scale tracked {mt.group(1) if mt else '?'} == git ls-files {len(tracked)}")
+# the Scale sentence's tracked count is the snapshot value (verified in A);
+# it may legitimately differ from the live tip, so no equality check here.
 
 print("\n=== C. test-count claims (parsed from the doc, compared to a live run) ===")
 # Nothing here is hardcoded: each claimed number is read out of the doc's

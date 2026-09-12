@@ -139,20 +139,39 @@ PREFIXED_VALID: dict[str, set[str]] = {
 # The token shape.
 #   (?<![.\w])  excludes dotted attribute references in prose
 #               ("see planpilot.CONTRACT_SHA256")
-#   (?!\.\w)    excludes FILENAME references ("IMPLEMENTATION_NOTES.md",
+#   (?!\.(md|json|…)) excludes FILENAME references ("IMPLEMENTATION_NOTES.md",
 #               "REVIEW_HANDOFF_FOR_CODEX.md"). A token followed by a dot and a
 #               word char is naming a file, not claiming a vocabulary value.
 #               This was added after the guard flagged six filename stems in
 #               tools/factcheck_impl_handoff.py and thereby blocked the whole
 #               test suite — a false positive in the guard is worse than a miss,
 #               because it trains people to override it.
-#               A trailing sentence period still matches: "MISMATCH." is a dot
-#               followed by whitespace, not by \w.
+#
+#               The first version used (?!\.\w) — any dot+word-char. That was too
+#               generous and was confirmed exploitable two ways:
+#                 "PLAN_DIGEST_MISMATCHED.md"[:-3]  restores the fabrication
+#                 "Error MISMATCHED.After retry EVAL-031.Failed"  fully invisible
+#               So the suffix must now be a KNOWN document extension. A trailing
+#               sentence period still matches, because "MISMATCHED." is a dot
+#               followed by whitespace or a quote, not by an extension.
 #   (?![\w])    excludes mid-word matches
+_DOC_EXT = r"(?:md|markdown|json|py|txt|ya?ml|rst|csv|tsv|toml|cfg|ini|log|html|ipynb)"
 TOKEN_RE = re.compile(
     r"(?<![.\w])"
     r"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[A-Z]{2,}-\d{3})"
-    r"(?!\.\w)(?![\w])"
+    r"(?!\." + _DOC_EXT + r"\b)(?![\w])"
+)
+
+# Filename-shaped tokens: "STEM.ext". TOKEN_RE exempts these so that real
+# references like IMPLEMENTATION_NOTES.md are not flagged (defect D13). But the
+# exemption is exploitable — `"PLAN_DIGEST_MISMATCHED.md"[:-3]` restores the
+# fabrication at runtime — so FILENAME_RE re-examines the stem and flags it when
+# the stem is ITSELF a fabricated identifier. Measured against the repo: 7
+# distinct TOKEN.ext strings exist, this rule flags 0 legitimate filenames.
+FILENAME_RE = re.compile(
+    r"(?<![.\w])"
+    r"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[A-Z]{2,}-\d{3})"
+    r"\." + _DOC_EXT + r"\b"
 )
 
 # The implementation's own namespaces. These are env vars and local constants,
@@ -172,6 +191,12 @@ IMPLEMENTATION_NAMESPACES: tuple[str, ...] = ("PLANPILOT_",)
 # ---------------------------------------------------------------------------
 
 _NEGATIVE_TEST_DIR = "tests/unit/test_closed_vocabularies.py"
+# The bypass-regression module pins the ten bypasses an independent attack
+# found, so it must contain the same fabricated tokens as fixtures.
+_BYPASS_TEST_FILE = "tests/unit/test_guard_bypass_regressions.py"
+# Both files are SCANNED (neither is in NEGATIVE_FIXTURE_PATHS), so the
+# allowlist mechanism itself is exercised on every run.
+_FIXTURE_FILES = (_NEGATIVE_TEST_DIR, _BYPASS_TEST_FILE)
 
 # Deliberately MINIMAL. Three entries were removed after the self-checks proved
 # them dead:
@@ -197,17 +222,17 @@ ALLOWED_LOCAL: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "PLAN_DIGEST_MISMATCHED": (
         "near-miss fixture proving edit-distance detection works",
-        (_NEGATIVE_TEST_DIR,),
+        _FIXTURE_FILES,
     ),
     "SEARCH_ESCALATION_EXHAUST": (
         "truncation fixture proving near-miss detection",
-        (_NEGATIVE_TEST_DIR,),
+        _FIXTURE_FILES,
     ),
     # Out-of-range prefixed ids: only HC-001..013, EVAL-001..030, EVT-001..007
     # exist. These assert the range check fires.
     "HC-014": (
         "asserts an out-of-range hard-constraint id is flagged",
-        (_NEGATIVE_TEST_DIR,),
+        _FIXTURE_FILES,
     ),
     "HC-099": (
         "appears in the guard's test module as a string constant holding probe "
@@ -218,11 +243,22 @@ ALLOWED_LOCAL: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "EVAL-031": (
         "asserts an out-of-range EVAL id is flagged",
-        (_NEGATIVE_TEST_DIR,),
+        _FIXTURE_FILES,
     ),
     "EVT-009": (
         "asserts an out-of-range event id is flagged",
         (_NEGATIVE_TEST_DIR,),
+    ),
+    # Bare filename stems passed to _is_fabricated_stem() to assert it exempts
+    # real documentation names. Without the ".md" suffix they are not
+    # filename-shaped, so TOKEN_RE flags them — correctly, by its own rules.
+    "IMPLEMENTATION_NOTES": (
+        "bare filename stem used to prove _is_fabricated_stem exempts real docs",
+        (_BYPASS_TEST_FILE,),
+    ),
+    "REVIEW_HANDOFF_FOR_CODEX": (
+        "bare filename stem used to prove _is_fabricated_stem exempts real docs",
+        (_BYPASS_TEST_FILE,),
     ),
     # Implementation-constant shapes used to assert __all__ exports are excluded.
     "SOME_LOCAL_CONSTANT": (
@@ -336,6 +372,27 @@ def _string_constants(tree: ast.AST):
             yield child, parent
 
 
+def _is_fabricated_stem(token: str) -> bool:
+    """True when a filename stem is itself a fabricated contract identifier.
+
+    Only two shapes qualify, both unambiguous:
+      * a prefixed id outside the contract's real range (HC-014, EVAL-031, EVT-009)
+      * a near miss of a real member (PLAN_DIGEST_MISMATCHED, edit distance 2)
+
+    Everything else stays exempt, so genuine filenames such as
+    IMPLEMENTATION_NOTES.md, REVIEW_HANDOFF_FOR_CODEX.md and V1.8_changelog.md
+    are never flagged. Note that a bare word like README cannot reach here at
+    all: TOKEN_RE and FILENAME_RE both require an underscore group or the
+    PREFIX-DIGITS shape.
+    """
+    if token in ALL_KNOWN:
+        return False
+    for kind, pattern in PREFIXED.items():
+        if pattern.match(token) and token not in PREFIXED_VALID[kind]:
+            return True
+    return _near_miss(token) is not None
+
+
 def _tokens(text: str) -> list[str]:
     out = []
     for m in TOKEN_RE.finditer(text):
@@ -344,6 +401,13 @@ def _tokens(text: str) -> list[str]:
             continue
         if any(p.match(tok) for p in PREFIXED.values()) or "_" in tok:
             out.append(tok)
+    # Re-examine filename-shaped tokens that TOKEN_RE deliberately skipped.
+    for m in FILENAME_RE.finditer(text):
+        stem = m.group(1)
+        if stem.startswith(IMPLEMENTATION_NAMESPACES):
+            continue
+        if _is_fabricated_stem(stem) and stem not in out:
+            out.append(stem)
     return out
 
 
@@ -373,13 +437,22 @@ def _near_miss(token: str) -> str | None:
 
 
 def classify(token: str) -> tuple[str, str | None] | None:
-    """Return (kind, detail) for a violation, or None when legitimate."""
+    """Return (kind, detail) for a violation, or None when legitimate.
+
+    ORDER MATTERS. The near-miss check runs BEFORE the _DEFINED_NAMES exclusion.
+    It used to run after, which meant binding a fabricated code as a Python name
+    anywhere in the project — even a local variable inside a test function — made
+    it an "implementation constant" and silently voided the guard's own
+    highest-signal check. Confirmed exploitable: `PLAN_DIGEST_MISMATCHED = "..."`
+    in one file made the string pass in another.
+
+    A defined name within edit distance 2 of a contract member is a vocabulary
+    claim wearing a constant's clothes, not an implementation constant. Genuine
+    implementation constants (CONTRACT_SHA256, OPERATION_SORT_KEY_FIELDS) are far
+    from every member and are unaffected; if one ever is close, the allowlist is
+    the escape hatch and a reviewer sees it in the diff.
+    """
     if token in ALL_KNOWN:
-        return None
-    # A SCREAMING_SNAKE token that is a real Python definition somewhere in the
-    # project is an implementation constant (CONTRACT_SHA256, OPERATION_SORT_KEY_FIELDS),
-    # not a claim about contract vocabulary. Excluded on principle, not by allowlist.
-    if token in _DEFINED_NAMES:
         return None
     for kind, pattern in PREFIXED.items():
         if pattern.match(token):
@@ -391,7 +464,26 @@ def classify(token: str) -> tuple[str, str | None] | None:
     miss = _near_miss(token)
     if miss:
         return "near_miss_of_contract_member", miss
+    # Only now: a SCREAMING_SNAKE token that is a real Python definition somewhere
+    # in the project is an implementation constant, not a vocabulary claim.
+    if token in _DEFINED_NAMES:
+        return None
     return "not_in_any_vocabulary", None
+
+
+def _path_matches(rel: str, pattern: str) -> bool:
+    """Component-aware path match. Bare `startswith` has no boundary, so
+    "tools/check_closed_vocabularies.py.evil.py" matched the guard's own entry and
+    was never scanned, and "tests/unit/test_closed_vocabularies.py.evil.py"
+    inherited all nine allowlist tokens. Both were confirmed loadable with the
+    guard exiting 0.
+
+    A pattern ending in "/" matches a directory subtree; anything else must be
+    exactly equal.
+    """
+    if pattern.endswith("/"):
+        return rel == pattern[:-1] or rel.startswith(pattern)
+    return rel == pattern
 
 
 def scan_file(path: Path, *, is_negative_fixture: bool = False) -> list[tuple[int, str, str, str | None]]:
@@ -401,7 +493,7 @@ def scan_file(path: Path, *, is_negative_fixture: bool = False) -> list[tuple[in
         rel = path.relative_to(ROOT).as_posix()
     except ValueError:
         rel = path.name
-    skip = is_negative_fixture or any(rel.startswith(p) or rel == p for p in NEGATIVE_FIXTURE_PATHS)
+    skip = is_negative_fixture or any(_path_matches(rel, p) for p in NEGATIVE_FIXTURE_PATHS)
     if skip:
         return []
 
@@ -422,7 +514,7 @@ def scan_file(path: Path, *, is_negative_fixture: bool = False) -> list[tuple[in
                 _reason, allowed_paths = entry
                 # Path-scoped: the token is permitted ONLY under its declared
                 # paths. Anywhere else it is a violation like any other.
-                if any(rel == p or rel.startswith(p) for p in allowed_paths):
+                if any(_path_matches(rel, p) for p in allowed_paths):
                     continue
             hit = classify(token)
             if hit:
@@ -525,7 +617,7 @@ def main(argv: list[str]) -> int:
     seen: dict[str, list[str]] = {t: [] for t in ALLOWED_LOCAL}
     for path in targets:
         rel = path.relative_to(ROOT).as_posix()
-        if any(rel == p or rel.startswith(p) for p in NEGATIVE_FIXTURE_PATHS):
+        if any(_path_matches(rel, p) for p in NEGATIVE_FIXTURE_PATHS):
             continue  # the guard's own body is not evidence of use
         try:
             tree = ast.parse(path.read_bytes().decode("utf-8"), filename=str(path))

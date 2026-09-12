@@ -3,7 +3,12 @@
 **For:** an independent reviewer (Codex, or a human)
 **From:** the implementing agent (Hermes)
 **Date:** 2026-09-12
-**Repo:** `E:\PlanPilot-Hackathon\planpilot-build` — git, 6 commits, HEAD `98ee9a8`, clean tree, **no remote yet**
+**Repo:** `E:\PlanPilot-Hackathon\planpilot-build` — git, **no remote yet**.
+Snapshot for the counts in this document: commit `961c0e6` (7 commits, 47 files tracked, working tree clean at
+the time of writing). Commit/HEAD/tracked counts are stated *as of that commit*
+and are not live values: a committed document cannot state the HEAD of the
+commit that contains it. `tools/factcheck_impl_handoff.py` verifies the named
+snapshot commit exists and is an ancestor of HEAD rather than equal to it.
 
 This document is deliberately sceptical of its own subject. Where a claim could be
 verified mechanically, it was, and the command is given. Where the implementer
@@ -37,25 +42,27 @@ dataset access. 8 of the 15 specs in `.kiro/specs/README.md` are untouched.
 fact that the test suite runs in a clean venv with only `jsonschema`, `ortools`
 (transitively) and `pytest` installed — verified in §3.
 
-Scale: **3,898 lines** across 18 Python files (the subject; the factcheck tool that
-measures them is excluded to avoid self-reference); 45 files tracked in git.
+Scale: **4,263 lines** across 19 Python files (the subject; the factcheck tool that
+measures them is excluded to avoid self-reference); 47 files tracked in git
+as of the snapshot commit.
 
 | layer | lines | files |
 |---|---|---|
 | `src/planpilot/` — store package + top-level `__init__` | 920 | 5 |
-| `tests/unit/` — 5 test modules + `__init__` | 1,318 | 6 |
+| `tests/unit/` — 6 test modules + `__init__` | 1,591 | 7 |
 | `tests/negative_control/` | 378 | 2 |
 | `tests/_fixtures.py`, `conftest.py`, `__init__.py` | 403 | 3 |
-| `tools/check_closed_vocabularies.py` | 631 | 1 |
+| `tools/check_closed_vocabularies.py` | 723 | 1 |
 | `tools/write_evidence_plan_store.py` | 248 | 1 |
-| **subject total** | **3,898** | **18** |
+| **subject total** | **4,263** | **19** |
 
-`tools/factcheck_impl_handoff.py` (257 lines) checks the table above, so it is
+`tools/factcheck_impl_handoff.py` (269 lines) checks the table above, so it is
 **deliberately excluded from the total** — the same reason `canonical_plan_digest`
 excludes `plan_digest` and `engine.canonical_plan_hash` from the hashed payload. A
 checker that counts itself makes the figure move every time the checker is edited,
-which is a circular dependency, not a measurement. (All 19 Python files together
-are 4,155 lines.)
+which is a circular dependency, not a measurement. (All 20 Python files together
+are 4,532 lines, including the 269-line
+factcheck tool.)
 
 ---
 
@@ -70,10 +77,10 @@ set PY=E:\PlanPilot-Hackathon\contract-review\.venv\Scripts\python.exe
 
 | # | command | result |
 |---|---|---|
-| 1 | `%PY% -m pytest tests/unit -q` | **154 passed** |
+| 1 | `%PY% -m pytest tests/unit -q` | **202 passed** |
 | 2 | `%PY% -m pytest tests/negative_control -q` | **3 passed** (19 mutations) |
 | 3 | `%PY% tools/check_closed_vocabularies.py --self-test` | **SELF-TEST \| PASS** (17 cases) |
-| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 22 modules scanned |
+| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 23 modules scanned |
 | 5 | `%PY% tools/validate_kiro_workspace.py` | **ok=190 fail=0** |
 | 6 | `%PY% tools/negative_control_workspace.py` | **caught=14 escaped=0 of 14** |
 | 7 | `sha256sum contract/planpilot_agent_contract_v1.8.json` | `b92e53f4ff054105…` unchanged |
@@ -101,7 +108,7 @@ cleanenv\Scripts\python.exe -m pytest tests/ -q
 temp venv was deleted afterwards and is not in the repo.
 
 That run predates five tests added to pin the filename-reference fix (§3.1). The
-suite is now **157 tests** (154 unit + 3 negative control). The
+suite is now **205 tests** (202 unit + 3 negative control). The
 clean-environment claim is about the two requirements files being sufficient,
 which is unaffected.
 
@@ -178,6 +185,83 @@ cannot be "simplified" away.
 and then it guards nothing. Its precision is a functional requirement, not a
 nicety. Recorded as defect **D13**.
 
+### 3.2 An independent attack found ten bypasses
+
+After writing §3 and §3.1, I had a separate agent attack the guard with one
+instruction: smuggle a fabricated contract identifier into the implementation
+without the guard failing. It found **ten bypasses and proved each one end to
+end** — copying the repo to scratch, smuggling the payload in, running the real
+guard (exit 0), then executing the smuggled module to show the fabricated
+identifier materializing at runtime. Controls failed the guard in every copy, so
+the copies were faithful.
+
+I independently reproduced the three I fixed before fixing them. The attacker's
+report is not taken on trust.
+
+| # | Bypass | Mechanism | Severity | Status |
+|---|---|---|---|---|
+| 1 | Bind the fabrication as a Python name once (`PLAN_DIGEST_MISMATCHED = "..."`), even in a test-function local, then use the string anywhere in `src/` | `_DEFINED_NAMES` was checked **before** the near-miss check, so it voided the guard's own highest-signal feature | **CRITICAL** | **FIXED** |
+| 2 | Put fabricated codes in a non-`.py` file (`src/planpilot/vocab_override.json` loaded at runtime), or in a root-level `.py`, or under `tests/negative_control/` imported by `src/` | scan scope is only `*.py` under exactly `src/ tests/ tools/` | **CRITICAL** | **OPEN — accepted limit** |
+| 3 | `tools/check_closed_vocabularies.py.evil.py` → matched the guard's own skip entry and was never scanned; `tests/unit/test_closed_vocabularies.py.evil.py` → inherited all nine allowlist tokens | bare `startswith` has no path-component boundary | **HIGH** | **FIXED** |
+| 4 | Fabricated single-word statuses: `"PUBLISHING"`, `"APPROVEDD"` (edit distance 1 from `APPROVED`) | `TOKEN_RE` requires an underscore group or `PREFIX-DIGITS`, so a bare word never reaches `classify()` | **HIGH** | **OPEN — accepted limit** |
+| 5 | `"HC-0" + "14"`, `f"HC-{n:03d}"`, `"".join`, `.format`, `chr()`, `bytes.fromhex(...)`, `"hc-014".upper()` | only literal string constants are folded; `ast` concatenation is not | **HIGH** | **OPEN — accepted limit** |
+| 6 | `"PLAN_DIGEST_MISMATCHED.md"[:-3]`; packed sentences `"Error MISMATCHED.After retry EVAL-031.Failed"` | the `(?!\.\w)` filename lookahead accepted any dot+word suffix | **MED-HIGH** | **FIXED** |
+| 7 | Codes in `#` comments, extracted at runtime via `inspect.getsource` + regex | comments are not string constants | **MEDIUM** | **OPEN — accepted limit** |
+| 8 | `"see planpilot.HC-014".split(".")[-1]` | the dotted-reference exclusion | **MEDIUM** | **OPEN — accepted limit** |
+| 9 | Fabricate in a docstring, read via `__doc__.split()` | docstrings are excluded | **LOW-MED** | **OPEN — accepted limit** |
+| 10 | `__all__ = ["HC-014"]; CODES = list(__all__)`; `"PLANPILOT_PLAN_DIGEST_MISMATCHED"[10:]`; `b"HC-014"`; homoglyph hyphen U+2011 | the `__all__`, `PLANPILOT_` and bytes exclusions | **LOW-MED** | **OPEN — accepted limit** |
+
+**Negative results** (the guard held): implicit literal concatenation
+`"PLAN_DIGEST_" "MISMATCHED"` is caught (`ast` folds adjacent literals); every
+container context is caught (dict keys/values, lists, sets, nesting, annotations,
+default args, decorators, comprehensions, assert messages, raise args);
+`\u0050`-escaped spellings are caught; hyphenated ids cannot exploit `_DEFINED_NAMES`
+because they are not valid Python names. The near-miss machinery itself is sound
+for every token that reaches `classify()` — **every bypass works by never
+reaching it, or by `_DEFINED_NAMES` preempting it.**
+
+#### The three fixes
+
+1. **Near-miss now runs before `_DEFINED_NAMES`.** A defined name within edit
+   distance 2 of a contract member is a vocabulary claim wearing a constant's
+   clothes. Genuine constants (`CONTRACT_SHA256`, `OPERATION_SORT_KEY_FIELDS`) are
+   far from every member and are unaffected.
+2. **`_path_matches()` does component matching.** A pattern ending in `/` matches a
+   subtree; anything else must be exactly equal.
+3. **The filename lookahead requires a known document extension**
+   (`md|markdown|json|py|txt|ya?ml|rst|csv|tsv|toml|cfg|ini|log|html|ipynb`), and
+   `_is_fabricated_stem()` re-examines a filename-shaped token, flagging it when
+   the stem is itself an out-of-range prefixed id or a near miss. Measured against
+   the repo first: 7 distinct `TOKEN.ext` strings exist, the rule flags 0
+   legitimate filenames.
+
+All three are pinned by `tests/unit/test_guard_bypass_regressions.py` (48 tests),
+which reproduces the attacker's own payloads rather than easier substitutes. That
+module also pins the **seven open limits as current behaviour** — if anyone closes
+one, the test fails and forces §3.2 to be updated in the same commit. Silent
+divergence between doc and code is the failure mode this project keeps hitting.
+
+#### What the guard actually is
+
+The attacker's verdict, which I accept:
+
+> **Yes — as an accident tripwire, not a security boundary.** Its realistic threat
+> model is an LLM or developer writing a wrong code into a string literal, and
+> against that it works (honest controls failed it every time, in every copy).
+> Against a deliberate adversary it is trivially defeated.
+
+That reframing matters for how this is presented at the hackathon. The guard is
+**not** a security control and must not be described as one. It is a
+typo-and-drift tripwire for the realistic case: an agent or developer writing
+`PLAN_DIGEST_MISMATCHED` or `HC-014` into a literal. It closes that window, which
+is where the actual risk lives, because the alternative — discovering the
+fabrication at EVAL time — leaves days, not hours.
+
+The §3 "attack surface" list above predates this attack. It named
+`_DEFINED_NAMES`, `TOKEN_RE`'s lookbehind, the allowlist's path-scoping and
+`classify()`'s ordering as the things to probe. The attack confirmed all four and
+found six more.
+
 ### Attack surface I would point a reviewer at
 
 - The `_DEFINED_NAMES` escape hatch: a fabricated token that someone first binds
@@ -185,7 +269,7 @@ nicety. Recorded as defect **D13**.
   limitation. Is that acceptable, or should definition-site checks be stricter?
 - `TOKEN_RE` uses a negative lookbehind for `.` to skip dotted prose. Can a real
   vocabulary claim be smuggled past it?
-- The allowlist is now 9 entries, all scoped to
+- The allowlist is now 11 entries, all scoped to
   `tests/unit/test_closed_vocabularies.py`. Is path-scoping sufficient, or should
   the guard refuse to allowlist prefixed ids (`HC-014`) at all?
 - `classify()` returns `fabricated_hard_constraint` for `HC-014` **before**
