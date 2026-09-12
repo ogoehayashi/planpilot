@@ -1,10 +1,11 @@
 
 BROKEN FIXTURES (mutation did not apply): 0
 
-DEFENCE IN DEPTH — one layer removed, suite still green: 1
+DEFENCE IN DEPTH — one layer removed, suite still green: 2
   float layer 2 removed (allow_nan) — layer 1 must still hold
+  P1-a(2): event no longer requires status SUPERSEDED
 
-NEGATIVE CONTROL (store) | caught=29 escaped=0 broken_fixtures=0 of 30
+NEGATIVE CONTROL (store) | caught=42 escaped=0 broken_fixtures=0 of 44
 sources restored to pre-test bytes: True
 ...
-3 passed in 43.35s
+3 passed in 81.45s (0:01:21)

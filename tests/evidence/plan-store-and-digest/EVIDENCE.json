@@ -1,6 +1,6 @@
 {
   "spec": "plan-store-and-digest",
-  "generated_at_utc": "2026-09-12T11:13:13+00:00",
+  "generated_at_utc": "2026-09-12T18:28:15+00:00",
   "contract": {
     "schema_version": "1.8.0",
     "sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
@@ -84,18 +84,18 @@
   "results": {
     "unit_tests": {
       "exit_code": 0,
-      "summary": "334 passed in 2.77s"
+      "summary": "381 passed in 4.39s"
     },
     "negative_control": {
       "exit_code": 0,
-      "summary": "3 passed in 43.35s",
+      "summary": "3 passed in 81.45s (0:01:21)",
       "ok": true,
-      "caught": 29,
+      "caught": 42,
       "escaped": 0,
       "broken_fixtures": 0,
-      "total": 30,
+      "total": 44,
       "sources_restored": true,
-      "detail": "NEGATIVE CONTROL (store) | caught=29 escaped=0 broken_fixtures=0 of 30"
+      "detail": "NEGATIVE CONTROL (store) | caught=42 escaped=0 broken_fixtures=0 of 44"
     },
     "vocabulary_guard_self_test": {
       "exit_code": 0,
