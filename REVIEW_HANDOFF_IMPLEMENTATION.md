@@ -71,11 +71,13 @@ excludes `plan_digest` and `engine.canonical_plan_hash` from the hashed payload.
 checker that counts itself makes the figure move every time the checker is edited,
 which is a circular dependency, not a measurement.
 
-The repo holds 30 Python files totalling 10,132 lines. The four not in the table are
-`factcheck_impl_handoff.py` (361, excluded for the circularity reason above) and three
+The repo holds 31 Python files totalling 10,259 lines. The five not in the table are
+`factcheck_impl_handoff.py` (361, excluded for the circularity reason above); three
 tools that belong to the Kiro workspace rather than to this spec:
 `generate_kiro_workspace.py` (1,014), `validate_kiro_workspace.py` (189) and
-`negative_control_workspace.py` (88). 8,480 + 361 + 1,291 = 10,132.
+`negative_control_workspace.py` (88); and `tools/probes/probe_pyc_stale.py` (127),
+the D20 reproduction, which is evidence rather than product code.
+8,480 + 361 + 1,291 + 127 = 10,259.
 
 ---
 
@@ -93,7 +95,7 @@ set PY=E:\PlanPilot-Hackathon\contract-review\.venv\Scripts\python.exe
 | 1 | `%PY% -m pytest tests/unit -q` | **381 passed** |
 | 2 | `%PY% -m pytest tests/negative_control -q` | **3 passed** (44 mutations) |
 | 3 | `%PY% tools/check_closed_vocabularies.py --self-test` | **SELF-TEST \| PASS** (17 cases) |
-| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 30 modules scanned |
+| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 31 modules scanned |
 | 5 | `%PY% tools/validate_kiro_workspace.py` | **ok=190 fail=0** |
 | 6 | `%PY% tools/negative_control_workspace.py` | **caught=14 escaped=0 of 14** |
 | 7 | `sha256sum contract/planpilot_agent_contract_v1.8.json` | `b92e53f4ff054105…` unchanged |
@@ -317,9 +319,20 @@ to keep the two audits distinguishable.
 This ran against commit `651ab5e`, after the two P0s above were fixed and this
 document already claimed the store was sound. It found four things the first two
 audits missed. All four were reproduced against a clean tree with a standalone
-probe (`_audit_scratch/verify_audit3.py`, kept as the pre-fix baseline) before any
-fix was written, and re-verified closed afterwards (`verify_audit3_after.py`: 29
-checks, 0 still open).
+probe before any fix was written, and re-verified closed afterwards (29 checks,
+0 still open).
+
+> **On the probes.** The scratch probes that produced these verdicts
+> (`verify_audit3.py`, `probe_roundtrip.py`, `probe_reachability.py`,
+> `probe_occ_reachable.py`) live in `_audit_scratch/`, a sibling of the repo and
+> **not committed** — they are development scaffolding, not part of the
+> deliverable. Their findings are *permanently* backed by committed tests:
+> `tests/unit/test_audit3_regressions.py` (44 tests) and 14 new negative-control
+> mutations. One exception is deliberate: the D20 stale-bytecode mechanism is
+> reproduced by `tools/probes/probe_pyc_stale.py`, which **is** committed
+> because that claim asserts a mechanism rather than a behaviour, so it should be
+> runnable by a reviewer. Reproduce any finding with `pytest tests/unit` — that is
+> the authoritative, in-repo check.
 
 | # | finding | mechanism | fix |
 |---|---|---|---|
@@ -377,7 +390,8 @@ merged two unrelated things and shipped "no mechanism is claimed" as though
 agnosticism were honesty.
 
 The escape was real and intermittent, and the mechanism is now reproduced
-deterministically (`_audit_scratch/probe_pyc_stale.py`): CPython validates a cached
+deterministically (`tools/probes/probe_pyc_stale.py`, committed so this claim is
+runnable): CPython validates a cached
 `.pyc` against the source mtime **truncated to whole seconds** plus its **size**. The
 control rewrites `plan_store.py` per mutation and spawns a fresh pytest child each
 time, so two mutations written in the same second at the same byte length make the
@@ -731,7 +745,7 @@ refused, (c) is wrong.
 | D17 | a probe's final route printed `True`/`False` values I had typed in, not measured — stale by the time it ran, and indistinguishable from a measuring probe | reading the output against the earlier routes |
 | D18 | an evidence-reading script used `negative_control.mutation_counters`, a field that does not exist; it returned `null`, which reads as "no evidence" rather than "wrong key" | opening `EVIDENCE.json` |
 | D19 | ran two `factcheck` processes at once; their negative-control subprocesses mutated the same files concurrently and one restored the MUTATED bytes, leaving `digest.py` at `sort_keys=False` and failing three tests — one step after writing a helper whose docstring forbids exactly this | `git status` after the run |
-| D20 | the negative control read **stale `.pyc`** bytecode (CPython keys cache validity on mtime-to-the-second + size), so an equal-length mutation inherited a preceding mutation's bytecode and ran the wrong code — a false `escaped=1`; my first write-up misattributed it to factcheck parsing bugs and claimed "no mechanism", which was wrong | reproducing the mechanism in `probe_pyc_stale.py` |
+| D20 | the negative control read **stale `.pyc`** bytecode (CPython keys cache validity on mtime-to-the-second + size), so an equal-length mutation inherited a preceding mutation's bytecode and ran the wrong code — a false `escaped=1`; my first write-up misattributed it to factcheck parsing bugs and claimed "no mechanism", which was wrong | reproducing the mechanism in `tools/probes/probe_pyc_stale.py` (committed) |
 
 D14–D20 were all found and fixed inside the third audit's work, before the
 commit that carries it. All seven were caught by running the code, reading it

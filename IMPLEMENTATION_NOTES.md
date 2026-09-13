@@ -18,7 +18,7 @@ written. The claim was made before the artefact existed. It exists now.
 | negative control (store) | **42 caught / 0 escaped / 0 broken fixtures** of 44 |
 | full suite (`pytest tests/`) | **384 passed** |
 | closed-vocabulary guard self-test | **17/17 PASS** |
-| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 30 modules) |
+| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 31 modules) |
 | workspace validation | **190 checks / 0 fail** |
 | workspace negative control | **14 caught / 0 escaped** |
 | LLM / network / credentials / dataset used | **none** |
@@ -325,7 +325,7 @@ fixed, but they explained the checker's *inconsistent numbers*, not the *escape*
 had conflated two unrelated things and shipped "no mechanism is claimed" as if
 agnosticism were honesty. It is not: an unexplained verdict is an untrustworthy one.
 
-**The real mechanism, reproduced deterministically** (`_audit_scratch/probe_pyc_stale.py`):
+**The real mechanism, reproduced deterministically** (`tools/probes/probe_pyc_stale.py`, committed so this claim is runnable):
 CPython judges a cached `.pyc` valid from the source mtime **truncated to whole
 seconds** plus its **size**. The control rewrites `plan_store.py` per mutation and
 spawns a fresh pytest child each time; when two mutations land in the same second at
@@ -542,9 +542,19 @@ checked.
 A third independent review ran against the tree at commit `651ab5e`, after the two
 P0s were fixed and the docs claimed the module was sound. It found one authority
 bypass and three persistence/consistency gaps. All four were reproduced against a
-clean tree with a standalone probe (`_audit_scratch/verify_audit3.py`, kept as the
-pre-fix baseline) before any fix was written, and all four were re-verified closed
-afterwards (`verify_audit3_after.py`: 29 checks, 0 still open).
+clean tree with a standalone probe before any fix was written, and all four were
+re-verified closed afterwards (29 checks, 0 still open).
+
+> **On the probes.** The scratch probes behind these verdicts
+> (`verify_audit3.py`, `probe_roundtrip.py`, `probe_reachability.py`,
+> `probe_occ_reachable.py`) live in `_audit_scratch/`, a sibling of the repo, and
+> are **not committed** — development scaffolding, not deliverable. Every finding
+> is *permanently* backed by committed tests instead:
+> `tests/unit/test_audit3_regressions.py` (44 tests) and 14 negative-control
+> mutations. The one probe that *is* committed is `tools/probes/probe_pyc_stale.py`
+> (D20), because that claim asserts a mechanism, not a behaviour, and a reviewer
+> should be able to run it. The authoritative in-repo reproduction is
+> `pytest tests/unit`.
 
 The pattern across all three audits is now the headline finding: **each audit
 found things the previous one missed, and the previous one's docs claimed
@@ -686,7 +696,7 @@ match and asserts `caught + escaped + held == total`). But those explained the
 checker's *inconsistent numbers*, not the *escape*. The escape was real,
 intermittent, and had a different cause.
 
-**The mechanism, reproduced deterministically** (`_audit_scratch/probe_pyc_stale.py`):
+**The mechanism, reproduced deterministically** (`tools/probes/probe_pyc_stale.py`, committed so this claim is runnable):
 CPython decides whether a cached `.pyc` is still valid from the source file's mtime
 **truncated to whole seconds** plus its **size**. The negative control rewrites
 `plan_store.py` once per mutation and spawns a fresh pytest subprocess for each. When

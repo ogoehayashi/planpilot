@@ -1,6 +1,6 @@
 contract: planpilot_agent_contract_v1.8.json
 vocabularies: 21 sets, 135 known members
-scanning 30 modules under src/ tests/ tools/
+scanning 31 modules under src/ tests/ tools/
 
 allowlist: 12 entries
   ANOTHER_ONE — used by tests/unit/test_closed_vocabularies.py
