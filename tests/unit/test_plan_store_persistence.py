@@ -177,10 +177,11 @@ class TestDumpFormat:
         path = tmp_path / "state.json"
         store.dump_state(path)
         state = json.loads(path.read_bytes().decode("utf-8"))
-        assert set(state) == {"content", "lifecycle", "superseded_events"}
+        assert set(state) == {"content", "lifecycle", "superseded_events", "superseded_acks"}
         assert len(state["content"]) == 2
         assert len(state["lifecycle"]) == 2
         assert len(state["superseded_events"]) == 1
+        assert state["superseded_acks"] == []
 
     def test_non_ascii_survives_unescaped(self, fixtures, tmp_path):
         draft = fixtures.make_content(assumptions=["假设：交期以新加坡时间为准"])

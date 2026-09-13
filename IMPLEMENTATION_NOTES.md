@@ -14,11 +14,11 @@ written. The claim was made before the artefact existed. It exists now.
 
 | | |
 |---|---|
-| unit tests | **381 passed** |
-| negative control (store) | **42 caught / 0 escaped / 0 broken fixtures** of 44 |
-| full suite (`pytest tests/`) | **384 passed** |
+| unit tests | **418 passed** |
+| negative control (store) | **56 caught / 0 escaped / 0 broken fixtures** of 58; working repository unchanged |
+| full suite (`pytest tests/`) | **421 passed** |
 | closed-vocabulary guard self-test | **17/17 PASS** |
-| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 31 modules) |
+| closed-vocabulary guard repo scan | **PASS** (21 vocabularies, 135 members, 32 modules) |
 | workspace validation | **190 checks / 0 fail** |
 | workspace negative control | **14 caught / 0 escaped** |
 | LLM / network / credentials / dataset used | **none** |
@@ -110,11 +110,11 @@ hold?"*, recording `True` as "caught". That is backwards: `True` means the
 mutation had **no** effect, i.e. the test did **not** detect it. It reported
 **10 caught / 5 escaped** when the real numbers were close to the reverse.
 
-Rewritten to the unambiguous method used by `negative_control_v18.py`: write the
-mutation into the real source, run the real pytest suite as a subprocess, and
-count the mutation as caught only if that suite **fails**. There is nothing left
-to interpret. It also asserts `git status --porcelain src/planpilot/store` is
-empty afterwards, so a crash cannot leave mutated sources behind.
+Rewritten to the unambiguous method used by `negative_control_v18.py`: apply the
+mutation, run the real pytest suite as a subprocess, and count it as caught only
+if that suite **fails**. There is nothing left to interpret. This first safe-looking
+implementation still wrote the working source and trusted `finally`; D21 records
+why that was not crash-safe and how it was replaced with a disposable copy.
 
 ### D6 — the two non-finite-float layers are not interchangeable (F-STORE-02)
 
@@ -230,22 +230,25 @@ you read the fixture.
 
 ### D15 — my first `load_state` version-authority check was too strict
 
-The P1-b fix refuses a stale version holding authority. My first implementation
-required every stale version to be `SUPERSEDED`. That was wrong twice over, and
+The P1-b fix refused a stale version holding publication authority. My first implementation
+required every stale version to be `SUPERSEDED`. That was wrong twice over at the
+time, and
 `probe_roundtrip.py` caught both:
 
-- It refused four states the **live API legitimately produces** — a stale version
+- It refused four states the **then-current live API legitimately produced** — a stale version
   left in `DRAFT`, `PROPOSED`, `AWAITING_APPROVAL` or `BLOCKED`. `commit_new_version()`
   skips the supersede when the previous version has no lifecycle record, and
   `create_lifecycle()` can then attach one, so a stale non-authority record is
   reachable. Requiring `SUPERSEDED` broke dump/load round-trip fidelity.
 - It encoded a **second copy** of the authority policy, stricter than
-  `transition()`'s own `_AUTHORITY_STATUSES`. Two definitions of "which statuses
+  `transition()`'s then-current `_AUTHORITY_STATUSES`. Two definitions of "which statuses
   grant authority" in one module is the orphan-spec defect class the V1.8 review
   found eight instances of.
 
-The fix reuses `_AUTHORITY_STATUSES` rather than naming statuses again, so there
-is one definition. Pinned by
+That audit's fix reused `_AUTHORITY_STATUSES` rather than naming statuses again.
+The fourth audit intentionally tightened this policy and renamed the one shared
+set to `_ACTIVE_ONLY_STATUSES`: stale `AWAITING_APPROVAL` was shown to reacquire
+authority, so it is no longer an allowed round-trip state. Pinned by
 `test_a_stale_version_without_authority_still_loads`, parametrised over the four
 statuses, which fails if anyone tightens the check back.
 
@@ -348,6 +351,28 @@ is the control's own rule turned on the control: when a result is intermittent,
 reproduce the mechanism before writing down a cause — and never record "could not
 reproduce" as a substitute for finding out why.
 
+### D21 — `finally` is not a crash barrier for mutation testing
+
+The negative control restored each real source file in `finally`. That protects
+against an assertion or exception in the runner, but not against SIGKILL, machine
+restart or interpreter crash after the mutated bytes reach disk. The sixth review
+reproduced exactly that leak, and the delivered working tree had in fact contained
+two leftover mutations from an interrupted run. A defence-in-depth mutation can
+leave the ordinary suite green, so a later green run is not a reliable residue
+detector.
+
+**Fixed structurally:** the runner now creates a disposable repository copy with
+all paths required by the unit suite, applies mutations only there, and runs each
+pytest child with that copy as its working directory. The real mutation targets
+are read only to prove their bytes did not change. Killing the runner can strand
+temporary files but cannot strand a mutation in commit-eligible source.
+
+A collection-time `# MUTATION:` sentinel was rejected as the primary fix: almost
+every mutation deliberately contains that marker, so the sentinel would make all
+children fail before exercising the named defence. It would turn a behavioural
+negative control into 58 identical syntax scans — green theatre of the same class
+as D5.
+
 ---
 
 ## External audit — findings F1–F15
@@ -383,9 +408,9 @@ reintroduced, restoring byte-identical afterward.
 | F4 | LOW/MED | `sort_operations` | ops tied on all five contract fields kept input order (stable sort), so the digest depended on input order | **FIXED** — tie-broken by canonical JSON of the operation; measured before/after |
 | F5 | HIGH | `DigestMismatchError` | built details with `str(None)` when the declared digest was absent, violating `^[a-f0-9]{64}$` — an unemittable tool_error | **FIXED** — malformed digest raises the new `InvalidContentError`; `DigestMismatchError` refuses non-64-hex inputs at construction |
 | F6 | LOW/MED | `assert_digest_consistent` | `int(plan_version)` raised `ValueError` on a non-numeric version, masking the real `DigestMismatchError` | **FIXED** — `_safe_version()` for reporting only; pinned to assert the exact error type |
-| F7 | info | `transition` | `PUBLISHED -> DRAFT` is accepted | **DOCUMENTED DEFERRAL** — the transition graph is `workflow.transitions`, not re-implemented here (design decision 3). The HIGH risk is publish-without-approval (F11), now closed; back-transition is a LOW hole by comparison |
+| F7 | info | `transition` | `PUBLISHED -> DRAFT` is accepted | **FIXED in the fourth audit** — PUBLISHED may move only to SUPERSEDED, preserving the contract's replanning path while blocking rollback to mutable states |
 | F8 | MED | `_resolve_version` | `version=None` silently resolves to newest across records | **MITIGATED** — mutations now require an explicit version (F11); reads may still default to latest by design |
-| F9 | LOW | `drain_superseded` / `dump_state` | hands out raw internal dicts; a caller mutating them corrupts the next dump | **ACCEPTED** — single-process store; documented as a known gap (§ Not done). A defensive copy is cheap and worth adding if the store ever gains a second consumer |
+| F9 | LOW | supersede-event read APIs / `dump_state` | handing out raw internal dicts let a caller corrupt later dumps | **FIXED** — reads return defensive copies; the destructive drain was replaced by a durable pending/acknowledge outbox in the fourth audit |
 | F10 | LOW | `transition` | cannot CLEAR `approval_set_id` / `published_version` (only set them) | **ACCEPTED** — no contract path requires clearing; flagged for the approval-service spec |
 | F11 | HIGH | `transition:253` | `transition(plan_id, None, "PUBLISHED")` published the LATEST version regardless of which version an approval was bound to — a stale approval could publish a regenerated plan | **FIXED** — mutations require an explicit int version (bool rejected); pinned by `TestF11TransitionRequiresExplicitVersion` |
 | F12 | MED | `sort_operations` | NOT total: `TypeError` on mixed-type key fields — contradicted design decision 4 | **FIXED** — `_total_key` type-rank wrapper (see decision 4 above); pinned by `TestF12SortOperationsIsTotalOnMalformedKeys` |
@@ -556,10 +581,10 @@ re-verified closed afterwards (29 checks, 0 still open).
 > should be able to run it. The authoritative in-repo reproduction is
 > `pytest tests/unit`.
 
-The pattern across all three audits is now the headline finding: **each audit
+The pattern across the first three audits was the headline finding: **each audit
 found things the previous one missed, and the previous one's docs claimed
-completeness.** Three rounds is evidence about the review process, not a reason to
-believe a fourth round would find nothing.
+completeness.** The fourth audit below confirmed that warning with six more
+state-machine and persistence findings.
 
 ### P0-bis — `create_lifecycle()` could mint an authority status
 
@@ -612,8 +637,8 @@ the flag is private so it cannot become a second public bypass.
 
 The dump was a second way in and was wide open: appending a v2 content record to a
 dump whose v1 is APPROVED loaded cleanly. `load_state()` now refuses a stale
-version holding an authority status (its layer-3 check, reusing `_AUTHORITY_STATUSES`
-— see D15 for why it does not require SUPERSEDED).
+version holding an authority status (the then-current layer-3 check; the fourth
+audit widened and renamed the shared set to `_ACTIVE_ONLY_STATUSES`).
 
 ### P1-a — `load_state()` did not relate supersede events to lifecycle records
 
@@ -624,7 +649,7 @@ relationships were missing; all five were measured ACCEPTED before the fix:
 | # | tampering | consequence if loaded |
 |---|---|---|
 | 1 | event's `approval_set_id` rebound to another set | approval service invalidates the WRONG set |
-| 2 | same event duplicated | one set invalidated twice, another never touched (drain is exactly-once) |
+| 2 | same event duplicated | one set could be invalidated twice while another was never touched |
 | 3 | lifecycle flipped back to APPROVED, event kept | resurrects authority the event claims was withdrawn |
 | 4 | event kept, its lifecycle record deleted | event describes nothing — a fabrication |
 | 5 | event deleted, SUPERSEDED record with a bound set kept | approvals never invalidated against a retired plan |
@@ -722,6 +747,110 @@ ordering-or-identity assumption that looked fine until a second case appeared (F
 sorting, the P0-2 escape, now this). The negative control's own lesson applies to its
 own tooling: a verdict you cannot explain is a verdict you cannot trust.
 
+---
+
+## Fourth adversarial audit — lifecycle authority and durable invalidation
+
+The fourth review started from commit `fc908d7`. Before editing, the full suite
+was independently re-run (**384 passed**) and the D20 stale-bytecode probe was
+reproduced. Fresh, read-only probes then found six reachable defects:
+
+| # | reproduced behaviour | risk | disposition |
+|---|---|---|---|
+| A4-1 | consuming the destructive supersede queue and then dumping state produced a dump that `load_state()` rejected | a successful consumer made persistence non-round-trippable | **FIXED** — append-only event history plus separately persisted acknowledgements |
+| A4-2 | forged `invalidation_cause` and an event timestamp different from lifecycle `updated_at` loaded cleanly | a fabricated invalidation event was trusted | **FIXED** — exact cause and timestamp equality are load invariants |
+| A4-3 | content versions `[1, 42]` loaded cleanly | the persistence route bypassed version continuity | **FIXED** — restored versions must be pairwise contiguous |
+| A4-4 | stale v1 could transition back to `AWAITING_APPROVAL` after v2 existed | retired content could reacquire authority | **FIXED** — every authority-bearing status is active-version-only |
+| A4-5 | `DRAFT -> PUBLISHED` worked with no approval, and a mismatched `published_version` was accepted | the store could manufacture publication authority | **FIXED** — local lifecycle prerequisites and exact version binding |
+| A4-6 | an existing approval binding could be replaced, and `PUBLISHED` could return to a mutable state | audit identity could be rewritten after binding | **FIXED** — write-once binding; PUBLISHED may move only to SUPERSEDED |
+
+The supersede API is now a durable outbox:
+
+- `pending_superseded()` returns defensive copies of unacknowledged events and is
+  safe to retry after a consumer crash.
+- `acknowledge_superseded(...)` validates the complete event identity and records
+  an idempotent acknowledgement without deleting history.
+- both event history and acknowledgements participate in `dump_state()` /
+  `load_state()`, including orphan, duplicate, binding and timestamp checks.
+- old dumps that predate `superseded_acks` still load; the new field defaults to
+  an empty list.
+
+`tests/unit/test_audit4_regressions.py` permanently pins the reproductions.
+Eleven new source mutations took the store negative control from 44 to 55 cases:
+at the close of that audit, **53 caught, 0 escaped, 0 broken fixtures, 2 held by
+defence in depth**. The unit suite was **399 passed** and the complete suite
+**402 passed**. The status table carries the post-fifth-audit totals.
+
+This closes the store-local safety gaps. It does **not** claim end-to-end exactly
+once invalidation: the future approval service must consume the pending event,
+perform an idempotent invalidation, and acknowledge it only after that side effect
+commits. The outbox makes that integration possible and crash-retryable; it does
+not pretend an unbuilt service already exists.
+
+---
+
+## Fifth adversarial audit — direct SUPERSEDED route self-locked persistence
+
+A read-only follow-up found that public `transition(..., "SUPERSEDED")` changed
+the lifecycle without recording the immutable supersede event. `dump_state()`
+then wrote that state, while `load_state()` correctly refused it because every
+SUPERSEDED lifecycle must have exactly one event. The store could therefore
+create a dump that it could never load, and the terminal state made the damage
+unrecoverable through public APIs.
+
+The fix establishes one semantic owner:
+
+- public `transition()` rejects SUPERSEDED as a target from every status;
+- `supersede()` alone performs lifecycle retirement plus event construction;
+- `commit_new_version()` uses that same atomic route when regeneration retires
+  the prior version;
+- PUBLISHED can be retired by the supersede route, but cannot be rewritten to a
+  mutable lifecycle state.
+
+The structural regression suite now builds all seven public lifecycle states and
+asserts both halves of the invariant: direct transition to SUPERSEDED is refused,
+and every public reachable state survives byte-identical dump → load → dump.
+It separately proves regeneration of a PUBLISHED version produces one SUPERSEDED
+record, one event, and a loadable store.
+
+One new mutation removes the public-route gate. Current evidence is **414 unit
+tests**, **417 total**, and **54 caught / 0 escaped / 0 broken of 56** mutations,
+with two defence-in-depth cases.
+
+---
+
+## Sixth adversarial audit — crash-safe negative control and canonical edge values
+
+The sixth review found that a normal `finally` restored mutations after Python
+exceptions but could not protect the real repository from process death. This was
+not theoretical: a previous interrupted run left two mutation bodies in the
+working source, and one defence-in-depth mutation could have left the suite green.
+
+The negative control now copies the project (excluding `.git`, caches and the
+virtual environment) into a pytest temporary directory and runs every mutation
+against that disposable repository. Path-sensitive unit tests and the vocabulary
+guard execute inside the copy. The original five mutation targets are snapshotted
+only for a read-only end assertion. A failed or killed runner can now leave at
+worst a dirty temp directory, never commit-eligible source. The behavioural
+signal is preserved: mutations are still caught by their named tests rather than
+by a generic marker scan.
+
+The same review found two canonicalization edge cases:
+
+- an isolated UTF-16 surrogate reached `.encode("utf-8")` and leaked a raw
+  `UnicodeEncodeError`; values and object keys are now scanned and rejected as a
+  registered, contract-shaped `CanonicalizationError` with a JSON path;
+- Python serialized IEEE-754 `-0.0` differently from `0.0`, although the values
+  compare equal and have identical planning meaning; signed zero is now
+  normalized on a copied tree, so callers are not mutated and both forms share
+  one digest.
+
+Four parameter-expanded regression cases pin these behaviours. Two source
+mutations remove the surrogate guard and signed-zero normalization. Current
+evidence is **418 unit tests**, **421 total**, and **56 caught / 0 escaped / 0
+broken of 58** mutations, with two defence-in-depth cases and an explicit
+`working repository unchanged by mutations: True` assertion.
+
 ## Design decisions worth challenging in review
 
 1. **Content validated on write, not on read.** Costs one SHA-256 plus one schema
@@ -747,20 +876,25 @@ own tooling: a verdict you cannot explain is a verdict you cannot trust.
 
    The second half of the decision — validate on write rather than on read — is
    unchanged and still correct.
-2. **`supersede()` is deliberately non-idempotent.** A second call raises.
-   `drain_superseded()` is an exactly-once hand-off to the approval service; a
-   duplicated event would invalidate the same set twice.
-3. **The transition graph is not re-implemented here.** `workflow.transitions` owns
-   it (11 states); lifecycle status is a projection. Only terminality is enforced.
+2. **`supersede()` is deliberately non-idempotent.** A second call raises. Event
+   delivery is at-least-once through `pending_superseded()` plus an idempotent
+   acknowledgement; the approval service must make its side effect idempotent.
+3. **The full transition graph is not re-implemented here.**
+   `workflow.transitions` owns it (11 states); lifecycle status is a projection.
+   The store enforces only its local authority invariants: active-version gates,
+   approval binding, publication prerequisites, SUPERSEDED terminality, and the
+   rule that only the atomic supersede route may retire PUBLISHED content.
    A second copy of the graph is exactly the orphan-spec defect class the V1.8
    review found eight instances of.
-4. **`sort_operations` is TOTAL — it never raises on malformed keys.** Schema
+4. **`sort_operations` is total over canonicalizable JSON key values.** Schema
    validation belongs to `validate_factory_state` / `validate_plan`. The digest
-   layer stays total so a malformed operation still produces a deterministic
-   digest and the failure surfaces where it can be reported properly.
+   layer deterministically orders mixed primitive types so an otherwise malformed
+   operation can still be digested and rejected at the schema boundary. A value
+   with no valid UTF-8 JSON representation is instead rejected with a registered
+   `CanonicalizationError`.
    **This was aspirational until audit finding F12 proved it false:** mixed-type
    sort fields (`lot_no` 1 vs `"1"`) raised `TypeError`, so a malformed plan could
-   not be digested at all. Now each key field is wrapped in `_total_key` →
+   not be digested at all. Now each canonicalizable key field is wrapped in `_total_key` →
    `(type_rank, value)`, which short-circuits cross-type comparison on the rank.
    For well-formed homogeneous input the rank is constant per position, so
    ordering — and the baseline digest `b9aa87e2…` — is unchanged. Pinned by
@@ -788,8 +922,8 @@ cleanenv/Scripts/python.exe -m pytest tests/ -q
 Result at the time of that run: **152 passed in 27.71s**, exit code 0.
 
 **That result is now stale and must not be cited as evidence for the current
-tree.** The suite has grown to 384 tests (381 unit + 3 negative control) through
-three audits' fixes, the ghost test, and the P0 work — and the clean-environment
+tree.** The suite has grown to 421 tests (418 unit + 3 negative control) through
+six audits' fixes, the ghost test, and the P0 work — and the clean-environment
 run has **not** been repeated since. A later attempt to re-run it was stopped
 part-way (only dependencies installed, no tests executed), so no clean-environment
 result exists for the current code.
@@ -812,6 +946,7 @@ the temp venv was deleted afterwards; it is not part of the repo.
 - `tool-error-middleware` — the 18 `details` schemas, UUIDv4 correlation ids, the
   4096-byte envelope
 - `audit-hash-chain` — append-only SHA-256 chain with the genesis sentinel
-- `approval-service` — consumes `drain_superseded()`; atomic set creation,
+- `approval-service` — consumes `pending_superseded()`, applies idempotent
+  invalidation, then calls `acknowledge_superseded()`; atomic set creation,
   snapshot invariants, TTL clamping
 - `dataset-migration` — the critical path for EVAL-020..030

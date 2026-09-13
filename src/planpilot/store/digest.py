@@ -56,14 +56,26 @@ ENGINE_DIGEST_EXCLUDED_FIELDS: frozenset[str] = frozenset({"canonical_plan_hash"
 
 
 def _reject_non_finite(obj: Any, path: str, entity_id: str | None) -> None:
-    """Raise if any float in the tree is NaN/Inf.
+    """Raise if the tree contains NaN/Inf or an isolated UTF-16 surrogate.
 
     json.dumps emits `NaN` and `Infinity` by default. Those are not valid JSON:
     a strict parser rejects them, and a lenient one may read them differently.
     Either way the digest would not be reproducible, so the hole is closed here
-    rather than left to the caller.
+    rather than left to the caller.  With ``ensure_ascii=False``, an isolated
+    surrogate also survives ``json.dumps`` but fails later at UTF-8 encoding.
+    Detecting it here turns that raw ``UnicodeEncodeError`` into the registered,
+    contract-shaped ``CanonicalizationError`` used by the tool boundary.
     """
-    if isinstance(obj, float):
+    if isinstance(obj, str):
+        for index, char in enumerate(obj):
+            if 0xD800 <= ord(char) <= 0xDFFF:
+                raise CanonicalizationError(
+                    f"isolated UTF-16 surrogate U+{ord(char):04X} at {path}[{index}] "
+                    "cannot be canonically serialized",
+                    json_path=f"{path}[{index}]",
+                    entity_id=entity_id,
+                )
+    elif isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
             raise CanonicalizationError(
                 f"non-finite float {obj!r} at {path} cannot be canonically serialized",
@@ -72,10 +84,30 @@ def _reject_non_finite(obj: Any, path: str, entity_id: str | None) -> None:
             )
     elif isinstance(obj, dict):
         for k, v in obj.items():
+            _reject_non_finite(k, f"{path}.<key>" if path else "<key>", entity_id)
             _reject_non_finite(v, f"{path}.{k}" if path else str(k), entity_id)
     elif isinstance(obj, (list, tuple)):
         for i, v in enumerate(obj):
             _reject_non_finite(v, f"{path}[{i}]", entity_id)
+
+
+def _normalize_negative_zero(obj: Any) -> Any:
+    """Return a canonical-value copy in which every ``-0.0`` is ``0.0``.
+
+    IEEE-754 signed zero compares equal and has identical scheduling meaning,
+    but Python's JSON encoder emits ``-0.0`` and ``0.0`` differently.  Without
+    this normalization, equivalent solver output could produce a false digest
+    mismatch.  Containers are copied so canonicalization never mutates input.
+    """
+    if isinstance(obj, float) and obj == 0.0:
+        return 0.0
+    if isinstance(obj, dict):
+        return {k: _normalize_negative_zero(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_negative_zero(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_normalize_negative_zero(v) for v in obj)
+    return obj
 
 
 def canonical_json(obj: Any, *, _path: str = "", _entity_id: str | None = None) -> str:
@@ -89,13 +121,16 @@ def canonical_json(obj: Any, *, _path: str = "", _entity_id: str | None = None) 
                                        silently expand every non-ASCII string
                                        into \\uXXXX escapes
       non-finite      rejected         see _reject_non_finite
+      signed zero     normalized       -0.0 and 0.0 have one representation
+      surrogates      rejected         UTF-8 cannot encode isolated surrogates
       int vs float    type-preserving  json keeps `1` and `1.0` distinct, which
                                        is correct: $defs.kpis separates
                                        `integer` from `number`
     """
     _reject_non_finite(obj, _path, _entity_id)
+    normalized = _normalize_negative_zero(obj)
     return json.dumps(
-        obj,
+        normalized,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -121,9 +156,10 @@ def _total_key(value) -> tuple:
     Audit finding F12: the bare 5-field key raised
     `TypeError: '<' not supported between str and int` on mixed-type lot_no,
     which broke this module's documented promise (design decision 4) that the
-    digest layer is TOTAL — "a malformed operation still produces a
-    deterministic digest". For well-formed homogeneous input every field has one
-    type, so the rank is constant per position and ordering is unchanged.
+    digest layer is total over canonicalizable JSON values. Inputs with no valid
+    UTF-8 JSON form (for example an isolated surrogate) are rejected deliberately.
+    For well-formed homogeneous input every field has one type, so the rank is
+    constant per position and ordering is unchanged.
     """
     rank = _TYPE_RANK.get(type(value), _TYPE_RANK_FALLBACK)
     if rank == _TYPE_RANK_FALLBACK:
@@ -152,8 +188,9 @@ def sort_operations(operations: list[dict]) -> list[dict]:
 
     * F12 (totality): mixed-type key fields (e.g. lot_no 1 vs "1") must not
       raise TypeError. Each field is wrapped in _total_key so cross-type
-      comparison short-circuits on a type rank. The digest layer stays total, as
-      design decision 4 promises; schema rejection belongs to validate_plan.
+      comparison short-circuits on a type rank. The order is total for values
+      with a canonical UTF-8 JSON representation; unencodable strings raise the
+      registered CanonicalizationError before hashing.
 
     The contract's five-field key still governs the primary order. For
     well-formed input the tiebreaker and the type rank never change the result,

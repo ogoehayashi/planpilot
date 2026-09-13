@@ -335,8 +335,8 @@ class TransitionNotAllowedError(StoreInvariantError):
 
     def __init__(self, plan_id: str, plan_version: int, from_status: str, to_status: str) -> None:
         super().__init__(
-            f"plan {plan_id} v{plan_version}: cannot transition {from_status} -> {to_status}; "
-            f"{from_status} is terminal for the store"
+            f"plan {plan_id} v{plan_version}: transition {from_status} -> {to_status} "
+            f"is not allowed by the store's lifecycle invariants"
         )
         self.plan_id = plan_id
         self.plan_version = plan_version

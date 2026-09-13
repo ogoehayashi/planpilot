@@ -6,10 +6,12 @@ guard's own body as evidence of use. Both looked green.
 
 Method — deliberately the unambiguous one
 -----------------------------------------
-Each mutation is written INTO the real source file, the real pytest suite is then
-run against it as a subprocess, and the mutation counts as CAUGHT only if that
-suite FAILS. The file is restored in a `finally`, and the whole run ends by
-asserting `git diff` is empty so a crash cannot leave the tree dirty.
+The repository is copied to a pytest temporary directory once per module. Each
+mutation is written only into that disposable copy, whose real pytest suite is
+then run as a subprocess. A mutation counts as CAUGHT only if that suite FAILS.
+The sandbox file is restored in a `finally` so sequential mutations stay
+independent; if pytest itself is killed, only the temporary copy can remain
+dirty. The working repository is never a mutation target.
 
 The first draft of this file did the opposite: it imported the mutated module and
 asked "did the protection hold?", then recorded True as "caught". That polarity
@@ -36,9 +38,34 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-STORE = ROOT / "src" / "planpilot" / "store"
-UNIT_TESTS = ROOT / "tests" / "unit"
 PYTEST = [sys.executable, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider"]
+
+_SANDBOX_EXCLUDES = {".git", ".pytest_cache", ".venv-review"}
+
+
+@pytest.fixture(scope="module")
+def sandbox_root(tmp_path_factory) -> Path:
+    """Make a disposable but faithful checkout for destructive mutation runs.
+
+    Copying all project entries except VCS/cache/venv state keeps path-sensitive
+    unit tests and the vocabulary guard honest. The copy lives outside ROOT, so
+    SIGKILL after a mutation write cannot alter a file that can be committed.
+    """
+    target = tmp_path_factory.mktemp("planpilot-negctl") / "repo"
+    target.mkdir()
+    for source in ROOT.iterdir():
+        if source.name in _SANDBOX_EXCLUDES:
+            continue
+        destination = target / source.name
+        if source.is_dir():
+            shutil.copytree(
+                source,
+                destination,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+            )
+        else:
+            shutil.copy2(source, destination)
+    return target
 
 
 def _sub_once(source: str, old: str, new: str, label: str) -> str:
@@ -72,7 +99,12 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
     (
         "canonical_json escapes non-ASCII",
         "digest.py",
-        lambda s: _sub_once(s, "ensure_ascii=False", "ensure_ascii=True", "ensure_ascii"),
+        lambda s: _sub_once(
+            s,
+            "        ensure_ascii=False,",
+            "        ensure_ascii=True,  # MUTATION: non-ASCII escaped",
+            "ensure_ascii",
+        ),
         "test_digest_determinism.py",
     ),
     (
@@ -175,6 +207,28 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
         ),
         "test_digest_determinism.py",
     ),
+    (
+        "isolated-surrogate guard removed",
+        "digest.py",
+        lambda s: _sub_once(
+            s,
+            "            if 0xD800 <= ord(char) <= 0xDFFF:",
+            "            if False:  # MUTATION: isolated surrogate accepted",
+            "surrogate guard",
+        ),
+        "test_digest_determinism.py",
+    ),
+    (
+        "negative zero normalization removed",
+        "digest.py",
+        lambda s: _sub_once(
+            s,
+            "    normalized = _normalize_negative_zero(obj)",
+            "    normalized = obj  # MUTATION: signed zero not normalized",
+            "negative-zero normalization",
+        ),
+        "test_digest_determinism.py",
+    ),
     # ---- store invariants
     (
         "write-once enforcement removed",
@@ -214,9 +268,9 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
         "plan_store.py",
         lambda s: _sub_once(
             s,
-            "            raise TransitionNotAllowedError(",
-            "            return record  # MUTATION: re-supersede allowed\n            raise TransitionNotAllowedError(",
-            "TransitionNotAllowedError raise",
+            '        if record["status"] in _TERMINAL:',
+            '        if False:  # MUTATION: re-supersede allowed',
+            "terminal supersede guard",
         ),
         "test_plan_store_invariants.py",
     ),
@@ -258,7 +312,7 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
         "plan_store.py",
         lambda s: _sub_once(
             s,
-            "        if new_status in _AUTHORITY_STATUSES and version != active:",
+            "        if new_status in _ACTIVE_ONLY_STATUSES and version != active:",
             "        if False:  # MUTATION: authority gate removed",
             "authority-status gate",
         ),
@@ -433,7 +487,10 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
         "plan_store.py",
         lambda s: _sub_once(
             s,
-            '                if lc is not None and lc["status"] in _AUTHORITY_STATUSES:',
+            '                if lc is not None and (\n'
+            '                    lc["status"] in _ACTIVE_ONLY_STATUSES\n'
+            '                    or (lc["approval_set_id"] is not None and lc["status"] != "SUPERSEDED")\n'
+            '                ):',
             "                if False:  # MUTATION",
             "layer-3 authority check",
         ),
@@ -468,8 +525,8 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
         lambda s: _sub_once(
             s,
             "            if event_count[key] > 1:",
-            "            if False:  # MUTATION: exactly-once lost",
-            "exactly-once events",
+            "            if False:  # MUTATION: duplicate history allowed",
+            "unique supersede history events",
         ),
         "test_audit3_regressions.py",
     ),
@@ -583,11 +640,150 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
         ),
         "test_audit3_regressions.py",
     ),
+    # ---- fourth audit: durable outbox + semantic lifecycle relationships
+    (
+        "stale version may enter AWAITING_APPROVAL",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '_ACTIVE_ONLY_STATUSES = frozenset({"AWAITING_APPROVAL", "APPROVED", "PUBLISHED"})',
+            '_ACTIVE_ONLY_STATUSES = frozenset({"APPROVED", "PUBLISHED"})  # MUTATION',
+            "active-only approval request",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "DRAFT may jump directly to PUBLISHED",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '                record["status"] != "APPROVED"\n'
+            '                or candidate["approval_set_id"] is None',
+            '                False  # MUTATION: predecessor ignored\n'
+            '                or candidate["approval_set_id"] is None',
+            "published predecessor",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "published_version need not equal plan_version",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '                or candidate["published_version"] != version',
+            '                or False  # MUTATION: publication binding ignored',
+            "published version binding",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "approval-set binding may be replaced",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '            if record["approval_set_id"] not in (None, approval_set_id):',
+            '            if False:  # MUTATION: approval binding can be replaced',
+            "approval binding immutability",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "PUBLISHED may return to a mutable state",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '        if record["status"] == "PUBLISHED" and new_status != "SUPERSEDED":',
+            '        if False:  # MUTATION: published rollback accepted',
+            "published successor restriction",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "public transition may bypass atomic supersede event creation",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '        if new_status == "SUPERSEDED" and not allow_superseded:',
+            '        if False:  # MUTATION: direct SUPERSEDED accepted',
+            "public SUPERSEDED route gate",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "supersede event cause is not bound to its type",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '            if event["invalidation_cause"] != _CAUSE_SUPERSEDED:',
+            '            if False:  # MUTATION: cause relationship ignored',
+            "supersede cause",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "supersede event time no longer matches lifecycle",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '            if event["superseded_at"] != lc["updated_at"]:',
+            '            if False:  # MUTATION: time relationship ignored',
+            "supersede time",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "load_state accepts a version gap",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            "                if current != previous + 1:",
+            "                if False:  # MUTATION: continuity ignored",
+            "load-state continuity",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "acknowledgement is not persisted",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '            "superseded_acks": sorted(self._superseded_acks.values(), key=_ack_sort_key),',
+            '            "superseded_acks": [],  # MUTATION: ack lost on restart',
+            "ack persistence",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "acknowledged event is still returned as pending",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '            if (event["plan_id"], event["plan_version"]) not in self._superseded_acks',
+            '            if True  # MUTATION: ack ignored',
+            "pending filter",
+        ),
+        "test_audit4_regressions.py",
+    ),
+    (
+        "acknowledgement binding is not verified",
+        "plan_store.py",
+        lambda s: _sub_once(
+            s,
+            '        if (\n'
+            '            event["plan_digest"] != plan_digest\n'
+            '            or event["approval_set_id"] != approval_set_id\n'
+            '        ):',
+            '        if False:  # MUTATION: acknowledgement binding ignored',
+            "ack binding",
+        ),
+        "test_audit4_regressions.py",
+    ),
 ]
 
 
-def _run_suite(test_file: str | None) -> subprocess.CompletedProcess:
-    target = UNIT_TESTS if test_file is None else UNIT_TESTS / test_file
+def _run_suite(root: Path, test_file: str | None) -> subprocess.CompletedProcess:
+    unit_tests = root / "tests" / "unit"
+    target = unit_tests if test_file is None else unit_tests / test_file
     # PYTHONDONTWRITEBYTECODE is load-bearing, not a tidy-up. CPython validates a
     # cached .pyc against the source mtime TRUNCATED TO WHOLE SECONDS plus its
     # size, so when two mutations are written within the same second and happen to
@@ -595,30 +791,35 @@ def _run_suite(test_file: str | None) -> subprocess.CompletedProcess:
     # mutation's stale bytecode and runs the wrong code. That made this control
     # intermittent: P1-a(2) — an equal-length `if …:` -> `if False:` swap —
     # reported a false escape inside the control while passing 7/7 in isolation.
-    # Reproduced deterministically in _audit_scratch/probe_pyc_stale.py.
+    # Reproduced deterministically in tools/probes/probe_pyc_stale.py.
     #
     # Disabling bytecode writing means every child compiles from source, so a
     # mutation can never be masked by a stale .pyc. The cost is recompiling src/
     # per child, which is a few files.
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    inherited_path = os.environ.get("PYTHONPATH")
+    sandbox_path = str(root / "src")
+    env = {
+        **os.environ,
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": sandbox_path + (os.pathsep + inherited_path if inherited_path else ""),
+    }
     return subprocess.run(
         [*PYTEST, str(target)],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=root, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=600, env=env,
     )
 
 
-def _clear_pycache() -> int:
+def _clear_pycache(root: Path) -> int:
     """Remove every __pycache__ under src/ and tests/ so no stale .pyc survives.
 
-    The baseline fixture runs the suite WITHOUT the env override above if it is
-    ever invoked directly, and any earlier manual test run leaves bytecode behind.
-    Clearing once before the mutation loop, combined with PYTHONDONTWRITEBYTECODE
-    on every child, guarantees the loop never reads a .pyc from before it started.
-    Only src/ and tests/ are touched — never the venv.
+    The sandbox copy already excludes caches. Clearing once before the mutation
+    loop, combined with PYTHONDONTWRITEBYTECODE on every child, also protects
+    against any bytecode produced by the baseline or a future sandbox setup step.
+    Only the sandbox's src/ and tests/ are touched — never the working tree or venv.
     """
     removed = 0
-    for base in (ROOT / "src", ROOT / "tests"):
+    for base in (root / "src", root / "tests"):
         for cache in base.rglob("__pycache__"):
             if cache.is_dir():
                 shutil.rmtree(cache, ignore_errors=True)
@@ -626,7 +827,7 @@ def _clear_pycache() -> int:
     return removed
 
 
-def _mutate_target(name: str) -> Path:
+def _mutate_target(root: Path, name: str) -> Path:
     """Where a mutation's file lives.
 
     A bare basename means `src/planpilot/store/<name>`, which is how every
@@ -640,21 +841,22 @@ def _mutate_target(name: str) -> Path:
     the wrong one, and the mutation would report "no change" or — worse — change
     something the suite does not cover.
     """
-    candidate = STORE / name
+    store = root / "src" / "planpilot" / "store"
+    candidate = store / name
     if candidate.exists():
         return candidate
-    resolved = ROOT / name
+    resolved = root / name
     if not resolved.exists():
         raise AssertionError(
-            f"mutation target {name!r} is neither in {STORE} nor at {resolved}"
+            f"mutation target {name!r} is neither in {store} nor at {resolved}"
         )
     return resolved
 
 
 @pytest.fixture(scope="module")
-def baseline():
+def baseline(sandbox_root):
     """The suite must be green before any mutation, or every result is meaningless."""
-    result = _run_suite(None)
+    result = _run_suite(sandbox_root, None)
     assert result.returncode == 0, (
         f"baseline suite is not green — negative control cannot interpret results:\n"
         f"{result.stdout[-3000:]}"
@@ -662,7 +864,7 @@ def baseline():
     return result
 
 
-def test_mutations_are_detected(baseline):
+def test_mutations_are_detected(baseline, sandbox_root):
     caught, escaped, broken = [], [], []
     # Mutations with expected_suite=None assert defence-in-depth: removing ONE
     # layer must NOT break the suite, because the other layer still holds.
@@ -672,7 +874,14 @@ def test_mutations_are_detected(baseline):
         "digest.py", "plan_store.py", "errors.py",
         "src/planpilot/validation/schema.py", "tests/_fixtures.py",
     )
-    pristine = {name: _mutate_target(name).read_bytes() for name in pristine_names}
+    pristine = {
+        name: _mutate_target(sandbox_root, name).read_bytes()
+        for name in pristine_names
+    }
+    working_tree_before = {
+        name: _mutate_target(ROOT, name).read_bytes()
+        for name in pristine_names
+    }
 
     # Clear any bytecode left by an earlier run BEFORE mutating, so the first
     # child cannot read a .pyc that predates this control. Every child also runs
@@ -680,11 +889,11 @@ def test_mutations_are_detected(baseline):
     # during the loop either. Belt and braces: the env var alone would suffice for
     # children, but a stale .pyc on disk could still be read by any process that
     # does NOT set it, so removing them costs nothing and closes that hole.
-    _clear_pycache()
+    _clear_pycache(sandbox_root)
 
     try:
         for label, filename, mutate, expected_suite in MUTATIONS:
-            path = _mutate_target(filename)
+            path = _mutate_target(sandbox_root, filename)
             original = pristine[filename].decode("utf-8")
             try:
                 mutated = mutate(original)
@@ -697,7 +906,7 @@ def test_mutations_are_detected(baseline):
 
             path.write_bytes(mutated.replace("\r\n", "\n").encode("utf-8"))
             try:
-                result = _run_suite(expected_suite)
+                result = _run_suite(sandbox_root, expected_suite)
             finally:
                 path.write_bytes(pristine[filename])
 
@@ -733,9 +942,9 @@ def test_mutations_are_detected(baseline):
                     escaped.append(f"{label} (suite passed — the guard did not detect it)")
     finally:
         for name, data in pristine.items():
-            _mutate_target(name).write_bytes(data)
+            _mutate_target(sandbox_root, name).write_bytes(data)
 
-    # ---- the sources must be exactly the bytes we captured at start
+    # ---- sandbox sources are restored; working sources were never targets
     #
     # This used to assert `git status --porcelain src/planpilot/store` was empty.
     # That was WRONG: it couples "did the test undo its own mutations" to "is the
@@ -750,9 +959,13 @@ def test_mutations_are_detected(baseline):
     # one.
     not_restored = [
         name for name, data in pristine.items()
-        if _mutate_target(name).read_bytes() != data
+        if _mutate_target(sandbox_root, name).read_bytes() != data
     ]
     restored = not not_restored
+    working_tree_changed = [
+        name for name, data in working_tree_before.items()
+        if _mutate_target(ROOT, name).read_bytes() != data
+    ]
 
     total = len(MUTATIONS)
     print()
@@ -770,8 +983,13 @@ def test_mutations_are_detected(baseline):
         print(f"  ESCAPED: {e}")
     print(f"sources restored to pre-test bytes: {restored}"
           + (f" (not restored: {not_restored})" if not_restored else ""))
+    print(f"working repository unchanged by mutations: {not working_tree_changed}"
+          + (f" (changed: {working_tree_changed})" if working_tree_changed else ""))
 
     assert restored, f"the store sources were not restored: {not_restored}"
+    assert not working_tree_changed, (
+        f"negative control changed files in the working repository: {working_tree_changed}"
+    )
     assert not broken, f"{len(broken)} mutation fixtures did not apply; results would be theatre"
     assert not escaped, f"{len(escaped)} mutations escaped detection"
     # every "must fail" mutation caught, plus every defence-in-depth case held

@@ -61,6 +61,7 @@ _NEGCTL_RE = re.compile(
     r"NEGATIVE CONTROL \(store\) \| caught=(\d+) escaped=(\d+) broken_fixtures=(\d+) of (\d+)"
 )
 _RESTORED_RE = re.compile(r"sources restored to pre-test bytes: (\w+)")
+_WORKING_TREE_RE = re.compile(r"working repository unchanged by mutations: (\w+)")
 
 
 def _extract_negative_control(out: str) -> dict:
@@ -86,8 +87,16 @@ def _extract_negative_control(out: str) -> dict:
 
     r = _RESTORED_RE.search(out)
     restored = (r.group(1) == "True") if r else None
+    w = _WORKING_TREE_RE.search(out)
+    working_tree_unchanged = (w.group(1) == "True") if w else None
 
-    ok = (escaped == 0 and broken == 0 and restored is True and total > 0)
+    ok = (
+        escaped == 0
+        and broken == 0
+        and restored is True
+        and working_tree_unchanged is True
+        and total > 0
+    )
     return {
         "ok": ok,
         "caught": caught,
@@ -95,6 +104,7 @@ def _extract_negative_control(out: str) -> dict:
         "broken_fixtures": broken,
         "total": total,
         "sources_restored": restored,
+        "working_repository_unchanged": working_tree_unchanged,
         "detail": m.group(0),
     }
 
@@ -160,6 +170,31 @@ def main() -> int:
         "float_1_0": hashlib.sha256(canonical_json({"x": 1.0}).encode()).hexdigest(),
         "distinct": canonical_json({"x": 1}) != canonical_json({"x": 1.0}),
     }
+
+    # signed zero has one canonical representation; solver output must not gain
+    # a different digest merely because an IEEE-754 zero carries a sign bit.
+    signed_negative = {"kpis": {"overtime_hours": -0.0}, "operations": []}
+    signed_positive = {"kpis": {"overtime_hours": 0.0}, "operations": []}
+    refs["signed_zero"] = {
+        "negative_canonical_json": canonical_json(signed_negative),
+        "positive_canonical_json": canonical_json(signed_positive),
+        "canonical_json_equal": canonical_json(signed_negative) == canonical_json(signed_positive),
+        "digest_equal": canonical_plan_digest(signed_negative) == canonical_plan_digest(signed_positive),
+    }
+
+    # An isolated surrogate cannot be UTF-8 encoded. Record that the public API
+    # converts it to the registered error shape instead of leaking a codec error.
+    from planpilot.store.errors import CanonicalizationError
+    try:
+        canonical_plan_digest({"plan_id": "PLN-SURROGATE", "note": "bad\ud800text"})
+    except CanonicalizationError as exc:
+        refs["isolated_surrogate"] = {
+            "exception": type(exc).__name__,
+            "error_code": exc.code,
+            "json_path": exc.json_path,
+        }
+    else:  # pragma: no cover - evidence generation must fail loudly if this regresses
+        raise AssertionError("isolated surrogate unexpectedly produced a digest")
 
     # sort key demonstration
     ops = [
@@ -290,6 +325,18 @@ def main() -> int:
                     "assumed the layers were redundant and was wrong."
                 ),
                 "status": "resolved — pinned by test_layer1_error_is_not_the_same_as_layer2",
+            },
+            {
+                "id": "F-STORE-03",
+                "summary": "Canonicalization leaked UnicodeEncodeError and distinguished signed zero.",
+                "detail": (
+                    "Isolated UTF-16 surrogates in string values or object keys are "
+                    "now rejected as contract-shaped CanonicalizationError before "
+                    "UTF-8 encoding. Every -0.0 value is normalized on a copied tree "
+                    "to 0.0, so semantically equal signed zeros have one digest without "
+                    "mutating caller input."
+                ),
+                "status": "resolved — pinned by TestUnicodeAndSignedZeroEdges",
             },
         ],
     }

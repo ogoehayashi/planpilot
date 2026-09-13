@@ -318,8 +318,9 @@ class TestLifecycle:
     def test_recreating_cannot_rewind_a_progressed_record(self, store, content, fixtures):
         """The reason recreation is refused: it would rewind status and binding."""
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
-        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1,
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
                          approval_set_id="AS-001")
+        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1)
         with pytest.raises(LifecycleAlreadyExistsError):
             store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T2)
         assert store.get_lifecycle(content["plan_id"], 1)["status"] == "APPROVED"
@@ -340,8 +341,12 @@ class TestLifecycle:
     def test_lifecycle_mutation_does_not_change_the_content_digest(self, store, content, fixtures):
         before = store.verify_digest(content["plan_id"], 1)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
-        for status in ("PROPOSED", "AWAITING_APPROVAL", "APPROVED", "PUBLISHED"):
-            store.transition(content["plan_id"], 1, status, ts=fixtures.T1)
+        store.transition(content["plan_id"], 1, "PROPOSED", ts=fixtures.T1)
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
+                         approval_set_id="AS-001")
+        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1)
+        store.transition(content["plan_id"], 1, "PUBLISHED", ts=fixtures.T1,
+                         published_version=1)
         assert store.verify_digest(content["plan_id"], 1) == before
 
 
@@ -356,6 +361,8 @@ class TestOptimisticConcurrency:
 
     def test_expected_version_match_succeeds(self, store, content, fixtures):
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
+                         approval_set_id="AS-001", expected_plan_version=1)
         rec = store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1,
                                expected_plan_version=1)
         assert rec["status"] == "APPROVED"
@@ -373,8 +380,10 @@ class TestOptimisticConcurrency:
         API at all (audit finding P1-b).
         """
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
-        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1,
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
                          approval_set_id="AS-001", expected_plan_version=1)
+        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1,
+                         expected_plan_version=1)
 
         v2 = copy.deepcopy(content)
         v2["plan_version"] = 2
@@ -423,7 +432,7 @@ class TestSupersede:
         store.supersede(content["plan_id"], 1, ts=fixtures.T2)
 
         assert store.get_lifecycle(content["plan_id"], 1)["status"] == "SUPERSEDED"
-        events = store.drain_superseded()
+        events = store.pending_superseded()
         assert len(events) == 1
         assert events[0]["approval_set_id"] == "AS-001"
         assert events[0]["plan_digest"] == content["plan_digest"]
@@ -442,25 +451,33 @@ class TestSupersede:
         # the binding is still recorded; invalidation is the consumer's job
         assert store.get_lifecycle(content["plan_id"], 1)["approval_set_id"] == "AS-001"
 
-    def test_drain_is_exactly_once(self, store, content, fixtures):
+    def test_pending_is_retried_until_acknowledged(self, store, content, fixtures):
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
         store.supersede(content["plan_id"], 1, ts=fixtures.T1)
-        assert len(store.drain_superseded()) == 1
-        assert store.drain_superseded() == []
-        assert store.drain_superseded() == []
+        event = store.pending_superseded()[0]
+        assert store.pending_superseded() == [event], "unacknowledged delivery is retried"
+        store.acknowledge_superseded(
+            event["plan_id"], event["plan_version"], event["plan_digest"],
+            event["approval_set_id"], ts=fixtures.T2,
+        )
+        assert store.pending_superseded() == []
 
     def test_supersede_is_not_idempotent(self, store, content, fixtures):
         """A second call must raise, not double-record the event.
 
-        drain_superseded() is an exactly-once hand-off; a duplicated event would
-        invalidate the same approval set twice.
+        Supersede history is immutable and unique; delivery retries are made safe
+        by consumer idempotency plus explicit acknowledgement.
         """
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
         store.supersede(content["plan_id"], 1, ts=fixtures.T1)
-        store.drain_superseded()
+        event = store.pending_superseded()[0]
+        store.acknowledge_superseded(
+            event["plan_id"], event["plan_version"], event["plan_digest"],
+            event["approval_set_id"], ts=fixtures.T2,
+        )
         with pytest.raises(TransitionNotAllowedError):
             store.supersede(content["plan_id"], 1, ts=fixtures.T2)
-        assert store.drain_superseded() == [], "no second event may be recorded"
+        assert store.pending_superseded() == [], "no second event may be recorded"
 
     def test_terminal_status_blocks_any_further_transition(self, store, content, fixtures):
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)

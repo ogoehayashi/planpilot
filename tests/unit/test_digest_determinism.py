@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import math
 import random
 
 import pytest
@@ -220,6 +221,42 @@ class TestNonFiniteFloatsRejected:
         # the two are different exception types with different information
         assert type(ours.value) is not type(stdlib.value)
         assert hasattr(ours.value, "details") and not hasattr(stdlib.value, "details")
+
+
+class TestUnicodeAndSignedZeroEdges:
+    @pytest.mark.parametrize(
+        ("payload", "expected_path"),
+        [
+            ({"note": "bad\ud800text"}, "note[3]"),
+            ({"bad\udfffkey": "value"}, "<key>[3]"),
+        ],
+    )
+    def test_isolated_surrogate_is_a_contract_shaped_error(
+        self, content, fixtures, payload, expected_path
+    ):
+        changed = copy.deepcopy(content)
+        changed["surrogate_probe"] = payload
+
+        with pytest.raises(CanonicalizationError) as exc:
+            canonical_plan_digest(changed)
+
+        assert exc.value.code == "INVALID_INPUT"
+        assert expected_path in exc.value.json_path
+        fixtures.validate(exc.value.details, "error_details_invalid_input")
+
+    def test_negative_zero_has_the_same_canonical_form_and_digest_as_zero(self):
+        negative = {"kpis": {"overtime_hours": -0.0}, "operations": []}
+        positive = {"kpis": {"overtime_hours": 0.0}, "operations": []}
+
+        assert canonical_json(negative) == canonical_json(positive)
+        assert canonical_plan_digest(negative) == canonical_plan_digest(positive)
+
+    def test_negative_zero_normalization_does_not_mutate_the_input(self):
+        value = {"outer": [{"zero": -0.0}]}
+
+        canonical_json(value)
+
+        assert math.copysign(1.0, value["outer"][0]["zero"]) == -1.0
 
 
 class TestSerializationChoices:

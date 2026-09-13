@@ -232,8 +232,10 @@ def contract_sha256(path: Path | None = None) -> str:
 def contract_path() -> Path:
     """The authoritative contract this package validates against.
 
-    Resolved from this file's location so it works installed, in-repo, and from
-    any cwd. Two properties, both added for audit finding P2:
+    Resolved from this file's location so it works from any cwd inside a source
+    checkout. Packaging the contract as an installed resource is deliberately
+    deferred until deployment packaging exists. Two properties, both added for
+    audit finding P2:
 
     1. Highest SEMANTIC version wins, not highest filename (see
        _contract_version for the lexicographic counterexample).

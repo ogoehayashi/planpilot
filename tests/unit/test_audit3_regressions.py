@@ -105,7 +105,7 @@ class TestLoadStateRelatesEventsToLifecycle:
         fresh = PlanStore()
         fresh.load_state(path)
         assert fresh.get_lifecycle(content["plan_id"], 1)["status"] == "SUPERSEDED"
-        assert len(fresh.drain_superseded()) == 1
+        assert len(fresh.pending_superseded()) == 1
 
     def test_an_event_rebound_to_another_approval_set_is_refused(self, store, content, tmp_path):
         """The audit's case 1. The approval service would invalidate the wrong set."""
@@ -122,8 +122,7 @@ class TestLoadStateRelatesEventsToLifecycle:
         assert len(fresh) == 0
 
     def test_a_duplicated_supersede_event_is_refused(self, store, content, tmp_path):
-        """The audit's case 2. drain_superseded() is exactly-once, so a second
-        event is fabricated — it would invalidate the same set twice."""
+        """The audit's case 2. Immutable history is unique per version."""
         path = self._dump_with_supersede(store, content, tmp_path)
 
         def duplicate(raw):
@@ -133,7 +132,7 @@ class TestLoadStateRelatesEventsToLifecycle:
         fresh = PlanStore()
         with pytest.raises(InvalidContentError) as exc:
             fresh.load_state(path)
-        assert "exactly-once" in str(exc.value)
+        assert "second history event" in str(exc.value)
         assert len(fresh) == 0
 
     def test_a_superseded_lifecycle_flipped_back_is_refused(self, store, content, tmp_path):
@@ -180,19 +179,13 @@ class TestLoadStateRelatesEventsToLifecycle:
         fresh = PlanStore()
         with pytest.raises(InvalidContentError) as exc:
             fresh.load_state(path)
-        assert "never be invalidated" in str(exc.value)
+        assert "audit history is incomplete" in str(exc.value)
         assert len(fresh) == 0
 
-    def test_a_superseded_record_with_no_approval_set_needs_no_event(
+    def test_a_superseded_record_with_no_approval_set_still_needs_history(
         self, store, content, tmp_path
     ):
-        """The boundary of check 5: nothing was bound, so nothing to invalidate.
-
-        commit_new_version() supersedes a version that has a lifecycle record
-        even when no approval set was ever attached, and emits an event with
-        approval_set_id=None. Deleting that event must stay loadable, or the
-        converse check would be stricter than the live path.
-        """
+        """No approval set means no invalidation side effect, not no audit fact."""
         store.put_content(content)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
                                ts=fixtures.T0)
@@ -208,8 +201,8 @@ class TestLoadStateRelatesEventsToLifecycle:
         path.write_text(json.dumps(raw), encoding="utf-8")
 
         fresh = PlanStore()
-        fresh.load_state(path)
-        assert fresh.get_lifecycle(content["plan_id"], 1)["status"] == "SUPERSEDED"
+        with pytest.raises(InvalidContentError):
+            fresh.load_state(path)
 
     def test_the_event_checks_report_the_event_not_the_content(self, store, content, tmp_path):
         """entity_type must say what was actually rejected (audit-adjacent fix).
@@ -265,17 +258,17 @@ class TestLoadStateRefusesStaleAuthority:
         assert exc.value.details["rejected_entity_type"] == "plan_lifecycle"
         assert len(fresh) == 0
 
-    @pytest.mark.parametrize("status", ["DRAFT", "PROPOSED", "AWAITING_APPROVAL", "BLOCKED"])
+    @pytest.mark.parametrize("status", ["DRAFT", "PROPOSED", "BLOCKED"])
     def test_a_stale_version_without_authority_still_loads(self, store, content, tmp_path, status):
         """Layer 3 must not be stricter than transition().
 
         Measured, not assumed: an earlier version of this check required
-        SUPERSEDED, which refused all four of these states — all of which the live
+        SUPERSEDED, which refused these states — all of which the live
         API produces, because commit_new_version() skips the supersede when the
         previous version has no lifecycle record and then create_lifecycle() can
         attach one. Refusing them broke dump/load round-trip fidelity AND encoded
         a second copy of the authority policy, free to drift from
-        _AUTHORITY_STATUSES. That is the orphan-spec defect class.
+        _ACTIVE_ONLY_STATUSES. That is the orphan-spec defect class.
         """
         # Build the state through the live API, exactly as probe_roundtrip.py did.
         store.put_content(content)
@@ -285,8 +278,7 @@ class TestLoadStateRefusesStaleAuthority:
                                ts=fixtures.T0)
         if status != "DRAFT":
             store.transition(content["plan_id"], 1, status, ts=fixtures.T2,
-                             approval_set_id="AS-001" if status == "AWAITING_APPROVAL"
-                             else None)
+                             approval_set_id=None)
         assert store.current_active_version(content["plan_id"]) == 2
         assert store.get_lifecycle(content["plan_id"], 1)["status"] == status
 

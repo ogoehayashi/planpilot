@@ -49,7 +49,10 @@ def run(args, cwd=ROOT):
     return p.returncode, p.stdout + p.stderr
 
 
-PY = r"E:\PlanPilot-Hackathon\contract-review\.venv\Scripts\python.exe"
+# Run every child with the interpreter that launched this checker.  The previous
+# machine-specific path made the supposedly portable handoff unverifiable from a
+# clone on any other workstation.
+PY = sys.executable
 
 print("=== A. git claims (snapshot-based, not live) ===")
 # The doc names a snapshot commit and states counts AS OF it. A committed document
@@ -57,7 +60,10 @@ print("=== A. git claims (snapshot-based, not live) ===")
 # unsatisfiable by construction — the same self-reference a digest avoids by
 # excluding itself. Verify instead that the named snapshot is real and is an
 # ancestor of (or equal to) HEAD, and that the stated counts match that snapshot.
-m = re.search(r"Snapshot for the counts in this document: commit `([0-9a-f]{7,40})`", text)
+m = re.search(
+    r"(?:Snapshot for the counts in this document: commit|[a-z]+-audit remediation started from commit) `([0-9a-f]{7,40})`",
+    text,
+)
 ck(m is not None, "doc names a snapshot commit")
 if m:
     snap = m.group(1)
@@ -187,10 +193,9 @@ def _passed_count(out: str) -> int | None:
 def _single_negctl_run():
     """Run the negative control, refusing to interpret a run that did not finish.
 
-    Two negative-control runs must never overlap: each writes mutations into the
-    real source files and restores them in `finally`, so concurrent runs corrupt
-    each other's bytes and both report garbage. This helper is the only place the
-    control is invoked, and the caller is expected to have nothing else running.
+    Mutations execute in a disposable repository copy. This helper still invokes
+    only one run because parallel copies would add cost without adding evidence,
+    but process death can no longer leave the working repository mutated.
     """
     rc, out = run([PY, "-m", "pytest", "tests/negative_control", "-q",
                    "--no-header", "-s", "-p", "no:cacheprovider"])
@@ -233,6 +238,8 @@ nc_claimed = _claimed_passed("pytest tests/negative_control")
 ck(nc_claimed == nc_actual, f"negative-control tests: doc claims {nc_claimed}, pytest reports {nc_actual}")
 ck("sources restored to pre-test bytes: true" in out.lower() or "restored: true" in out.lower(),
    "sources restored after mutations")
+ck("working repository unchanged by mutations: true" in out.lower(),
+   "mutations ran without changing the working repository")
 
 # full suite: the doc cites a historical 152 (clean-env) and a current total
 rc, out = run([PY, "-m", "pytest", "tests/", "-q", "--no-header", "-p", "no:cacheprovider"])
@@ -289,7 +296,8 @@ for rel in ["IMPLEMENTATION_NOTES.md",
             "tests/negative_control/test_plan_store_negctl.py",
             "tests/evidence/plan-store-and-digest/EVIDENCE.json",
             "requirements-dev.txt", ".kiro/hooks/guard-spec-tasks.json",
-            "../contract-review/REVIEW_HANDOFF_FOR_CODEX.md"]:
+            "FOURTH_AUDIT_REMEDIATION_REPORT.md", "FIFTH_AUDIT_REMEDIATION_REPORT.md",
+            "SIXTH_AUDIT_REMEDIATION_REPORT.md"]:
     ck((ROOT / rel).exists(), f"{rel} exists")
 
 print("\n=== G. named tests actually exist ===")
@@ -348,9 +356,15 @@ print("\n=== J. evidence pack contents match the doc ===")
 ev = json.loads((ROOT / "tests/evidence/plan-store-and-digest/EVIDENCE.json").read_bytes().decode("utf-8"))
 ck(ev["all_green"] is True, "evidence pack reports all_green")
 ck(ev["contract"]["sha256"] == h, "evidence pack contract hash matches disk")
+ck(ev["results"]["negative_control"]["working_repository_unchanged"] is True,
+   "evidence pack records mutation isolation from the working repository")
 rd = ev["reference_digests"]
 ck(rd["shuffled_operations_10_seeds"]["matches_baseline"] is True, "shuffle invariance recorded as true")
 ck(rd["int_vs_float"]["distinct"] is True, "int/float distinction recorded as true")
+ck(rd["signed_zero"]["canonical_json_equal"] is True and rd["signed_zero"]["digest_equal"] is True,
+   "signed-zero normalization recorded as true")
+ck(rd["isolated_surrogate"]["error_code"] == "INVALID_INPUT",
+   "isolated surrogate recorded as a registered error")
 ck(rd["non_ascii_assumption"]["canonical_text_contains_raw_cjk"] is True, "non-ASCII recorded as raw CJK")
 ck("scope_statement" in ev and "NOT an EVAL" in ev["scope_statement"], "scope statement disclaims EVAL status")
 ck("reference digests" in text.lower(), "doc mentions the reference digests")

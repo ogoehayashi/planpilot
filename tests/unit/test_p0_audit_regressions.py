@@ -215,6 +215,8 @@ class TestP01LifecycleTimestampIsValidated:
         store.put_content(content)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
                                ts=fixtures.T0)
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
+                         approval_set_id="AS-001")
         before = store.get_lifecycle(content["plan_id"], 1)
         with pytest.raises(SchemaViolationError):
             store.transition(content["plan_id"], 1, "APPROVED", ts="garbage")
@@ -317,6 +319,8 @@ class TestP02StaleVersionCannotBePublished:
         store.put_content(content)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
                                ts=fixtures.T0)
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
+                         approval_set_id="AS-001", expected_plan_version=1)
         rec = store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1,
                                expected_plan_version=1)
         assert rec["status"] == "APPROVED"
@@ -372,21 +376,22 @@ class TestP02CommitNewVersionIsAtomic:
         """plan_store.versioning: a superseded version moves to SUPERSEDED.
 
         Before commit_new_version() existed, writing v2 left v1 sitting at
-        APPROVED with drain_superseded() empty — the contract's invalidation
+        APPROVED with no supersede event — the contract's invalidation
         requirement was simply not implemented on the write path.
         """
         store.put_content(content)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
                                ts=fixtures.T0)
-        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1,
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
                          approval_set_id="AS-001")
+        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1)
 
         v2 = next_version(content, 2, on_time_rate=0.6)
         rec = store.commit_new_version(v2, ts=fixtures.T2)
 
         assert rec["status"] == "DRAFT"
         assert store.get_lifecycle(content["plan_id"], 1)["status"] == "SUPERSEDED"
-        events = store.drain_superseded()
+        events = store.pending_superseded()
         assert len(events) == 1
         assert events[0]["plan_version"] == 1
         assert events[0]["approval_set_id"] == "AS-001"
@@ -400,7 +405,7 @@ class TestP02CommitNewVersionIsAtomic:
                                ts=fixtures.T0)
         store.commit_new_version(next_version(content, 2, on_time_rate=0.6),
                                  ts=fixtures.T1)
-        event = store.drain_superseded()[0]
+        event = store.pending_superseded()[0]
         assert event["invalidation_cause"] in INVALIDATION_CAUSES
 
     def test_the_superseded_version_cannot_come_back(self, store, content):
@@ -439,7 +444,7 @@ class TestP02CommitNewVersionIsAtomic:
         first = next_version(content, 5)
         rec = store.commit_new_version(first, ts=fixtures.T0)
         assert rec["plan_version"] == 5
-        assert store.drain_superseded() == []
+        assert store.pending_superseded() == []
 
     def test_a_failed_commit_leaves_the_store_untouched(self, store, content):
         """Any step failing must roll the whole thing back."""
@@ -459,7 +464,7 @@ class TestP02CommitNewVersionIsAtomic:
         assert store._content == before_content
         assert store._lifecycle == before_lifecycle
         assert store.versions(content["plan_id"]) == [1]
-        assert store.drain_superseded() == []
+        assert store.pending_superseded() == []
 
     def test_a_bad_timestamp_rolls_the_commit_back(self, store, content):
         """The lifecycle step can fail after content was written — rollback matters."""
@@ -537,7 +542,7 @@ class TestP02CommitNewVersionIsAtomic:
         assert store.current_active_version(content["plan_id"]) == 2
         assert store.get_lifecycle(content["plan_id"], 1)["status"] == "SUPERSEDED"
         # and the invalidation event was recorded for the approval service
-        events = store.drain_superseded()
+        events = store.pending_superseded()
         assert len(events) == 1
         assert events[0]["approval_set_id"] == "AS-001"
 
@@ -549,8 +554,9 @@ class TestP1LoadStateRejectsAForgedDump:
         store.put_content(content)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"],
                                ts=fixtures.T0)
-        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1,
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
                          approval_set_id="AS-001")
+        store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1)
         if with_second_version:
             v2 = next_version(content, 2, on_time_rate=0.6)
             store.commit_new_version(v2, ts=fixtures.T2)
@@ -620,7 +626,7 @@ class TestP1LoadStateRejectsAForgedDump:
         with pytest.raises(PlanNotFoundError):
             fresh.load_state(path)
         assert len(fresh) == 0
-        assert fresh.drain_superseded() == []
+        assert fresh.pending_superseded() == []
 
     def test_an_event_with_the_wrong_digest_is_refused(self, tmp_path, content, store):
         path = self._dump(store, content, tmp_path, with_second_version=True)

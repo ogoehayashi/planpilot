@@ -64,6 +64,8 @@ another machine, so all are pinned here and asserted in tests:
 | `ensure_ascii` | **`False`** | non-ASCII (Chinese product notes) hashes as itself; `True` would silently double the byte count of any non-ASCII string |
 | float repr | shortest round-trip (`repr`) | Python's default; stable across runs on the same version |
 | non-finite floats | **rejected** | `NaN`/`Infinity` are not valid JSON and `json.dumps` emits them by default — a silent reproducibility hole |
+| signed zero | **normalize `-0.0` to `0.0`** | IEEE-754 signed zeros compare equal and have identical planning meaning; they must not create different digests |
+| isolated UTF-16 surrogates | **rejected as `CanonicalizationError`** | `ensure_ascii=False` preserves them until UTF-8 encoding, where a raw `UnicodeEncodeError` would otherwise escape the registered error model |
 | int vs float | type-preserving | `1` and `1.0` serialize differently, which is correct: the contract distinguishes `integer` from `number` in `kpis` |
 | excluded fields | `plan_digest`, `engine.canonical_plan_hash` | required to avoid circularity |
 | operations order | `(start_time, machine_id, order_id, lot_no, operation_no)` | the contract's sort key |
@@ -106,7 +108,7 @@ imports from `inference/`. The digest is computed without an LLM in the loop.
 ### 3.1 `digest.py`
 
 ```python
-canonical_json(obj) -> str          # pinned canonical form; raises on non-finite float
+canonical_json(obj) -> str          # pinned form; controlled error on unencodable/non-finite input
 canonical_plan_digest(content) -> str
 sort_operations(operations) -> list # contract sort key, stable
 assert_digest_consistent(content)   # the two identities in §2.2
@@ -116,6 +118,10 @@ assert_digest_consistent(content)   # the two identities in §2.2
 a clock, a file, or an environment variable — otherwise the same content would
 hash differently on two machines and the retention promise
 ("digests are recomputable from stored content at any time") would be false.
+Its supported domain includes malformed operation sort-key types so ordering can
+be computed deterministically. Inputs that have no valid UTF-8 JSON encoding
+(isolated surrogates) are rejected with `CanonicalizationError`; "pure" does not
+mean every Python object must be accepted.
 
 ### 3.2 `errors.py`
 
@@ -135,12 +141,16 @@ All three are non-retryable per `tool_execution_contract.retryability_registry`.
 
 ```python
 PlanStore()
-  .put_content(content) -> None          # write-once; recomputes and verifies digest
+  .put_content(content) -> str           # first version only; verifies schema + digest
+  .commit_new_version(content, ts) -> dict # contiguous, atomic supersede + outbox
   .get_content(plan_id, version=None) -> dict
   .get_lifecycle(plan_id, version=None) -> dict
-  .create_lifecycle(plan_id, version, digest, status="DRAFT", ts) -> dict
-  .transition(plan_id, version, new_status, ts, approval_set_id=None) -> dict
+  .create_lifecycle(plan_id, version, digest, ts) -> dict # always DRAFT
+  .transition(plan_id, version, new_status, ts, approval_set_id=None,
+              published_version=None, expected_plan_version=None) -> dict
   .supersede(plan_id, version, ts) -> None
+  .pending_superseded() -> list[dict]    # non-destructive, at-least-once delivery
+  .acknowledge_superseded(..., ts) -> dict # after idempotent consumer commits
   .latest_version(plan_id) -> int
   .verify_digest(plan_id, version) -> str # recompute from stored bytes
   .dump_state() / .load_state()           # JSON persistence for the evidence pack
@@ -155,10 +165,11 @@ PlanStore()
    a corrupt plan never enters the store.
 3. Every stored `plan_content` validates against `$defs/plan_content` with
    `additionalProperties: false`, so an unknown field cannot ride along.
-4. `supersede` sets `status=SUPERSEDED`. Per `plan_store.versioning` the
-   superseded version's approval sets are invalidated — this module does not own
-   approval sets, so it emits the fact (`superseded` event list) for the approval
-   service to consume. **No silent cross-module mutation.**
+4. `supersede` sets `status=SUPERSEDED` and appends one immutable history event.
+   Delivery state is separate: the approval service reads pending events,
+   invalidates idempotently, then acknowledges. A crash before acknowledgement
+   retries rather than loses the invalidation. **No silent cross-module mutation
+   and no destructive drain.**
 5. Persistence writes canonical JSON with LF newlines, so a dumped store is
    byte-reproducible (same rule as `.gitattributes`).
 
@@ -172,11 +183,15 @@ make the evidence pack unreproducible.
 `APPROVED`, `PUBLISHED`, `BLOCKED`, `SUPERSEDED`.
 
 The **authoritative** transition table is `workflow.transitions` (11 states,
-lifecycle status is a projection of workflow state). This module deliberately
-does **not** re-implement that table — it accepts a status and validates it is in
-the enum. Re-implementing the graph here would create a second source of truth
-that could drift, which is exactly the orphan-spec defect class the V1.8 review
-found eight instances of.
+lifecycle status is a projection of workflow state). This module does not copy
+the complete graph. It does enforce lifecycle-local facts that can never be valid
+under any orchestration: approval-bearing states are active-only, APPROVED needs
+an existing approval-set binding, PUBLISHED follows APPROVED with
+`published_version == plan_version`, and approval bindings cannot be replaced.
+SUPERSEDED is terminal. Public `transition()` cannot target SUPERSEDED because
+that would omit its required invalidation event. A later replanning cycle retires
+the old PUBLISHED version only through the atomic `supersede()` /
+`commit_new_version()` route.
 
 ---
 
@@ -203,12 +218,17 @@ credentials.
 | digest changes when any single content field changes | no field is silently ignored |
 | digest unchanged when any lifecycle field changes | §2.3 |
 | `NaN` / `Infinity` rejected | §2.1 non-finite guard |
+| isolated surrogate in a value or key becomes contract-shaped error | §2.1 UTF-8 domain |
+| `-0.0` and `0.0` share a digest without input mutation | §2.1 signed-zero normalization |
 | non-ASCII string digests identically to its UTF-8 bytes | `ensure_ascii=False` |
 | both identities in §2.2 hold | digest == `canonical_plan_hash` == `plan_digest` |
 | write-once: different bytes rejected, identical bytes idempotent | invariant 1 |
 | corrupt plan rejected at `put_content`, not at read | invariant 2 |
 | unknown field rejected | invariant 3 |
 | `supersede` sets status and records the event without touching approvals | invariant 4 |
+| unacknowledged event survives dump/load and is retried | durable outbox; no crash-window loss |
+| acknowledged event leaves pending delivery but remains in history | retention + idempotent delivery |
+| stale approval request and direct DRAFT→PUBLISHED are rejected | lifecycle-local authority boundary |
 | `dump_state()` → `load_state()` → re-digest identical | retention promise |
 | every raised error's `details` validates against its contract schema | §3.2 |
 | injected clock: no `datetime.now()` reachable from store code | §3.3 |

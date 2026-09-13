@@ -5,7 +5,8 @@ store validates against both through `planpilot.validation`. Two shapes are left
 over that the store itself invented:
 
 * the persistence envelope written by `dump_state` / read by `load_state`
-* the supersede events handed to the approval service via `drain_superseded`
+* the durable supersede outbox read through `pending_superseded` and acknowledged
+  through `acknowledge_superseded`
 
 `load_state` originally restored both with no checks at all — audit finding P1. A
 hand-edited dump could carry a duplicate `(plan_id, plan_version)` key, which the
@@ -29,7 +30,7 @@ pinned by test, so a drift fails loudly:
 
 from __future__ import annotations
 
-__all__ = ["STATE_SCHEMA", "SUPERSEDED_EVENT_SCHEMA"]
+__all__ = ["STATE_SCHEMA", "SUPERSEDED_EVENT_SCHEMA", "SUPERSEDED_ACK_SCHEMA"]
 
 # Mirrors $defs.error_details_approval_set_invalidated.properties.invalidation_cause.
 # Must stay equal to plan_store.INVALIDATION_CAUSES; pinned by test.
@@ -91,6 +92,27 @@ SUPERSEDED_EVENT_SCHEMA: dict = {
     "additionalProperties": False,
 }
 
+# Delivery acknowledgement for the durable supersede outbox.  It is deliberately
+# separate from SUPERSEDED_EVENT_SCHEMA: the event is immutable audit history,
+# while acknowledgement is mutable delivery state.  Combining them would make an
+# acknowledgement rewrite the audit record that the retention promise says to
+# keep.
+SUPERSEDED_ACK_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "plan_id": {"type": "string", "minLength": 1},
+        "plan_version": {"type": "integer", "minimum": 0},
+        "plan_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "approval_set_id": {"type": ["string", "null"]},
+        "acknowledged_at": {"type": "string", "format": "date-time"},
+    },
+    "required": [
+        "plan_id", "plan_version", "plan_digest", "approval_set_id",
+        "acknowledged_at",
+    ],
+    "additionalProperties": False,
+}
+
 STATE_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -103,7 +125,14 @@ STATE_SCHEMA: dict = {
             "type": "array",
             "items": SUPERSEDED_EVENT_SCHEMA,
         },
+        "superseded_acks": {
+            "type": "array",
+            "items": SUPERSEDED_ACK_SCHEMA,
+        },
     },
+    # superseded_acks was added after the first evidence format.  load_state()
+    # treats an omitted list as empty so an old, otherwise-valid dump remains
+    # readable; every newly written dump includes it.
     "required": ["content", "lifecycle", "superseded_events"],
     # Closed on purpose: an unknown top-level key means the dump was not written
     # by dump_state, so loading it would be trusting a file of unknown origin.

@@ -16,6 +16,8 @@ independent tasks concurrently (see `.kiro/specs/README.md`).
       `assert_digest_consistent`.
       Pins every decision in design.md §2.1: UTF-8, `sort_keys=True`,
       separators `(",", ":")`, `ensure_ascii=False`, reject non-finite floats,
+      reject isolated UTF-16 surrogates with a registered error, normalize
+      `-0.0` to `0.0` without mutating input,
       exclude `plan_digest` and `engine.canonical_plan_hash`.
       Sort key: `(start_time, machine_id, order_id, lot_no, operation_no)`
       per `scheduling_engine.determinism.canonical_serialization`.
@@ -26,7 +28,8 @@ independent tasks concurrently (see `.kiro/specs/README.md`).
       200 repeat runs identical · dict-key insertion order shuffled → identical ·
       `random.shuffle(operations)` across 10 seeds → identical ·
       `NaN` and `Infinity` rejected · non-ASCII hashes as its UTF-8 bytes ·
-      `1` vs `1.0` produce different digests.
+      isolated surrogates produce contract-shaped errors · `-0.0` and `0.0`
+      share one digest · `1` vs `1.0` produce different digests.
 
 - [x] **1.3 Test the two digest identities**
       `tests/unit/test_digest_identity.py`
@@ -55,9 +58,11 @@ independent tasks concurrently (see `.kiro/specs/README.md`).
 ## Phase 3 — the store (depends on 1.1, 2.1)
 
 - [x] **3.1 Implement `src/planpilot/store/plan_store.py`**
-      `put_content` (write-once, recomputes and verifies digest before storing),
-      `get_content`, `get_lifecycle`, `create_lifecycle`, `transition`,
-      `supersede`, `latest_version`, `verify_digest`, `dump_state`, `load_state`.
+      `put_content` (first version only; recomputes and verifies digest),
+      `commit_new_version`, `get_content`, `get_lifecycle`, `create_lifecycle`,
+      `transition`, `supersede`, `pending_superseded`,
+      `acknowledge_superseded`, `latest_version`, `verify_digest`, `dump_state`,
+      `load_state`.
       **Clock injected via `ts` argument — `datetime.now()` must not appear.**
       Validate stored content against `$defs.plan_content`.
 
@@ -65,8 +70,9 @@ independent tasks concurrently (see `.kiro/specs/README.md`).
       `tests/unit/test_plan_store_invariants.py`
       write-once: different bytes raise, identical bytes idempotent ·
       corrupt plan rejected at `put_content` not at read ·
-      unknown field rejected · `supersede` sets `SUPERSEDED` and records an event
-      without mutating any approval set · injected clock reproducibility.
+      unknown field rejected · `supersede` records immutable history · pending
+      delivery survives restart until explicitly acknowledged · stale approval
+      and invalid publication transitions rejected · injected clock reproducibility.
 
 - [x] **3.3 Test the retention promise**
       `tests/unit/test_plan_store_persistence.py`
@@ -143,7 +149,7 @@ Note that 2.2 and 3.2 are the same defect shape as F13 (the ghost test): a file
 that exists, is cited as a guarantee, and does not prove what it is cited for.
 Existence is not completion.
 
-### Evidence at tick time
+### Evidence at original tick time (historical)
 
 ```
 pytest tests/ -q                              337 passed
@@ -151,6 +157,22 @@ negative control (store)                      caught=29 escaped=0 broken_fixture
 tools/check_closed_vocabularies.py            CLOSED VOCABULARY CHECK | PASS
 tools/check_closed_vocabularies.py --self-test SELF-TEST | PASS
 tools/generate_kiro_workspace.py              7 steering, 2 hooks, exit 0
+tools/validate_kiro_workspace.py              ok=190 fail=0
+tools/negative_control_workspace.py           caught=14 escaped=0 of 14
+contract sha256                               b92e53f4ff054105... (unchanged)
+```
+
+### Current evidence after the sixth audit (2026-09-13)
+
+```
+pytest tests/unit -q                         418 passed
+pytest tests/negative_control -q             3 passed; 56 caught, 0 escaped,
+                                               0 broken fixtures of 58;
+                                               working repository unchanged
+pytest tests/ -q                             421 passed
+tools/check_closed_vocabularies.py           PASS; 21 vocabularies,
+                                               135 members, 32 modules
+tools/check_closed_vocabularies.py --self-test SELF-TEST | PASS (17 cases)
 tools/validate_kiro_workspace.py              ok=190 fail=0
 tools/negative_control_workspace.py           caught=14 escaped=0 of 14
 contract sha256                               b92e53f4ff054105... (unchanged)

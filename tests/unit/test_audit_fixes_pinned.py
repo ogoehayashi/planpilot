@@ -193,6 +193,8 @@ class TestF11TransitionRequiresExplicitVersion:
     def test_transition_with_an_explicit_int_still_works(self, store, content):
         store.put_content(content)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
+                         approval_set_id="AS-001")
         rec = store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1)
         assert rec["status"] == "APPROVED"
 
@@ -247,6 +249,8 @@ class TestF1LoadStateValidatesLifecycle:
     def test_round_trip_of_a_valid_state_succeeds(self, store, content, tmp_path):
         store.put_content(content)
         store.create_lifecycle(content["plan_id"], 1, content["plan_digest"], ts=fixtures.T0)
+        store.transition(content["plan_id"], 1, "AWAITING_APPROVAL", ts=fixtures.T1,
+                         approval_set_id="AS-001")
         store.transition(content["plan_id"], 1, "APPROVED", ts=fixtures.T1)
         p = tmp_path / "state.json"
         store.dump_state(p)

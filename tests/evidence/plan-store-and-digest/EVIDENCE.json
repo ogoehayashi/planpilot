@@ -1,6 +1,6 @@
 {
   "spec": "plan-store-and-digest",
-  "generated_at_utc": "2026-09-13T04:04:32+00:00",
+  "generated_at_utc": "2026-09-13T11:21:17+00:00",
   "contract": {
     "schema_version": "1.8.0",
     "sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
@@ -36,6 +36,17 @@
       "int_1": "5041bf1f713df204784353e82f6a4a535931cb64f1f4b4a5aeaffcb720918b22",
       "float_1_0": "bf32f56236899e13ef54db875d136c6cbcc65244464829c54911aa9069b0ae25",
       "distinct": true
+    },
+    "signed_zero": {
+      "negative_canonical_json": "{\"kpis\":{\"overtime_hours\":0.0},\"operations\":[]}",
+      "positive_canonical_json": "{\"kpis\":{\"overtime_hours\":0.0},\"operations\":[]}",
+      "canonical_json_equal": true,
+      "digest_equal": true
+    },
+    "isolated_surrogate": {
+      "exception": "CanonicalizationError",
+      "error_code": "INVALID_INPUT",
+      "json_path": "plan_content.note[3]"
     },
     "operation_sort_key": {
       "key_fields": [
@@ -84,18 +95,19 @@
   "results": {
     "unit_tests": {
       "exit_code": 0,
-      "summary": "381 passed in 4.21s"
+      "summary": "418 passed in 5.24s"
     },
     "negative_control": {
       "exit_code": 0,
-      "summary": "3 passed in 71.75s (0:01:11)",
+      "summary": "3 passed in 162.14s (0:02:42)",
       "ok": true,
-      "caught": 42,
+      "caught": 56,
       "escaped": 0,
       "broken_fixtures": 0,
-      "total": 44,
+      "total": 58,
       "sources_restored": true,
-      "detail": "NEGATIVE CONTROL (store) | caught=42 escaped=0 broken_fixtures=0 of 44"
+      "working_repository_unchanged": true,
+      "detail": "NEGATIVE CONTROL (store) | caught=56 escaped=0 broken_fixtures=0 of 58"
     },
     "vocabulary_guard_self_test": {
       "exit_code": 0,
@@ -127,6 +139,12 @@
       "summary": "The two non-finite-float layers are not interchangeable.",
       "detail": "_reject_non_finite raises CanonicalizationError with contract-shaped details and a json_path; allow_nan=False raises a bare ValueError with neither. Removing layer 1 still blocks NaN but produces an error the tool layer cannot turn into a valid tool_error. Measured by the negative control, which initially assumed the layers were redundant and was wrong.",
       "status": "resolved — pinned by test_layer1_error_is_not_the_same_as_layer2"
+    },
+    {
+      "id": "F-STORE-03",
+      "summary": "Canonicalization leaked UnicodeEncodeError and distinguished signed zero.",
+      "detail": "Isolated UTF-16 surrogates in string values or object keys are now rejected as contract-shaped CanonicalizationError before UTF-8 encoding. Every -0.0 value is normalized on a copied tree to 0.0, so semantically equal signed zeros have one digest without mutating caller input.",
+      "status": "resolved — pinned by TestUnicodeAndSignedZeroEdges"
     }
   ]
 }

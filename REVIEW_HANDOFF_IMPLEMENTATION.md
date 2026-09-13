@@ -2,18 +2,14 @@
 
 **For:** an independent reviewer (Codex, or a human)
 **From:** the implementing agent (Hermes)
-**Date:** 2026-09-12
-**Repo:** `E:\PlanPilot-Hackathon\planpilot-build` — git, **no remote yet**.
-Snapshot for the counts in this document: commit `8ddbb2d` (19 commits, 56 files tracked, working tree clean at
-the time of writing). Commit/HEAD/tracked counts are stated *as of that commit*
-and are not live values: a committed document cannot state the HEAD of the
-commit that contains it. `tools/factcheck_impl_handoff.py` verifies the named
-snapshot commit exists and is an ancestor of HEAD rather than equal to it.
-
-The line counts and test totals describe that same snapshot. An earlier revision
-named `79777fc` while carrying numbers measured on a later tree, which made the
-document internally inconsistent — the snapshot reference has to move with the
-numbers, not stay pinned to the commit where the document was first written.
+**Date:** 2026-09-13
+**Repo:** the directory containing this file — git, **no remote yet**.
+The sixth-audit remediation started from commit `fc908d7` (21 commits,
+57 files tracked at that snapshot). The line counts and test totals below are live
+measurements of the remediated tree. The delivery baseline is the clean Git commit
+supplied with this handoff; `fc908d7` is provenance, not the delivered revision.
+`tools/factcheck_impl_handoff.py` verifies both the snapshot provenance and the
+live claims.
 
 This document is deliberately sceptical of its own subject. Where a claim could be
 verified mechanically, it was, and the command is given. Where the implementer
@@ -21,16 +17,17 @@ made a judgement call, the call is named so it can be attacked.
 
 **Read in this order:**
 1. this file
-2. `IMPLEMENTATION_NOTES.md` — the defects found while building (D1–D20), the
-   external audit findings (F1–F15), and finding F-STORE-01
-3. `.kiro/specs/plan-store-and-digest/design.md` — what the module is supposed to do
-4. `.kiro/specs/plan-store-and-digest/tasks.md` — the task list it was built against
-5. the code: `src/planpilot/store/{digest,errors,plan_store}.py`
+2. `SIXTH_AUDIT_REMEDIATION_REPORT.md` — the latest findings, changes and verdict
+3. `IMPLEMENTATION_NOTES.md` — the defects found while building (D1–D21), the
+   six external audits, and finding F-STORE-01
+4. `.kiro/specs/plan-store-and-digest/design.md` — what the module is supposed to do
+5. `.kiro/specs/plan-store-and-digest/tasks.md` — the task list it was built against
+6. the code: `src/planpilot/store/{digest,errors,plan_store}.py`
 
-The **contract** review handoff is a separate document:
-`../contract-review/REVIEW_HANDOFF_FOR_CODEX.md`. It covers V1.8 of
-`planpilot_agent_contract_v1.8.json`. This file covers only the first
-implementation spec.
+The contract under review is included at
+`contract/planpilot_agent_contract_v1.8.json`. This handoff is self-contained for
+the first implementation spec; it does not require a sibling repository or any
+uncommitted scratch probe.
 
 ---
 
@@ -48,36 +45,36 @@ so **14 of the 15 do not exist yet** — not merely untouched, but unstarted.
 supported; the count is now taken from the README's own table.)
 
 **No LLM, network, credential or dataset was involved.** This is enforced by the
-fact that the test suite runs in a clean venv with only `jsonschema`, `ortools`
-(transitively) and `pytest` installed — verified in §3.
+fact that the historical clean-environment run used only the direct pins in
+`requirements.txt` (`jsonschema`, `ortools`) and `requirements-dev.txt` (`pytest`)
+plus their transitive dependencies — see §2.1 and its stated age limit.
 
-Scale: **8,480 lines** across 26 Python files (the subject; the factcheck tool that
-measures them is excluded to avoid self-reference); tracked-file count is as of the
-snapshot commit.
+Scale: **9,471 lines** across 27 Python files (the subject; the factcheck tool that
+measures them is excluded to avoid self-reference).
 
 | layer | lines | files |
 |---|---|---|
-| `src/planpilot/` — store + validation packages + top-level init | 2,457 | 8 |
-| `tests/unit/` — 10 test modules + init | 3,768 | 11 |
-| `tests/negative_control/` | 798 | 2 |
+| `src/planpilot/` — store + validation packages + top-level init | 2,777 | 8 |
+| `tests/unit/` — 11 test modules + init | 4,174 | 12 |
+| `tests/negative_control/` | 1,016 | 2 |
 | `tests/_fixtures.py`, `conftest.py`, `__init__.py` | 409 | 3 |
 | `tools/check_closed_vocabularies.py` | 734 | 1 |
-| `tools/write_evidence_plan_store.py` | 314 | 1 |
-| **subject total** | **8,480** | **26** |
+| `tools/write_evidence_plan_store.py` | 361 | 1 |
+| **subject total** | **9,471** | **27** |
 
-`tools/factcheck_impl_handoff.py` (361 lines) checks the table above, so it is
+`tools/factcheck_impl_handoff.py` (375 lines) checks the table above, so it is
 **deliberately excluded from the total** — the same reason `canonical_plan_digest`
 excludes `plan_digest` and `engine.canonical_plan_hash` from the hashed payload. A
 checker that counts itself makes the figure move every time the checker is edited,
 which is a circular dependency, not a measurement.
 
-The repo holds 31 Python files totalling 10,259 lines. The five not in the table are
-`factcheck_impl_handoff.py` (361, excluded for the circularity reason above); three
+The repo holds 32 Python files totalling 11,264 lines. The five not in the table are
+`factcheck_impl_handoff.py` (375, excluded for the circularity reason above); three
 tools that belong to the Kiro workspace rather than to this spec:
 `generate_kiro_workspace.py` (1,014), `validate_kiro_workspace.py` (189) and
 `negative_control_workspace.py` (88); and `tools/probes/probe_pyc_stale.py` (127),
 the D20 reproduction, which is evidence rather than product code.
-8,480 + 361 + 1,291 + 127 = 10,259.
+9,471 + 375 + 1,291 + 127 = 11,264.
 
 ---
 
@@ -85,41 +82,36 @@ the D20 reproduction, which is evidence rather than product code.
 
 Every number below was produced by running the command, not estimated.
 
-```bash
-cd E:\PlanPilot-Hackathon\planpilot-build
-set PY=E:\PlanPilot-Hackathon\contract-review\.venv\Scripts\python.exe
-```
+Run these commands from the directory containing this file with the active
+Python 3.11 environment described in §2.1.
 
 | # | command | result |
 |---|---|---|
-| 1 | `%PY% -m pytest tests/unit -q` | **381 passed** |
-| 2 | `%PY% -m pytest tests/negative_control -q` | **3 passed** (44 mutations) |
-| 3 | `%PY% tools/check_closed_vocabularies.py --self-test` | **SELF-TEST \| PASS** (17 cases) |
-| 4 | `%PY% tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 31 modules scanned |
-| 5 | `%PY% tools/validate_kiro_workspace.py` | **ok=190 fail=0** |
-| 6 | `%PY% tools/negative_control_workspace.py` | **caught=14 escaped=0 of 14** |
-| 7 | `sha256sum contract/planpilot_agent_contract_v1.8.json` | `b92e53f4ff054105…` unchanged |
+| 1 | `python -m pytest tests/unit -q` | **418 passed** |
+| 2 | `python -m pytest tests/negative_control -q` | **3 passed** (58 mutations) |
+| 3 | `python tools/check_closed_vocabularies.py --self-test` | **SELF-TEST \| PASS** (17 cases) |
+| 4 | `python tools/check_closed_vocabularies.py` | **PASS** — 21 vocabularies, 135 members, 32 modules scanned |
+| 5 | `python tools/validate_kiro_workspace.py` | **ok=190 fail=0** |
+| 6 | `python tools/negative_control_workspace.py` | **caught=14 escaped=0 of 14** |
+| 7 | `python -c "import hashlib,pathlib; print(hashlib.sha256(pathlib.Path('contract/planpilot_agent_contract_v1.8.json').read_bytes()).hexdigest())"` | `b92e53f4ff054105…` unchanged |
 
-Negative-control detail (from the run): **42 caught / 0 escaped / 0 broken
-fixtures of 44**, sources restored to their pre-test bytes. The restore check
+Negative-control detail (from the run): **56 caught / 0 escaped / 0 broken
+fixtures of 58**, with 2 deliberate defence-in-depth cases, sandbox sources
+restored to their pre-test bytes, and the working repository unchanged. The runner
+now mutates a disposable repository copy, so process death cannot strand a mutation
+in commit-eligible source. The restore check
 used to compare `git status --porcelain`, which wrongly failed whenever legitimate
 uncommitted work existed; it now compares against the pristine bytes captured at
 test start (the actual invariant), and it covers files outside `store/` too.
 Two non-"caught" cases are intentional defence-in-depth demonstrations — see §5.
 
-**One escape was reported once and could not be reproduced.** A single `factcheck`
-run printed `caught=42 escaped=1 broken_fixtures=0 of 44`. Five subsequent direct
-runs of the control — three with bytecode caching on, two with
-`PYTHONDONTWRITEBYTECODE=1` — all printed `escaped=0`. The escape was not reproduced
-and its cause is NOT claimed here; stating a mechanism I did not demonstrate would
-be the same failure as the ghost test this repo keeps finding.
-
-What that run DID expose is two real bugs in the checker, both now fixed and both
-independent of the escape:
+A previously intermittent `escaped=1` was later reproduced as stale `.pyc`
+reuse and fixed by disabling bytecode writes and clearing caches before mutation
+runs (D20). That investigation also exposed two independent checker bugs:
 
 - `nc_actual` used `re.search(r"(\d+) passed", out)`, the FIRST match. The control's
   baseline fixture embeds up to 3000 chars of the UNIT suite's output in its failure
-  message, so "381 passed" appears before the control's own "3 passed" — the checker
+  message, so a unit-suite pass count appears before the control's own "3 passed" — the checker
   compared the doc's negative-control count against the unit count. It now takes the
   LAST match (pytest writes its summary last).
 - The tally check hardcoded `caught == total - 1`, assuming exactly one
@@ -145,8 +137,8 @@ cleanenv\Scripts\python.exe -m pytest tests/ -q
 **152 passed in 27.71s, exit 0.** Only the two requirements files were used. The
 temp venv was deleted afterwards and is not in the repo.
 
-That run predates later additions (the filename-reference pins in §3.1, both
-audits' fixes, and the ghost test). The suite is now **384 tests** (381 unit + 3 negative
+That run predates later additions (the filename-reference pins in §3.1, six
+audits' fixes, and the ghost test). The suite is now **421 tests** (418 unit + 3 negative
 control). The clean-environment claim is about the two requirements files being
 sufficient, which is unaffected — but it was last measured at 152 tests, so
 re-run it for the current count rather than trusting either number. The last
@@ -410,9 +402,84 @@ and P0-1/P0-2, so each defence can be traced to the audit that forced it.
 `IMPLEMENTATION_NOTES.md` §"Third external audit" has the full account.
 
 **Three audits, three different sets of findings, each after the previous round's
-docs claimed completeness.** That is the single most important thing a reviewer
-should take from this section: it is evidence about the review process, not a
-reason to believe a fourth round would find nothing.
+docs claimed completeness.** The fourth audit below proved that warning was
+warranted.
+
+### 2.5 Fourth audit: durable outbox and lifecycle authority
+
+The fourth audit started from `fc908d7`. Its baseline was independently verified
+at 384 passing tests before any edit. Six reachable defects were then reproduced:
+
+| # | finding | fix |
+|---|---|---|
+| A4-1 | destructive event consumption made the next dump unloadable | append-only event history plus persisted, idempotent acknowledgements |
+| A4-2 | forged cause and event/lifecycle timestamp disagreement loaded | exact cause and timestamp relationship checks |
+| A4-3 | dump versions `[1, 42]` loaded | pairwise continuity check |
+| A4-4 | a stale version could re-enter `AWAITING_APPROVAL` | all authority-bearing statuses require the active version |
+| A4-5 | `DRAFT -> PUBLISHED` and a wrong `published_version` were accepted | approval prerequisite and exact publication binding |
+| A4-6 | approval binding could be replaced; `PUBLISHED` could return to a mutable state | write-once binding; PUBLISHED may move only to SUPERSEDED |
+
+The old destructive `drain_superseded()` API is gone. Consumers now call
+`pending_superseded()`, apply an idempotent approval invalidation, and call
+`acknowledge_superseded(...)` only after the side effect commits. Event history
+is never deleted. Both history and acknowledgements round-trip through state;
+legacy dumps without the acknowledgement field remain readable.
+
+The permanent reproductions are in `tests/unit/test_audit4_regressions.py`.
+Eleven new mutations brought the control to 55 cases: **53 caught, 0 escaped,
+0 broken fixtures, 2 defence-in-depth**. At the close of that audit the suite was
+399 unit tests plus 3 negative-control wrapper tests, **402 total**.
+
+This is a store-local guarantee, not an end-to-end exactly-once claim. The
+approval service is still unbuilt and must make its invalidation idempotent.
+
+### 2.6 Fifth audit: one atomic route into SUPERSEDED
+
+The follow-up review found a persistence self-lock: public
+`transition(..., "SUPERSEDED")` created a terminal lifecycle without the event
+that `load_state()` requires, so the store could dump a state it could never
+reload. The contract describes SUPERSEDED as the result of version replacement,
+not as a workflow transition.
+
+Public `transition()` now rejects that target. `supersede()` is the single
+lower-level owner of lifecycle retirement plus immutable event creation, and
+`commit_new_version()` uses it for regeneration. Tests enumerate all seven
+publicly reachable lifecycle states: every direct transition to SUPERSEDED is
+rejected without mutation, and every state survives byte-identical
+dump → load → dump. Regenerating a PUBLISHED version is separately pinned.
+
+One new negative-control mutation removes this route gate. Current results:
+**414 unit tests, 417 total; 54 caught / 0 escaped / 0 broken of 56**, plus two
+defence-in-depth cases.
+
+### 2.7 Sixth audit: crash containment and canonical edge inputs
+
+The sixth review reproduced a process-death hole in the negative control. Its
+`finally` restored files after ordinary exceptions, but SIGKILL after the mutation
+write left the real repository dirty. This had already happened in delivery: two
+mutation bodies remained in `plan_store.py`, and one defence-in-depth mutation
+could have survived while all ordinary unit tests stayed green.
+
+The runner now makes one disposable repository copy per negative-control module,
+including every path needed by path-sensitive tests and the vocabulary guard. All
+58 mutations and their pytest children execute there. The original five target
+files are only read to assert that their bytes remain unchanged. A killed runner
+can leave a temp directory behind, but cannot modify source that Git can commit.
+A generic mutation-marker collector was deliberately not used as the primary
+defence because it would catch every mutation for the same superficial reason and
+destroy the behavioural signal.
+
+The review also found that an isolated UTF-16 surrogate leaked
+`UnicodeEncodeError`, and that `-0.0` and `0.0` produced different digests.
+Canonicalization now rejects isolated surrogates in string values and object keys
+as `CanonicalizationError(code="INVALID_INPUT")` with a JSON path. It normalizes
+signed zero on a copied tree, so equal zero values share one digest without
+mutating caller input.
+
+Four parameter-expanded regression tests and two source mutations pin those
+decisions. Current results: **418 unit tests, 421 total; 56 caught / 0 escaped /
+0 broken of 58**, plus two defence-in-depth cases. The negative-control output
+also states `working repository unchanged by mutations: True`.
 
 ## 3. The closed-vocabulary guard (the part I would most like attacked)
 
@@ -585,8 +652,10 @@ decision is asserted by a test:
 | separators | `(",", ":")` | `test_no_whitespace_in_canonical_form` |
 | `ensure_ascii` | `False` | `test_non_ascii_is_not_escaped` |
 | non-finite floats | rejected, with contract-shaped error | `TestNonFiniteFloatsRejected` (5 tests) |
+| isolated UTF-16 surrogates | rejected in values and object keys with contract-shaped error | `test_isolated_surrogate_is_a_contract_shaped_error` |
+| signed zero | every `-0.0` normalized to `0.0` on a copy | `test_negative_zero_has_the_same_canonical_form_and_digest_as_zero`, `test_negative_zero_normalization_does_not_mutate_the_input` |
 | int vs float | type-preserving (`1` ≠ `1.0`) | `test_int_and_float_are_distinguished` |
-| operations order | `(start_time, machine_id, order_id, lot_no, operation_no)`, then a canonical-JSON tiebreaker and a per-field type rank so the order is TOTAL | `test_sort_operations_uses_the_contract_key`, `TestF4…`, `TestF12…` |
+| operations order | `(start_time, machine_id, order_id, lot_no, operation_no)`, then a canonical-JSON tiebreaker and a per-field type rank giving a total order over canonicalizable JSON values | `test_sort_operations_uses_the_contract_key`, `TestF4…`, `TestF12…` |
 | algorithm | SHA-256 of that exact text | `test_digest_equals_sha256_of_canonical_text` |
 
 **Both identities must hold**, per `$defs.plan_content.plan_digest.description`
@@ -612,18 +681,22 @@ the opposite choice is safer?
 
 ## 5. Negative control — including the defect it exposed in itself
 
-`tests/negative_control/test_plan_store_negctl.py`, 44 mutations across five
+`tests/negative_control/test_plan_store_negctl.py`, 58 mutations across five
 files: `digest.py`, `plan_store.py`, `errors.py`,
 `src/planpilot/validation/schema.py` and `tests/_fixtures.py`. The last two were
 added with the third audit — the runner had been hardwired to `store/`, so no
 mutation could reach the validator or the fixtures, and both are where that
 audit's findings were fixed.
 
-**Method.** Each mutation is written into the **real** source file, the **real**
-pytest suite runs as a subprocess, and the mutation counts as caught only if that
-suite **fails**. The file is restored in `finally`, and the test ends by asserting
-every mutated file still equals the pristine bytes captured at start. It used to
-assert `git status --porcelain src/planpilot/store` was empty instead, which
+**Method.** The repository is copied to a pytest temporary directory and every
+mutation is written only into that disposable copy. Its real pytest suite runs as
+a subprocess, and the mutation counts as caught only if that suite **fails**. The
+sandbox file is restored in `finally` for sequential independence; process death
+can no longer dirty the working repository. The test also snapshots the original
+targets and asserts their bytes never changed. It once mutated the real source and
+relied on `finally`, which cannot execute after SIGKILL and caused an observed
+delivery contamination. Before that it used to
+assert `git status --porcelain src/planpilot/store` was empty, which
 conflated "did the test undo its own mutations" with "is the working tree
 committed" and produced two false failures while legitimate work was in progress.
 
@@ -645,11 +718,11 @@ non-finite-float layers were redundant. Measured:
 NaN stays blocked either way, but with layer 1 gone the error cannot become a
 valid `tool_error`. So the control now probes **three** ways: layer 1 removed
 (suite **must** fail), layer 2 removed (suite **must still pass**), both removed
-(must fail). The single "still green" case is the only honest defence-in-depth
-demonstration in the set — and `test_layer1_error_is_not_the_same_as_layer2` pins
+(must fail). It is one of two explicit defence-in-depth demonstrations in the
+set — and `test_layer1_error_is_not_the_same_as_layer2` pins
 the difference so nobody "simplifies" layer 1 away as redundant.
 
-**Reviewer question:** the 42 "must fail" mutations each name one suite. Is any
+**Reviewer question:** the 56 "must fail" mutations each name one suite. Is any
 mutation caught by a test that would *also* fail for an unrelated reason? That
 would be a false catch. I did not check for this systematically.
 
@@ -695,17 +768,13 @@ refused, (c) is wrong.
 1. **Digest verified on write, not on read.** Costs one SHA-256 per write; buys
    "everything in the store is already consistent". Is write-time the right place,
    given `validate_plan` re-runs checks independently later?
-2. **`supersede()` is deliberately non-idempotent** — a second call raises.
-   `drain_superseded()` is an exactly-once hand-off; a duplicate event would
-   invalidate the same approval set twice. But is "raise" right, or should a repeat
-   be a silent no-op like `put_content`'s identical-bytes case? **These two are
-   inconsistent with each other and I am not sure which is wrong.**
-3. **The transition graph is not re-implemented.** `workflow.transitions` owns it
-   (11 states); lifecycle status is a projection. Only terminality (`SUPERSEDED`)
-   is enforced here. A second copy of the graph is the orphan-spec defect class the
-   V1.8 review found eight instances of. Risk: an illegal-but-non-terminal
-   transition (e.g. `PUBLISHED → DRAFT`) is **accepted** by this module. Is
-   deferring to the workflow layer correct, or a hole?
+2. **`supersede()` is deliberately non-idempotent** — a second state transition
+   raises, while outbox acknowledgement is idempotent. Is that distinction clear
+   enough for callers, or should supersede itself also be an idempotent no-op?
+3. **The full transition graph is not re-implemented.** `workflow.transitions`
+   owns it (11 states); lifecycle status is a projection. The store now enforces
+   only local authority invariants and terminality. Is that boundary complete, or
+   can another non-terminal route acquire authority without the workflow layer?
 4. **`sort_operations` does not raise on missing keys** — it substitutes `""`/`0`.
    Schema validation belongs to `validate_factory_state` / `validate_plan`, so the
    digest layer stays total. Consequence: two different malformed operations can
@@ -720,7 +789,7 @@ refused, (c) is wrong.
 
 ---
 
-## 8. What I got wrong (all 20, not a curated subset)
+## 8. What I got wrong (all 21, not a curated subset)
 
 `IMPLEMENTATION_NOTES.md` has the full list with mechanism and fix. Summary:
 
@@ -746,6 +815,7 @@ refused, (c) is wrong.
 | D18 | an evidence-reading script used `negative_control.mutation_counters`, a field that does not exist; it returned `null`, which reads as "no evidence" rather than "wrong key" | opening `EVIDENCE.json` |
 | D19 | ran two `factcheck` processes at once; their negative-control subprocesses mutated the same files concurrently and one restored the MUTATED bytes, leaving `digest.py` at `sort_keys=False` and failing three tests — one step after writing a helper whose docstring forbids exactly this | `git status` after the run |
 | D20 | the negative control read **stale `.pyc`** bytecode (CPython keys cache validity on mtime-to-the-second + size), so an equal-length mutation inherited a preceding mutation's bytecode and ran the wrong code — a false `escaped=1`; my first write-up misattributed it to factcheck parsing bugs and claimed "no mechanism", which was wrong | reproducing the mechanism in `tools/probes/probe_pyc_stale.py` (committed) |
+| D21 | relied on `finally` to restore mutations written into real source, although process death skips `finally`; an interrupted run actually contaminated a delivery tree | sixth-audit SIGKILL reproduction; fixed by mutating only a disposable repository copy |
 
 D14–D20 were all found and fixed inside the third audit's work, before the
 commit that carries it. All seven were caught by running the code, reading it
@@ -754,6 +824,8 @@ distribution as D1–D13 and the reason the negative control and the factcheck
 tool exist. D19 was caught by the factcheck's own sources-restored assertion,
 firing on corruption the factcheck run itself had caused; D20 by refusing to
 accept an intermittent verdict until its mechanism was reproduced.
+D21 was found in the sixth audit and removes the entire shared-working-tree
+failure mode rather than trying to detect residue after a crash.
 
 **One process failure worth naming separately:** commit `e2dea98` stated the
 defects were "all recorded in REVIEW notes" when no such file existed. The claim
@@ -780,9 +852,10 @@ were twelve.
   production readiness.
 - **No test asserts `dump_state` output size bounds.** A plan with many operations
   could produce a large evidence file. Not checked.
-- **The 18 "must fail" mutations were not checked for false catches** (§5).
-- **Platform binding in the contract is known-stale** — see
-  `../contract-review/REVIEW_HANDOFF_FOR_CODEX.md` and the v1.9 item below.
+- **The 54 "must fail" mutations were not checked systematically for false
+  catches** (§5).
+- **Platform binding in the contract is known-stale** — see the self-contained
+  v1.9 item below.
 
 ---
 
@@ -790,8 +863,9 @@ were twelve.
 
 1. **`check_closed_vocabularies.py`** — the `_DEFINED_NAMES` escape hatch and
    `TOKEN_RE`'s lookbehind. If either can be defeated, the guard is theatre.
-2. **§7.2 and §7.3** — the `supersede` / `put_content` idempotency inconsistency,
-   and the hole where non-terminal illegal transitions are accepted.
+2. **§2.5 and §7.2/§7.3** — attack crash timing around pending/acknowledge,
+   idempotency identities, and any lifecycle route not covered by local authority
+   invariants.
 3. **F-STORE-01** — is "no code, crash" defensible, or does the contract need a
    19th code?
 4. **The digest pins** — anything a second implementation would plausibly do
@@ -806,7 +880,8 @@ were twelve.
 
 ## 11. Carried forward from the contract review
 
-Unchanged and still true (see `../contract-review/REVIEW_HANDOFF_FOR_CODEX.md`):
+These points are reproduced here so the handoff does not depend on an external
+contract-review directory:
 
 - **R1** — single-pass material reservation: a `READY` lot that cannot be placed
   keeps its materials committed. Documented as a deliberate trade-off in
@@ -826,11 +901,12 @@ Unchanged and still true (see `../contract-review/REVIEW_HANDOFF_FOR_CODEX.md`):
 
 ## 12. Bottom line
 
-This module does what the contract requires of it, and every claim above is
-reproducible with the commands in §2. The guard and the negative control are the
+This module now meets the reviewed store-local invariants, and every current
+verification claim above is reproducible with the commands in §2. The guard and the negative control are the
 two pieces I would most want independently attacked, because both are
 self-validating and self-validating checks are where this project has repeatedly
 been fooled — D2 and D5 are both instances of a check that passed for the wrong
 reason.
 
-Nothing here makes the agent pilot-ready, and no EVAL has run.
+Nothing here makes the agent pilot-ready, no approval-service side effect has
+been integrated, and no EVAL has run.

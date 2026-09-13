@@ -7,7 +7,7 @@
 
 You are doing an **adversarial code review** of one module of a hackathon
 production-planning agent. Your job is to find defects, not to confirm quality.
-**Three** independent audits have already run, and each found things the one
+**Six** independent audits have already run, and each found things the one
 before it missed — after that round's docs had already claimed the module was
 sound:
 
@@ -22,52 +22,60 @@ sound:
    the previous one; `load_state()` did not relate supersede events to the
    lifecycle records they invalidate; and contract selection was lexicographic
    (v1.9 beat v1.10) with an unverified path override.
+4. The fourth found a destructive/non-durable supersede handoff, two event
+   forgery routes, a persistence version-gap bypass, stale versions reacquiring
+   approval authority, direct publish without approval, replaceable approval
+   bindings, and non-terminal publication.
+5. The fifth found that public `transition(..., "SUPERSEDED")` bypassed event
+   creation, so the store could dump a terminal state that its own `load_state()`
+   permanently refused.
+6. The sixth found that killing the negative-control process could leave a
+   mutation in the real working source, that isolated UTF-16 surrogates leaked a
+   raw codec exception, and that `-0.0` and `0.0` produced different digests.
 
-Every finding in all three rounds was reproduced against a clean tree with a
-standalone probe before being believed, and each fix is pinned by a regression
-test and by a negative-control mutation that fails the suite if the defence is
-removed.
+Every actionable fourth-round finding was reproduced against the clean
+`fc908d7` baseline before being fixed. Its defences are pinned by committed
+regression tests and source mutations.
 
-Read that as the bar, not as a clean bill of health. Three audits missing
-different things each round is evidence that a fourth can still find more — that
-is the single most useful fact in this document, and the reason your review is
-worth doing.
+Read that as the bar, not as a clean bill of health. Six audits finding
+different things is evidence that another review can still find more.
 
 ## Repo and how to run it
 
+From a clone, create or activate any Python 3.11 virtual environment, then run:
+
 ```
-cd E:\PlanPilot-Hackathon\planpilot-build
-set PY=E:\PlanPilot-Hackathon\contract-review\.venv\Scripts\python.exe
+python -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-Python 3.11, venv already has `jsonschema 4.23.0`, `ortools 9.11.4210`,
-`pytest 9.1.1`. **No network, no LLM, no API key, no dataset is needed or used** —
-this module is pure deterministic Python. You should never have to install anything.
+The pinned environment uses `jsonschema 4.23.0`, `ortools 9.11.4210` and
+`pytest 9.1.1`. No LLM, API key or dataset is needed or used. Network is needed
+only if those pinned wheels are not already cached locally.
 
 Verify the baseline before you start (all should pass; if any fails, stop and say so):
 
 ```
-%PY% -m pytest tests/ -q                          # 384 passed
-%PY% tools/check_closed_vocabularies.py           # CLOSED VOCABULARY CHECK | PASS
-%PY% tools/factcheck_impl_handoff.py              # HANDOFF FACT-CHECK | fails=0
-sha256sum contract/planpilot_agent_contract_v1.8.json   # b92e53f4ff054105...
+python -m pytest tests/ -q                         # 421 passed
+python tools/check_closed_vocabularies.py          # CLOSED VOCABULARY CHECK | PASS
+python tools/factcheck_impl_handoff.py             # HANDOFF FACT-CHECK | fails=0
+python -c "import hashlib,pathlib; print(hashlib.sha256(pathlib.Path('contract/planpilot_agent_contract_v1.8.json').read_bytes()).hexdigest())"
 ```
 
 ## What the module is
 
 `src/planpilot/store/` — the plan store and canonical digest. Five files:
 `digest.py`, `errors.py`, `plan_store.py`, `persistence_schema.py`, `__init__.py`
-(1,882 lines).
+(2,163 lines).
 
 `src/planpilot/validation/` — the production contract validator the store now
-calls at every write boundary (557 lines, added to fix P0-1). It is the single
+calls at every write boundary (559 lines, added to fix P0-1). It is the single
 validation entry point for both `src/` and `tests/`; `tests/_fixtures.py` is no
 longer on any production path.
 
-It is the foundation every later module depends on. Its whole reason to exist is
-one property: **a plan's digest is a pure function of its content**, so a
-fabricated or corrupted plan (the known failure mode of the LLM gateway this agent
-will sit behind) cannot survive into approval or publish.
+It is the foundation every later module depends on. It combines two separate
+properties: **a plan's digest is a pure function of its content**, and every
+write is contract-schema validated. The digest detects post-signing corruption;
+schema validation—not the digest—rejects a re-signed fabrication.
 
 The contract it implements is `contract/planpilot_agent_contract_v1.8.json`
 (189,921 bytes). The relevant sections are `plan_store`, `$defs.plan_content`,
@@ -76,13 +84,14 @@ The contract it implements is `contract/planpilot_agent_contract_v1.8.json`
 
 ## Read in this order
 
-1. `REVIEW_HANDOFF_IMPLEMENTATION.md` — the implementer's own sceptical handoff,
-   including §2.2/§2.3/§2.4 (the three audits) and §10 (suggested attack order)
-2. `IMPLEMENTATION_NOTES.md` — self-found defects (D1–D20), the F1–F15 audit
+1. `SIXTH_AUDIT_REMEDIATION_REPORT.md` — current changes and readiness verdict
+2. `REVIEW_HANDOFF_IMPLEMENTATION.md` — the implementer's own sceptical handoff,
+   including §2.2–§2.7 (the six audits) and §10 (suggested attack order)
+3. `IMPLEMENTATION_NOTES.md` — self-found defects (D1–D21), the F1–F15 audit
    disposition table, the P0-1/P0-2 findings from the second audit, the
    P0-bis/P1-a/P1-b/P2 findings from the third, and design decisions
-3. `.kiro/specs/plan-store-and-digest/design.md` and `tasks.md`
-4. the code itself
+4. `.kiro/specs/plan-store-and-digest/design.md` and `tasks.md`
+5. the code itself
 
 ## Where to attack (highest value first)
 
@@ -91,8 +100,9 @@ The contract it implements is `contract/planpilot_agent_contract_v1.8.json`
    hash differently, or one content hashes differently across runs/machines.
    `sort_operations` was already found order-dependent (F4) and non-total (F12) —
    both "fixed". Check whether the fixes are complete, or whether a third ordering
-   hole remains (e.g. the `_total_key` type-rank tiebreak, float repr, dict
-   ordering inside an operation, the `ensure_ascii=False` choice).
+   hole remains (e.g. the `_total_key` type-rank tiebreak, float repr beyond
+   signed zero, dict ordering inside an operation, the `ensure_ascii=False`
+   choice, or a Unicode edge not covered by the surrogate guard).
 2. **The closed-vocabulary guard** (`tools/check_closed_vocabularies.py`). This is
    the implementer's proudest piece and the most likely to be theatre. It scans
    `src/ tests/ tools/` for string constants that look like contract identifiers
@@ -109,9 +119,10 @@ The contract it implements is `contract/planpilot_agent_contract_v1.8.json`
    and look for a *second* ghost test — any test referenced in prose/comments that
    does not exist, or any assertion that cannot fail.
 4. **The negative control** (`tests/negative_control/test_plan_store_negctl.py`).
-   It mutates the source 44 ways across five files (`digest.py`, `plan_store.py`,
-   `errors.py`, `src/planpilot/validation/schema.py`, `tests/_fixtures.py`) and
-   asserts the suite catches 42; the other 2 are deliberate defence-in-depth cases
+   It mutates a disposable repository copy 58 ways across five files (`digest.py`,
+   `plan_store.py`, `errors.py`, `src/planpilot/validation/schema.py`,
+   `tests/_fixtures.py`) and asserts the suite catches 56; the other 2 are
+   deliberate defence-in-depth cases
    where removing ONE layer must leave the suite green because another still holds.
    Verify it is not theatre: do the mutations actually apply (each uses
    `_sub_once`, which fails loudly on a non-unique or absent anchor)? Could a
@@ -119,21 +130,32 @@ The contract it implements is `contract/planpilot_agent_contract_v1.8.json`
    has caught exactly that in a fix the implementer had just written (§2.3 and
    §2.4: a test that passed for the wrong reason, so removing the defence left
    the suite green). It once inverted its own polarity (D5) and once asserted
-   git-cleanliness instead of byte-restoration — both fixed; check the fixes hold.
-5. **`load_state` / `dump_state` round-trip.** F1, P1-a and P1-b all landed here,
+   git-cleanliness instead of byte-restoration — both fixed. A sixth review then
+   proved `finally` could not protect real files from process death, so mutations
+   now run only in a temp copy; verify the child really imports from that copy and
+   cannot write through to the working repository.
+5. **The supersede outbox.** Crash the conceptual consumer before and after its
+   external side effect and before acknowledgement. Attack event/ack identity,
+   duplicate and orphan records, timestamp ordering, backwards compatibility,
+   defensive copying and deterministic dump order. The approval service is not
+   built, so verify the store API makes an idempotent consumer possible without
+   mistaking that for end-to-end exactly-once.
+   Also prove that public `transition()` cannot target SUPERSEDED and that every
+   supported route into that status creates exactly one immutable event.
+6. **`load_state` / `dump_state` round-trip.** F1, P1-a, P1-b and the fourth audit
+   all landed here,
    so this is the most-worked surface and the likeliest place a constraint is
    either incomplete or over-strict. Try to construct a dumped state that loads
    but leaves the store internally inconsistent (lifecycle pointing at wrong
    content, terminal status revived, superseded events that double-fire, a stale
    version holding APPROVED/PUBLISHED). Then try the opposite: find a state the
    LIVE API can produce that `load_state` now WRONGLY refuses — the layer-3
-   authority check was once too strict and broke round-trip fidelity for four
-   legal statuses (D15), so a second over-refusal is plausible. Also check
+   authority check was once too strict and broke round-trip fidelity for states
+   the then-current API allowed (D15), so a second over-refusal is plausible. Also check
    `dump_state` really is order-independent now that it sorts `superseded_events`.
-6. **The deferred findings.** F7 (back-transitions accepted), F9 (raw internal
-   dicts handed out), F10 (fields cannot be cleared) were accepted, not fixed.
-   Argue whether any is actually a real defect for this module's contract, or
-   whether accepting it was correct.
+7. **The remaining deferred finding.** F7 (published back-transition) and F9
+   (raw event dicts) are now fixed. F10—fields cannot be cleared—remains accepted.
+   Determine whether clearing is actually required by any contract path.
 
 ## What "done" means for your review
 
