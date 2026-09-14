@@ -17,10 +17,14 @@ from .schema import (
     def_names,
     errors_for,
     is_valid,
+    is_tool_payload_valid,
+    tool_names,
     validation_issues_for,
     validate,
+    validate_tool_payload,
     validate_shape,
     validator_for,
+    validator_for_tool,
 )
 
 __all__ = [
@@ -32,8 +36,12 @@ __all__ = [
     "def_names",
     "errors_for",
     "is_valid",
+    "is_tool_payload_valid",
+    "tool_names",
     "validation_issues_for",
     "validate",
+    "validate_tool_payload",
     "validate_shape",
     "validator_for",
+    "validator_for_tool",
 ]

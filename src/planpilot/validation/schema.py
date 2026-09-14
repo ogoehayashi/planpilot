@@ -41,12 +41,16 @@ __all__ = [
     "contract_path",
     "contract_sha256",
     "def_names",
+    "tool_names",
     "errors_for",
     "is_valid",
+    "is_tool_payload_valid",
     "validation_issues_for",
     "validate",
+    "validate_tool_payload",
     "validate_shape",
     "validator_for",
+    "validator_for_tool",
 ]
 
 
@@ -146,6 +150,7 @@ class SchemaValidationError(ValueError):
 
 _LOCK = threading.Lock()
 _VALIDATORS: dict[tuple[str, str], Draft202012Validator] = {}
+_TOOL_VALIDATORS: dict[tuple[str, str, str], Draft202012Validator] = {}
 _CONTRACTS: dict[str, dict] = {}
 
 
@@ -357,6 +362,11 @@ def def_names() -> list[str]:
     return sorted(_load_contract(contract_path())["$defs"])
 
 
+def tool_names() -> list[str]:
+    """Names of the eight public tools in contract order."""
+    return [tool["name"] for tool in _load_contract(contract_path())["tools"]]
+
+
 def validator_for(def_name: str, path: Path | None = None) -> Draft202012Validator:
     """A cached validator scoped to `$defs/<def_name>`.
 
@@ -393,6 +403,45 @@ def validator_for(def_name: str, path: Path | None = None) -> Draft202012Validat
     validator = root.evolve(schema={"$ref": f"#/$defs/{def_name}"})
     with _LOCK:
         _VALIDATORS[key] = validator
+    return validator
+
+
+def validator_for_tool(
+    tool_name: str,
+    payload_schema: str,
+    path: Path | None = None,
+) -> Draft202012Validator:
+    """Compile one public tool input/output/failure schema with root `$defs`.
+
+    Tool schemas contain references such as ``#/$defs/approval_set_snapshot``;
+    validating only the nested schema loses that resolution scope.  This is the
+    production compiler for adapters and internal server boundaries that consume
+    an exact tool payload. ``payload_schema`` is restricted to the three schema
+    keys the contract defines rather than accepting an arbitrary lookup string.
+    """
+    if payload_schema not in {"input_schema", "output_schema", "failure_schema"}:
+        raise KeyError(f"unsupported tool payload schema {payload_schema!r}")
+    p = path or contract_path()
+    key = (str(p), tool_name, payload_schema)
+    with _LOCK:
+        cached = _TOOL_VALIDATORS.get(key)
+    if cached is not None:
+        return cached
+
+    contract = _load_contract(p)
+    matches = [tool for tool in contract["tools"] if tool["name"] == tool_name]
+    if len(matches) != 1:
+        raise KeyError(f"tool {tool_name!r} occurs {len(matches)} times in {p}")
+    if payload_schema not in matches[0]:
+        raise KeyError(f"tool {tool_name!r} has no {payload_schema}")
+
+    root = Draft202012Validator(
+        {"$defs": contract["$defs"]},
+        format_checker=jsonschema.FormatChecker(),
+    )
+    validator = root.evolve(schema=matches[0][payload_schema])
+    with _LOCK:
+        _TOOL_VALIDATORS[key] = validator
     return validator
 
 
@@ -473,6 +522,16 @@ def errors_for(
     return sorted(e.message for e in validator.iter_errors(instance))
 
 
+def is_tool_payload_valid(
+    instance: Any,
+    tool_name: str,
+    payload_schema: str,
+    path: Path | None = None,
+) -> bool:
+    """True when a payload satisfies one exact public tool schema."""
+    return validator_for_tool(tool_name, payload_schema, path).is_valid(instance)
+
+
 def validate(
     instance: Any,
     def_name: str,
@@ -489,6 +548,26 @@ def validate(
     issues = validation_issues_for(instance, def_name, entity_type, entity_id, path)
     if issues:
         raise SchemaValidationError(issues, entity_type, entity_id)
+
+
+def validate_tool_payload(
+    instance: Any,
+    tool_name: str,
+    payload_schema: str,
+    entity_type: str,
+    entity_id: str | None = None,
+    path: Path | None = None,
+) -> None:
+    """Raise a contract-shaped INVALID_INPUT error for an invalid tool payload."""
+    validator = validator_for_tool(tool_name, payload_schema, path)
+    issues = [
+        _issue_from_error(error, entity_type, entity_id)
+        for error in validator.iter_errors(instance)
+    ]
+    if not issues:
+        return
+    issues.sort(key=lambda issue: (issue["code"], issue["field"] or "", issue["message"]))
+    raise SchemaValidationError(issues, entity_type, entity_id)
 
 
 def validate_shape(

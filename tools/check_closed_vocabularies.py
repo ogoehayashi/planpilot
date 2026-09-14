@@ -103,6 +103,8 @@ VOCABULARIES: dict[str, set[str]] = {
     "approval_action": set(
         DEFS["error_details_policy_violation"]["properties"]["approval_action"]["anyOf"][0]["enum"]
     ),
+    "approval_reason_code": set(DEFS["approval_reason_code"]["enum"]),
+    "approval_decision_reason_code": set(DEFS["approval_decision_reason_code"]["enum"]),
     "approval_decision": {r["decision"] for r in CONTRACT["approval_rules"]},
     # Security controls carry enum-like string values that are just as closed as
     # the $defs enums. BLOCK_AND_LOG lives here, not in approval_rules.
@@ -197,6 +199,7 @@ _BYPASS_TEST_FILE = "tests/unit/test_guard_bypass_regressions.py"
 # The audit-fix pin module injects a fabricated lifecycle status to prove
 # load_state refuses it (finding F1), so it carries one fixture token.
 _PIN_TEST_FILE = "tests/unit/test_audit_fixes_pinned.py"
+_APPROVAL_TEST_FILE = "tests/unit/test_approval_service.py"
 # All three files are SCANNED (none is in NEGATIVE_FIXTURE_PATHS), so the
 # allowlist mechanism itself is exercised on every run.
 _FIXTURE_FILES = (_NEGATIVE_TEST_DIR, _BYPASS_TEST_FILE, _PIN_TEST_FILE)
@@ -222,6 +225,10 @@ ALLOWED_LOCAL: dict[str, tuple[str, tuple[str, ...]]] = {
     "FABRICATED_CODE": (
         "asserts the guard rejects an invented error code",
         (_NEGATIVE_TEST_DIR,),
+    ),
+    "NOT_A_REASON": (
+        "negative approval-decision fixture proving unregistered reasons are refused",
+        (_APPROVAL_TEST_FILE,),
     ),
     "PLAN_DIGEST_MISMATCHED": (
         "near-miss fixture proving edit-distance detection works",

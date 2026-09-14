@@ -1,0 +1,94 @@
+{
+  "evidence_version": 1,
+  "generated_at_utc": "2026-09-14T00:56:07+00:00",
+  "module": "approval-service",
+  "contract": {
+    "path": "contract/planpilot_agent_contract_v1.8.json",
+    "sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639"
+  },
+  "python": "3.11.5 (tags/v3.11.5:cce6ba9, Aug 24 2023, 14:38:34) [MSC v.1936 64 bit (AMD64)]",
+  "subject_sha256": {
+    "src/planpilot/approval/__init__.py": "f7c65aa7202dfea94f3fc377073e5ecdbd9cc1127742819a41e19e9b39f4560d",
+    "src/planpilot/approval/errors.py": "73a06070d0956bfd6923451e0c399f4f396d28661ede63b934964a027466ddea",
+    "src/planpilot/approval/policy.py": "b67c2d0ed773628986d8f2f6cf156dad85b1a23915153d7051ab7b7c125bd185",
+    "src/planpilot/approval/service.py": "14a4bd9d1961972ddd483e373f395b708843e181f4a8ae27a68f6c7ebca7f56a",
+    "src/planpilot/validation/__init__.py": "4281ca4319e8c17e40b11dd3d8a2597dcb4a96e786f06527dfd83678b58a5210",
+    "src/planpilot/validation/schema.py": "fd9e2a487991de093d5513893d14c1b1ea52a47c81c09821c5b6d99b3c560515",
+    "tests/unit/test_approval_service.py": "c87d8d1cb70976eb3d25d46843ac4faaba328f9131110b55229bc5dc80cdaefe",
+    "tests/negative_control/test_approval_service_negctl.py": "6e15b6772e15268b835dc9cb959f60a561a37402e1a62a3d7fab91a7c819dc20",
+    ".kiro/specs/approval-service/design.md": "d171cfaf924ec1762a5e89c863640819e1dc404cbae41d7e6d634ed955ee2a78",
+    ".kiro/specs/approval-service/tasks.md": "f8277358a043f2756266cf6ef23afab21fbb9d2a11df1b608590fb161407fe21",
+    "tools/write_evidence_approval_service.py": "e7f32b50bda052b93010d6f49f832e84cc7bf5b22f5bf029ecd0c40d5f67c103",
+    "tools/factcheck_approval_handoff.py": "e28e2e800b007a19848e8d5220d2b4996636bf2bb8bc20d401467dc6a98e8b69"
+  },
+  "results": {
+    "approval_unit": {
+      "command": [
+        "E:\\PlanPilot-Hackathon\\planpilot-build\\.venv-review\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_approval_service.py",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "39 passed in 1.86s"
+    },
+    "approval_negative_control": {
+      "command": [
+        "E:\\PlanPilot-Hackathon\\planpilot-build\\.venv-review\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/negative_control/test_approval_service_negctl.py",
+        "-q",
+        "-s"
+      ],
+      "exit_code": 0,
+      "summary": "1 passed in 38.66s"
+    },
+    "closed_vocabularies": {
+      "command": [
+        "E:\\PlanPilot-Hackathon\\planpilot-build\\.venv-review\\Scripts\\python.exe",
+        "tools/check_closed_vocabularies.py"
+      ],
+      "exit_code": 0,
+      "summary": "CLOSED VOCABULARY CHECK | PASS"
+    },
+    "workspace_validation": {
+      "command": [
+        "E:\\PlanPilot-Hackathon\\planpilot-build\\.venv-review\\Scripts\\python.exe",
+        "tools/validate_kiro_workspace.py"
+      ],
+      "exit_code": 0,
+      "summary": "WORKSPACE VALIDATION | ok=190 fail=0"
+    },
+    "full_suite": {
+      "command": [
+        "E:\\PlanPilot-Hackathon\\planpilot-build\\.venv-review\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "461 passed in 170.13s (0:02:50)"
+    },
+    "diff_check": {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "summary": ""
+    }
+  },
+  "negative_control": {
+    "caught": 13,
+    "escaped": 0,
+    "broken": 0,
+    "total": 13,
+    "all_caught": true
+  },
+  "all_green": true,
+  "scope_statement": "Module/unit and mutation evidence only. Scheduler, public tool adapters, publish transaction, audit chain, UI, dataset integration, and EVAL-001..030 remain outside this evidence and runtime evaluation remains pending."
+}
