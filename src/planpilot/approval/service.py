@@ -405,7 +405,21 @@ class ApprovalService:
         events = self._plan_store.pending_superseded()
         consumed = 0
         for event in events:
-            set_id = event["approval_set_id"]
+            binding = (event["plan_id"], event["plan_version"], event["plan_digest"])
+            bound_set_id = self._set_by_binding.get(binding)
+            event_set_id = event["approval_set_id"]
+            if (
+                event_set_id is not None
+                and bound_set_id is not None
+                and event_set_id != bound_set_id
+            ):
+                raise ApprovalInvariantError(
+                    "supersede event names a different set than the approval binding index"
+                )
+            # The lifecycle may still be DRAFT when request_approval creates a
+            # set. In that case PlanStore truthfully emits approval_set_id=null;
+            # the approval service still owns the binding and must invalidate it.
+            set_id = event_set_id or bound_set_id
             if set_id is not None:
                 if self._state_path is None:
                     raise ApprovalInvariantError(
@@ -433,7 +447,7 @@ class ApprovalService:
                 event["plan_id"],
                 event["plan_version"],
                 event["plan_digest"],
-                event["approval_set_id"],
+                event_set_id,
                 acknowledged_at,
             )
             consumed += 1

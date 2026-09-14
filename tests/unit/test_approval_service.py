@@ -613,6 +613,47 @@ class TestPersistenceAndOutbox:
             NOW,
         )["aggregate_status"] == "INVALIDATED"
 
+    def test_draft_lifecycle_set_is_invalidated_by_binding_fallback(
+        self, prepared, fixtures
+    ):
+        store, service, content, _, _ = prepared
+        snapshot = _request(service, content)
+        for request in snapshot["approvals"]:
+            snapshot = service.record_decision(
+                request["approval_request_id"],
+                "APPROVED",
+                request["approver_role"],
+                f"{request['approver_role']} authenticated",
+                "2026-09-14T08:01:00+08:00",
+            )
+        assert snapshot["aggregate_status"] == "APPROVED"
+        assert store.get_lifecycle(content["plan_id"], 1)["status"] == "DRAFT"
+
+        store.commit_new_version(
+            _signed_content(fixtures, plan_version=2),
+            "2026-09-14T08:02:00+08:00",
+        )
+        event = store.pending_superseded()[0]
+        assert event["approval_set_id"] is None
+
+        assert service.consume_superseded("2026-09-14T08:03:00+08:00") == 1
+        status = service.check_approval_status(
+            snapshot["approval_set_id"],
+            content["plan_id"],
+            content["plan_version"],
+            content["plan_digest"],
+            "2026-09-14T08:03:00+08:00",
+        )
+        assert status["aggregate_status"] == "INVALIDATED"
+        with pytest.raises(ApprovalSetInvalidatedError):
+            service.require_approved(
+                snapshot["approval_set_id"],
+                content["plan_id"],
+                content["plan_version"],
+                content["plan_digest"],
+                "2026-09-14T08:03:00+08:00",
+            )
+
     def test_missing_named_set_is_not_acknowledged(self, fixtures, tmp_path):
         store = PlanStore()
         content = _signed_content(fixtures)

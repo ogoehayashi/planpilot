@@ -93,6 +93,11 @@ MUTATIONS = [
         "                self.invalidate_set(\n                    set_id, event[\"invalidation_cause\"], event[\"plan_digest\"]\n                )",
         "                pass  # MUTATION: invalidation omitted before acknowledgement",
     ),
+    (
+        "null lifecycle set id no longer falls back to approval binding",
+        "            set_id = event_set_id or bound_set_id",
+        "            set_id = event_set_id  # MUTATION: binding fallback removed",
+    ),
 ]
 
 
