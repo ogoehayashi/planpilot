@@ -127,6 +127,34 @@
   永不改写历史)。今后任何 src/tests/contract 改动、commit/tag、决策、
   审查 finding、证据重生成,当次追加。
 
+## 2026-09-14 10:30 — 全组审查意见落定 + git bundle 备份完成(对上一条目口径的更正)
+
+- 类型:决策 / 更正 / 证据
+- 证据:`D:/PlanPilot_backups/planpilot-build_all_20260914.bundle`
+  (411 KB,`git bundle verify` = okay,含全部 6 refs:2 branches +
+  3 annotated tags + HEAD,完整历史);本次 commit
+- 更正一:**不存在"7 个 part"的路线**。正式规划是 `.kiro/specs/README.md`
+  的 **15 个 spec**(依合同 implementation_migration)。此前审查报告中
+  "3/7"的分母是我口头聚合、无仓库依据,作废。当前已审计完成:
+  foundation、plan-store-and-digest、approval-service;其余按 15-spec 表推进。
+- 更正二:"negctl 4 passed" 是 **pytest 外层 wrapper 测试数**,不是变异数。
+  准确口径:全部负控 wrapper 4 passed;其中 approval-service
+  **14/14 mutations caught**,store 为既有 58 路 mutation control
+  (56 caught / 0 escaped / 0 broken)。
+- 决策三:tool-error-middleware 与 publisher **不合并交付**。publisher 依赖
+  audit chain、decision trace、PlanStore、ApprovalService、幂等事务,
+  合并会造成单次审查范围过大。保留独立 spec 与独立验收边界,顺序:
+  **tool-error-middleware → audit-hash-chain / decision-traces →
+  publisher 事务**。
+- 口径补充:approval-service"无未闭环发现"成立,但
+  `change_promised_due_date` 的确定性来源验证仍是
+  independent-validator / tool-integration 的**后续验收项**,
+  不属本模块遗留缺陷。
+- 最终结论修订定稿:`approval-service v1.0.1-hardening` 审查通过,
+  commit `0cf1060` 及 tag 可作为下一阶段开发基线;**本结论仅覆盖审批服务,
+  不代表 publisher、工具层或端到端 EVAL 已就绪。**
+- 附:bundle 首备完成,D 盘落地。远程仓库(gh CLI 未装)仍为待办。
+
 ---
 
 # 里程碑速览
@@ -142,6 +170,11 @@
 
 - tool-error-middleware(**下一 part**;主办方 Ollama 网关 tool_calls 恒空、
   已知伪造 tool result——工具结果溯源(provenance)必须是硬需求)
-- 发布事务、审计链(append-only hash chain)、调度器
-- 数据集 + EVAL-001~030(官方评分的实际战场;9/28 截止前须留 ≥5 整天)
-- git 远程 / bundle 备份(三个审计 tag 目前全在 E 盘单点)
+- audit-hash-chain / decision-traces → publisher 事务(独立 spec、独立验收,
+  按此顺序,不与 middleware 合并)
+- 其余 15-spec 表模块:lot-and-material、calendar-and-shifts、cpsat-scheduler、
+  escalation-and-budget、independent-validator、inference-client、
+  ui-approval-queue、lightsail-deploy
+- 数据集(dataset-migration,critical path)+ EVAL-001~030
+  (官方评分的实际战场;9/28 截止前须留 ≥5 整天)
+- ~~git bundle 备份~~ ✅ 已完成(2026-09-14,D 盘);私有远程仓库仍为待办
