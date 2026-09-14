@@ -153,6 +153,20 @@
 - 最终结论修订定稿:`approval-service v1.0.1-hardening` 审查通过,
   commit `0cf1060` 及 tag 可作为下一阶段开发基线;**本结论仅覆盖审批服务,
   不代表 publisher、工具层或端到端 EVAL 已就绪。**
+
+## 2026-09-14 10:42 — 下一 Part 自包含交接包建立
+
+- 类型:决策 / 文档
+- 证据:`.kiro/specs/tool-error-middleware/{README,design,tasks,START_PROMPT}.md`;
+  本条目所在 commit 可用
+  `git log -1 --format=%H -- .kiro/specs/tool-error-middleware` 解析
+- 内容:为另一名组员和全新 Codex/Kiro task 建立 Design-First 交接入口。
+  spec 钉住 18 个错误 details/retryability、UUIDv4 correlation、最终 UTF-8
+  4096-byte 限制、可信异常白名单、未知异常清洗、output-before-commit 与
+  staged transaction、deadline 和 solver exhaustion 分界、无隐藏 retry、
+  observer seam、临时副本 mutation control、证据与 tag 验收。明确不把
+  publisher、audit hash chain、decision trace persistence 或八个 public handler
+  混入本 Part。`START_PROMPT.md` 是可直接交给执行 Agent 的完整启动指令。
 - 附:bundle 首备完成,D 盘落地。远程仓库(gh CLI 未装)仍为待办。
 
 ---
