@@ -169,6 +169,30 @@
   混入本 Part。`START_PROMPT.md` 是可直接交给执行 Agent 的完整启动指令。
 - 附:bundle 首备完成,D 盘落地。远程仓库(gh CLI 未装)仍为待办。
 
+## 2026-09-15 14:40 · 第 10 轮审查:队友包 E:\PlanPilot-Team-20260915(EVAL 撤回整改)
+
+- 审查人:Hermes(独立复核,非转述)。对象:无 `.git` 的交付包,149 文件 manifest。
+- 实测复现 ✓:全仓 534 passed(153.67s);negctl 4 wrappers passed;
+  EVAL gate `0/0/30 BLOCKED` 退出码 2、acceptance_claimed=false;smoke 8/0;
+  词表 PASS;契约 SHA `b92e53f4…` 未动;manifest 147/149 哈希匹配
+  (2 个不匹配是我重跑 gate 重生成的时间戳 EVIDENCE,非交付缺陷)。
+- 核心结论:**整改只做了 P0-1(EVAL 撤回),P0-2/3/4 未动一行代码**:
+  api_server 仍走 persistence.Database(实测拒绝签名错误但接受
+  `{"totally_made_up": true}`、孤立 surrogate 裸 UnicodeEncodeError、
+  -0.0/0.0 digest 不同);contract_adapter :32 `calendar_window_ids:[]`、
+  HC 仅 001/002;framework_error 无 message/无 UUIDv4;src/planpilot/tools 不存在。
+- 来源比对:包内 store/approval/domain 共 10 文件,9 个与审计基线 `0cf1060`
+  逐字节一致,plan_store.py = 审计版 +15 行时间戳校验(更严,良性);
+  test_approval_service.py 与审计版逐字节一致。审批测试计 38 个 `def test_`
+  (审计口径 40 含参数化展开,一致)。
+- 修订:上一轮 setup_local.ps1 "UTF-8 修复未落地" 判定有误——实际以
+  `python -X utf8`(等效 PYTHONUTF8)钉住安装路径,requirements 非 ASCII
+  仅注释区,修复成立;仅 `pip list > $env:TEMP` 旁路未钉,极低风险,不阻塞。
+- 判决:**不得并入,不得作为 v1.8 实现或 EVAL 成绩交付**;EVAL 撤回部分
+  予以确认(factcheck 21 项中 20 PASS,唯一 FAIL 为上因我复跑所致)。
+- 证据:本报告全部命令在 .venv-runtime 实测;src 污染检查 0;
+  `# MUTATION:` 残留 0。
+
 ---
 
 # 里程碑速览
