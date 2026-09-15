@@ -1,0 +1,11 @@
+.git
+.venv*
+.pytest_cache
+__pycache__
+**/__pycache__
+*.db
+*.db-*
+.env
+secrets
+dist
+tests/evidence

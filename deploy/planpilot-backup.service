@@ -1,0 +1,10 @@
+[Unit]
+Description=PlanPilot verified online SQLite backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/planpilot
+ExecStart=/usr/bin/docker compose --profile operations run --rm backup
+TimeoutStartSec=300

@@ -1,0 +1,12 @@
+{
+  "planning_start": "2026-09-14T00:00:00+08:00",
+  "horizon": 7200,
+  "orders": [
+    {"order_id":"ORD-1001","product_id":"BRACKET-A","quantity":60,"due_date":"2026-09-16","operations":[{"machine_id":"CNC-01","worker_id":"W-01","duration":4,"material_id":"AL-6061","material_qty":60},{"machine_id":"MILL-01","worker_id":"W-02","duration":3}]},
+    {"order_id":"ORD-1002","product_id":"SHAFT-B","quantity":40,"due_date":"2026-09-17","operations":[{"machine_id":"CNC-01","worker_id":"W-01","duration":5,"material_id":"SS-304","material_qty":40},{"machine_id":"GRIND-01","worker_id":"W-03","duration":2}]},
+    {"order_id":"ORD-URGENT","product_id":"BRACKET-A","quantity":20,"due_date":"2026-09-15","operations":[{"machine_id":"CNC-01","worker_id":"W-01","duration":2,"material_id":"AL-6061","material_qty":20}]}
+  ],
+  "inventory": {"AL-6061": 80, "SS-304": 40},
+  "maintenance": [{"machine_id":"CNC-01","start":6,"end":8}],
+  "workers": [{"worker_id":"W-01","skills":["CNC"]},{"worker_id":"W-02","skills":["MILL"]},{"worker_id":"W-03","skills":["GRIND"]}]
+}

@@ -1,0 +1,126 @@
+{
+  "evidence_version": 1,
+  "evidence_kind": "component_smoke",
+  "generated_at": "2026-09-15T13:30:14.123189+00:00",
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "harness_sha256": "f9d5052904554ba749146664aa5292521710293da6c0747eb900cf4936b14f89",
+  "fixture": "data/factory_demo_v18.json",
+  "fixture_sha256": "a7d3d35c0df9c6dc8bd53a7e2aa09e5df3e0201a206a9235140780a934cff0f9",
+  "python": "3.11.5 (tags/v3.11.5:cce6ba9, Aug 24 2023, 14:38:34) [MSC v.1936 64 bit (AMD64)]",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "check_count": 8,
+  "smoke_passed": 8,
+  "smoke_failed": 0,
+  "acceptance_claimed": false,
+  "runtime_evaluation": "PENDING_UNTIL_EVAL_001_TO_030_EXECUTE",
+  "scope_statement": "These are compact-fixture component smoke checks only. Related contract case IDs are traceability hints, not executed acceptance cases, and no result here may be reported as an EVAL PASS.",
+  "results": [
+    {
+      "check_id": "candidate_determinism",
+      "status": "pass",
+      "reason": "component assertion executed",
+      "details": {
+        "candidate_count": 3,
+        "profiles": [
+          "Balanced",
+          "Delivery First",
+          "Cost First"
+        ]
+      },
+      "related_contract_cases": [
+        "EVAL-009"
+      ]
+    },
+    {
+      "check_id": "fifo_ready_time",
+      "status": "pass",
+      "reason": "component assertion executed",
+      "details": {
+        "ready_reservations_checked": 9
+      },
+      "related_contract_cases": [
+        "EVAL-024"
+      ]
+    },
+    {
+      "check_id": "injection_boundary",
+      "status": "pass",
+      "reason": "component assertion executed",
+      "details": {
+        "state": "BLOCKED",
+        "security_event_recorded": true
+      },
+      "related_contract_cases": [
+        "EVAL-006"
+      ]
+    },
+    {
+      "check_id": "approval_precedence",
+      "status": "pass",
+      "reason": "component assertion executed",
+      "details": {
+        "pending": "PENDING",
+        "expired": "EXPIRED",
+        "invalidated": "INVALIDATED"
+      },
+      "related_contract_cases": [
+        "EVAL-010",
+        "EVAL-014",
+        "EVAL-016"
+      ]
+    },
+    {
+      "check_id": "generation_fallback",
+      "status": "pass",
+      "reason": "component assertion executed",
+      "details": {
+        "provenance": "HEURISTIC_FALLBACK",
+        "attempted_rungs": [
+          "CP-SAT",
+          "HEURISTIC_FALLBACK"
+        ]
+      },
+      "related_contract_cases": [
+        "EVAL-019"
+      ]
+    },
+    {
+      "check_id": "fixed_lot_utility",
+      "status": "pass",
+      "reason": "component assertion executed",
+      "details": {
+        "quantities": [
+          10,
+          10,
+          5
+        ]
+      },
+      "related_contract_cases": [
+        "EVAL-021"
+      ]
+    },
+    {
+      "check_id": "stability_utility",
+      "status": "pass",
+      "reason": "component assertion executed",
+      "details": {
+        "stability": 0.5
+      },
+      "related_contract_cases": [
+        "EVAL-022",
+        "EVAL-026"
+      ]
+    },
+    {
+      "check_id": "overtime_utility",
+      "status": "pass",
+      "reason": "component assertion executed",
+      "details": {
+        "overtime_minutes": 30
+      },
+      "related_contract_cases": [
+        "EVAL-020"
+      ]
+    }
+  ]
+}

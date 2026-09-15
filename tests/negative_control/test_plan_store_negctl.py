@@ -40,7 +40,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 PYTEST = [sys.executable, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider"]
 
-_SANDBOX_EXCLUDES = {".git", ".pytest_cache", ".venv-review"}
+_SANDBOX_EXCLUDES = {".git", ".pytest_cache"}
 
 
 @pytest.fixture(scope="module")
@@ -54,7 +54,7 @@ def sandbox_root(tmp_path_factory) -> Path:
     target = tmp_path_factory.mktemp("planpilot-negctl") / "repo"
     target.mkdir()
     for source in ROOT.iterdir():
-        if source.name in _SANDBOX_EXCLUDES:
+        if source.name in _SANDBOX_EXCLUDES or source.name.startswith(".venv"):
             continue
         destination = target / source.name
         if source.is_dir():

@@ -1,0 +1,2 @@
+# Optional Bedrock adapter dependency; local tests never invoke the provider.
+boto3==1.35.99

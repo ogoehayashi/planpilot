@@ -1,0 +1,204 @@
+{
+  "planning_start": "2026-09-14T00:00:00+08:00",
+  "horizon": 7200,
+  "orders": [
+    {
+      "order_id": "ORD-1001",
+      "product_id": "BRACKET-A",
+      "quantity": 60,
+      "due_date": "2026-09-16",
+      "priority": 2,
+      "operations": [
+        {
+          "operation_no": 1,
+          "machine_id": "CNC-01",
+          "worker_id": "W-01",
+          "duration": 120,
+          "material_id": "AL-6061",
+          "material_qty": 60
+        },
+        {
+          "operation_no": 2,
+          "machine_id": "MILL-01",
+          "worker_id": "W-02",
+          "duration": 90
+        },
+        {
+          "operation_no": 3,
+          "machine_id": "QC-01",
+          "worker_id": "W-03",
+          "duration": 20,
+          "operation_type": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "order_id": "ORD-1002",
+      "product_id": "SHAFT-B",
+      "quantity": 40,
+      "due_date": "2026-09-17",
+      "priority": 1,
+      "operations": [
+        {
+          "operation_no": 1,
+          "machine_id": "CNC-01",
+          "worker_id": "W-01",
+          "duration": 150,
+          "material_id": "SS-304",
+          "material_qty": 40
+        },
+        {
+          "operation_no": 2,
+          "machine_id": "GRIND-01",
+          "worker_id": "W-03",
+          "duration": 60
+        },
+        {
+          "operation_no": 3,
+          "machine_id": "QC-01",
+          "worker_id": "W-03",
+          "duration": 20,
+          "operation_type": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "order_id": "ORD-URGENT",
+      "product_id": "BRACKET-A",
+      "quantity": 20,
+      "due_date": "2026-09-15",
+      "priority": 5,
+      "operations": [
+        {
+          "operation_no": 1,
+          "machine_id": "CNC-01",
+          "worker_id": "W-01",
+          "duration": 45,
+          "material_id": "AL-6061",
+          "material_qty": 20
+        },
+        {
+          "operation_no": 2,
+          "machine_id": "MILL-01",
+          "worker_id": "W-02",
+          "duration": 30
+        },
+        {
+          "operation_no": 3,
+          "machine_id": "QC-01",
+          "worker_id": "W-03",
+          "duration": 15,
+          "operation_type": "INSPECTION"
+        }
+      ]
+    }
+  ],
+  "inventory": {
+    "AL-6061": {
+      "batches": [
+        {
+          "batch_id": "AL-ONHAND-001",
+          "quantity": 80,
+          "available_at": 0
+        },
+        {
+          "batch_id": "AL-INBOUND-001",
+          "quantity": 40,
+          "available_at": 1440
+        }
+      ]
+    },
+    "SS-304": {
+      "batches": [
+        {
+          "batch_id": "SS-ONHAND-001",
+          "quantity": 40,
+          "available_at": 0
+        }
+      ]
+    }
+  },
+  "machines": [
+    {
+      "machine_id": "CNC-01",
+      "machine_group_id": "CNC",
+      "capacity_minutes": 2400
+    },
+    {
+      "machine_id": "MILL-01",
+      "machine_group_id": "MILL",
+      "capacity_minutes": 2400
+    },
+    {
+      "machine_id": "GRIND-01",
+      "machine_group_id": "GRIND",
+      "capacity_minutes": 2400
+    },
+    {
+      "machine_id": "QC-01",
+      "machine_group_id": "QC",
+      "capacity_minutes": 2400
+    }
+  ],
+  "workers": [
+    {
+      "worker_id": "W-01",
+      "name": "Ari",
+      "available": true
+    },
+    {
+      "worker_id": "W-02",
+      "name": "Bao",
+      "available": true
+    },
+    {
+      "worker_id": "W-03",
+      "name": "Chen",
+      "available": true
+    }
+  ],
+  "shifts": [
+    {
+      "machine_id": "CNC-01",
+      "start": 0,
+      "end": 480
+    },
+    {
+      "machine_id": "MILL-01",
+      "start": 0,
+      "end": 480
+    },
+    {
+      "machine_id": "GRIND-01",
+      "start": 0,
+      "end": 480
+    },
+    {
+      "machine_id": "QC-01",
+      "start": 0,
+      "end": 480
+    },
+    {
+      "worker_id": "W-01",
+      "start": 0,
+      "end": 480
+    },
+    {
+      "worker_id": "W-02",
+      "start": 0,
+      "end": 480
+    },
+    {
+      "worker_id": "W-03",
+      "start": 0,
+      "end": 480
+    }
+  ],
+  "maintenance": [
+    {
+      "machine_id": "CNC-01",
+      "start": 300,
+      "end": 360
+    }
+  ]
+}

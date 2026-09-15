@@ -1,0 +1,754 @@
+{
+  "created_at": "2026-09-15T13:02:54.150262+00:00",
+  "format": "source-handoff",
+  "python": "3.11",
+  "default_region": "ap-southeast-1",
+  "default_model": "amazon.nova-pro-v1:0",
+  "files": [
+    {
+      "path": ".dockerignore",
+      "size": 98,
+      "sha256": "ff45e30cf7ea1b884034e24cda2c62c545bc61f9e3eb62297c649ec8345b646d"
+    },
+    {
+      "path": ".env.example",
+      "size": 559,
+      "sha256": "65b068c73f7c478d8aa556e8ca7cf7894944de57f379c1b9842a52d026a3793c"
+    },
+    {
+      "path": ".gitattributes",
+      "size": 1211,
+      "sha256": "84db779ae23f42678bf8ec7f706b869674095b72e97174ae383e208e4fb4bfed"
+    },
+    {
+      "path": ".gitignore",
+      "size": 298,
+      "sha256": "bf60e84e2c9a3be5bc00a7bbb7bdb3d9d466840751d5752244a723727e61e7d4"
+    },
+    {
+      "path": ".kiro/hooks/guard-spec-tasks.json",
+      "size": 847,
+      "sha256": "b8d8bd7cf23076af3969f39625f235e685e88a7450f6746873bf0092e5144133"
+    },
+    {
+      "path": ".kiro/hooks/verify-on-save.json",
+      "size": 628,
+      "sha256": "86f1e9edca6d3acbf163e10057e9d9ab1f5ac893d62f7ea97dcd0f1414ac4cc0"
+    },
+    {
+      "path": ".kiro/specs/approval-service/design.md",
+      "size": 6195,
+      "sha256": "d171cfaf924ec1762a5e89c863640819e1dc404cbae41d7e6d634ed955ee2a78"
+    },
+    {
+      "path": ".kiro/specs/approval-service/tasks.md",
+      "size": 2502,
+      "sha256": "f8277358a043f2756266cf6ef23afab21fbb9d2a11df1b608590fb161407fe21"
+    },
+    {
+      "path": ".kiro/specs/bedrock-web/design.md",
+      "size": 2384,
+      "sha256": "a20e92073e26260ab243fdc321686ec60d55b6ad93e4d331593d4e68c9417c05"
+    },
+    {
+      "path": ".kiro/specs/bedrock-web/tasks.md",
+      "size": 560,
+      "sha256": "c91461d5ece7cdd1f4ec0f82162c909391941db0fac1328b4f504d10cda643eb"
+    },
+    {
+      "path": ".kiro/specs/plan-store-and-digest/design.md",
+      "size": 12538,
+      "sha256": "b0a6a8f595aa1ad0361218dbb50f633c5fda1c09a0507e15d6e2ae80f03aea23"
+    },
+    {
+      "path": ".kiro/specs/plan-store-and-digest/tasks.md",
+      "size": 10245,
+      "sha256": "934a794a3557bfc6a59999e52f03bb826cbd3e6667646a4523adf93c6301d88f"
+    },
+    {
+      "path": ".kiro/specs/README.md",
+      "size": 1978,
+      "sha256": "548c5ba845048354ca2d300a14fa65b12efea72991aabc65c1c3a1a77e57f9ed"
+    },
+    {
+      "path": ".kiro/specs/tool-error-middleware/design.md",
+      "size": 24319,
+      "sha256": "6f3df792c6de2beff5a6df9d13ffc5e18e70325fbb771b14e54e8c5ef5190369"
+    },
+    {
+      "path": ".kiro/specs/tool-error-middleware/README.md",
+      "size": 1108,
+      "sha256": "b8fb3d126d2a8b67e3d270c1640e547163195574f71f88a9422ea5fc91852e8d"
+    },
+    {
+      "path": ".kiro/specs/tool-error-middleware/START_PROMPT.md",
+      "size": 9968,
+      "sha256": "c35fd1af78a69bd5ffa88bcff60b02747663c10b19711523b5e2d0ee305c8a2b"
+    },
+    {
+      "path": ".kiro/specs/tool-error-middleware/tasks.md",
+      "size": 7001,
+      "sha256": "7d06bb94d67aeb4552e6a617e411482d3307bb720789504cd9a8d692d65e0d4c"
+    },
+    {
+      "path": ".kiro/steering/contract-authority.md",
+      "size": 9237,
+      "sha256": "5866ea5707a9b597cd9692c7fe5d02d02beddf366dda781405f267deed56022e"
+    },
+    {
+      "path": ".kiro/steering/engine-rules.md",
+      "size": 12453,
+      "sha256": "884c03b46a0bde26ae996fc353ff5d812b90124a9e8eaeae356b8c36211ef45a"
+    },
+    {
+      "path": ".kiro/steering/guardrails.md",
+      "size": 9913,
+      "sha256": "094bef07405c11b3dd35cf5c72916e2b2855ec6a47c268effed7faa5db048646"
+    },
+    {
+      "path": ".kiro/steering/observability.md",
+      "size": 8070,
+      "sha256": "7166536f6e9f87f9c04edc66a3aae5bb8fb3c53a82649249047847af4849317b"
+    },
+    {
+      "path": ".kiro/steering/product.md",
+      "size": 6887,
+      "sha256": "b7ba94183a0805fd5a0bff37e88a616b6b8fbfcfb8b31c4c0ed65a59d317d0a7"
+    },
+    {
+      "path": ".kiro/steering/structure.md",
+      "size": 4784,
+      "sha256": "b727f8ff1816a9248f4238501096190f78b9bbd72413b65538640d58318077ed"
+    },
+    {
+      "path": ".kiro/steering/tech.md",
+      "size": 10674,
+      "sha256": "ee184d3929673ece46cb7fce99592099fd03de293d459081222e6ade5b2b0638"
+    },
+    {
+      "path": "AGENT_IMPLEMENTATION_PLAN.md",
+      "size": 2064,
+      "sha256": "e632fa5f345a6a8beaef61ffe6dc10124f541afee02323d4c48e58e73e41f180"
+    },
+    {
+      "path": "AGENTS.md",
+      "size": 2968,
+      "sha256": "4ccec923543bb70ea82b28b23d1e1cc389beb2fce8751bfff37a557993f7dda2"
+    },
+    {
+      "path": "APPROVAL_SERVICE_HANDOFF.md",
+      "size": 5764,
+      "sha256": "e9f8fda6619c40fb8a38cee9b51aace74fc2b48d216b64092af5502be5f26b5d"
+    },
+    {
+      "path": "APPROVAL_SERVICE_HARDENING_REPORT.md",
+      "size": 3726,
+      "sha256": "825c8f5f8fa5be2111f65a0221a9cf9a5374d804718917458f5fcf58d9fd3b96"
+    },
+    {
+      "path": "compose.yaml",
+      "size": 748,
+      "sha256": "8265bdda01969db44d471aa94cd6644328b394db66090a8688f14a5b71056d34"
+    },
+    {
+      "path": "contract/planpilot_agent_contract_v1.8.json",
+      "size": 189921,
+      "sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639"
+    },
+    {
+      "path": "data/factory_demo_v18.json",
+      "size": 4272,
+      "sha256": "a7d3d35c0df9c6dc8bd53a7e2aa09e5df3e0201a206a9235140780a934cff0f9"
+    },
+    {
+      "path": "data/PlanPilot_Mock_Factory_Dataset.xlsx",
+      "size": 20738,
+      "sha256": "83261163992fe095054c113c6be3ab61f5996f2432879909bbba9ff5657ec680"
+    },
+    {
+      "path": "deploy/planpilot-backup.service",
+      "size": 251,
+      "sha256": "03d7a72afc34629dd6952d3b228d731bf6daab97ba35e7f2b2a564250b57d8fe"
+    },
+    {
+      "path": "deploy/planpilot-backup.timer",
+      "size": 184,
+      "sha256": "04e42c78be0a8cb55e6d14315bc3198781bd1e155c20be05d369ba47a0a65a9c"
+    },
+    {
+      "path": "Dockerfile",
+      "size": 695,
+      "sha256": "3be67248e5d03b24e55c18d7c55646347b84fab3cd450ca9b663102b42d6683a"
+    },
+    {
+      "path": "docs/bedrock-web-guide.md",
+      "size": 5577,
+      "sha256": "7f78adc7abfeb7f356395a23688c4a36ac72e3ff76cf98ad236ae318fcd65d0b"
+    },
+    {
+      "path": "docs/devlog/DEVELOPMENT_LOG.md",
+      "size": 12441,
+      "sha256": "b1a61a3ff54ab0f867fbeb5ee22381a46f97cd41eeb6f84da935f36c4cad0f04"
+    },
+    {
+      "path": "docs/devlog/README.md",
+      "size": 1468,
+      "sha256": "44a88001ffb5c55f2b4a1d67deddf8520096180cdf324131d005a13eb3aa5185"
+    },
+    {
+      "path": "docs/EVAL_EVIDENCE_RETRACTION_REPORT_20260915.md",
+      "size": 4830,
+      "sha256": "6dfa6a9ad57ef6ff23d9f42102a86e2f49ba45025929c5e56e22c1d73be353e6"
+    },
+    {
+      "path": "docs/PLANPILOT_AGENT_DESIGN_ZH.md",
+      "size": 37054,
+      "sha256": "f7e79151a809d6786459b0dc1ceab3312d85a54179abf58fe97753f898c5249a"
+    },
+    {
+      "path": "examples/factory_demo.json",
+      "size": 1059,
+      "sha256": "41f470568fe4293a6909954bf502546e41ae66f6194c4c485202f1e6c2b82053"
+    },
+    {
+      "path": "FIFTH_AUDIT_REMEDIATION_REPORT.md",
+      "size": 4903,
+      "sha256": "3aa2be26f808f8d279f8d9819589c203c0dca1b3aed65454dff35fe3340914b5"
+    },
+    {
+      "path": "FOURTH_AUDIT_REMEDIATION_REPORT.md",
+      "size": 5660,
+      "sha256": "50005dd434426bd357e1286996b6b3e7df527945750e3b3a9801d1c6e31896d4"
+    },
+    {
+      "path": "IMPLEMENTATION_NOTES.md",
+      "size": 56439,
+      "sha256": "b2873d0d0bdc46f7c966edd397653707a08a3bbcdd5e052970a4afec48b43e89"
+    },
+    {
+      "path": "PRODUCT_RUNBOOK.md",
+      "size": 2990,
+      "sha256": "44995738ca362dfa8e036817b09a3b1b6e76f7534826cf9a59743a1bbe918e18"
+    },
+    {
+      "path": "PROJECT_OVERVIEW_BILINGUAL.md",
+      "size": 11042,
+      "sha256": "89f38686df139f3dd419662489f12ce7622d4282a35c4cf7ca7f818eb97bc861"
+    },
+    {
+      "path": "requirements-bedrock.txt",
+      "size": 93,
+      "sha256": "94b0b21399dab652cc995cbc2703644f2351750b9348f1713f09bbd42452e2b4"
+    },
+    {
+      "path": "requirements-dev.txt",
+      "size": 670,
+      "sha256": "94f6b719f7867593cf4c677f33737f2a5cff9c7c7f40b0ae904a5882f133f106"
+    },
+    {
+      "path": "requirements-import.txt",
+      "size": 16,
+      "sha256": "06d28d69e958deafb09f0a44fcae9b548f15e4debc14ebc39aad5f0934856fbf"
+    },
+    {
+      "path": "requirements.txt",
+      "size": 566,
+      "sha256": "a37bc0843f9ef34cbd6a6b3929ca8319ad984ff25ffe040aacced64dbeadabb1"
+    },
+    {
+      "path": "REVIEW_HANDOFF_IMPLEMENTATION.md",
+      "size": 57153,
+      "sha256": "9f00851c516ec65ff98608094adda5c52d79f5e3fc2f3b64a01658c840041041"
+    },
+    {
+      "path": "REVIEW_PROMPT.md",
+      "size": 10800,
+      "sha256": "21c445b337e235cce57249385619e7eb1a2f2340fc3382a58b13233bbf360e6b"
+    },
+    {
+      "path": "SIXTH_AUDIT_REMEDIATION_REPORT.md",
+      "size": 4738,
+      "sha256": "a004bcbe30cef633dea16768db567be7db86ab6ae77a2bfd05b4eead934b4cb4"
+    },
+    {
+      "path": "src/planpilot/__init__.py",
+      "size": 866,
+      "sha256": "ed0a03cf2e5bded66b158c9e5358e217abdf20d140f6d78dd398536ace8934fd"
+    },
+    {
+      "path": "src/planpilot/agent/__init__.py",
+      "size": 244,
+      "sha256": "9071fe91fec3aca22c8c113af5ff36cf97289b0b7e29df2c7e76678610cedbfc"
+    },
+    {
+      "path": "src/planpilot/agent/bedrock.py",
+      "size": 1681,
+      "sha256": "58d1f978a01d1fb6e0dab4f972c6b038aa8320ecb96dbd65c231d6c82a4d9281"
+    },
+    {
+      "path": "src/planpilot/agent/chat.py",
+      "size": 8229,
+      "sha256": "6e4b824789d529b6995160762422d6668c506c00d2c2a1b26e9779b6511eaba1"
+    },
+    {
+      "path": "src/planpilot/agent/orchestrator.py",
+      "size": 2958,
+      "sha256": "1615df88be7de92de6e9f92b8611a23507250b6ab9f534b42edafeed1d651549"
+    },
+    {
+      "path": "src/planpilot/agent/planning_tools.py",
+      "size": 2470,
+      "sha256": "3d5543424da1e47942cb0a497e873e3f9ecb62e06aa3eacf8af65efedd10137c"
+    },
+    {
+      "path": "src/planpilot/agent/scheduler.py",
+      "size": 649,
+      "sha256": "db121574d133a91aae1f82b284e71ca69c3b8622b47a2cefe97c929b11a51c9d"
+    },
+    {
+      "path": "src/planpilot/approval/__init__.py",
+      "size": 1226,
+      "sha256": "f7c65aa7202dfea94f3fc377073e5ecdbd9cc1127742819a41e19e9b39f4560d"
+    },
+    {
+      "path": "src/planpilot/approval/errors.py",
+      "size": 5095,
+      "sha256": "73a06070d0956bfd6923451e0c399f4f396d28661ede63b934964a027466ddea"
+    },
+    {
+      "path": "src/planpilot/approval/policy.py",
+      "size": 2387,
+      "sha256": "b67c2d0ed773628986d8f2f6cf156dad85b1a23915153d7051ab7b7c125bd185"
+    },
+    {
+      "path": "src/planpilot/approval/service.py",
+      "size": 35030,
+      "sha256": "baff12236833b02ba81cf11e3b352ba34a4ffbe0cd31c26a3267ef6bfe241e4e"
+    },
+    {
+      "path": "src/planpilot/backup.py",
+      "size": 1276,
+      "sha256": "f255775b237c1fcb999ddeed56f3d4de157aee0dac2d526069716392be1daacc"
+    },
+    {
+      "path": "src/planpilot/contract_adapter.py",
+      "size": 3989,
+      "sha256": "1226029ba8936c708b53f24192aafdf6c7d1639b93b007e3290d42f382846c74"
+    },
+    {
+      "path": "src/planpilot/domain/__init__.py",
+      "size": 271,
+      "sha256": "ae613877c3c0fd24f6a9d8a82e706b58e3fccfc67724330fb20cc89b6fd2a110"
+    },
+    {
+      "path": "src/planpilot/domain/importer.py",
+      "size": 9241,
+      "sha256": "f2e45b27b591936901466031fef0bbe19a4439f174696adf8e90e717b5e07d30"
+    },
+    {
+      "path": "src/planpilot/domain/lots.py",
+      "size": 814,
+      "sha256": "ddbbef1cd88ee9512d7ef5e826d2de869814e53fbbccf1158816bdebd7f80263"
+    },
+    {
+      "path": "src/planpilot/domain/models.py",
+      "size": 1293,
+      "sha256": "ec8cb9911f8fb58b636d856c62df2ba1ba0759c49a690c25f6bc0aa3080b0859"
+    },
+    {
+      "path": "src/planpilot/domain/planning.py",
+      "size": 14325,
+      "sha256": "93d5a98925385e200575fde9c35135aca091cb76c6fe3d0edb0924b90b7308c8"
+    },
+    {
+      "path": "src/planpilot/engine.py",
+      "size": 3724,
+      "sha256": "5ac236e86cd4c87fc15dffbba3436bb3baaafc5a392027bd42e2a99a5a16cc42"
+    },
+    {
+      "path": "src/planpilot/inference/__init__.py",
+      "size": 83,
+      "sha256": "1ca1dce9c2758d1a525f737366201d9c5d955b877635acb6915b8270a1af8b9e"
+    },
+    {
+      "path": "src/planpilot/inference/bedrock_client.py",
+      "size": 10407,
+      "sha256": "ffd27e28e497626fc4f539c098b17fd2fbb1457c98d8fb6801448128cb066179"
+    },
+    {
+      "path": "src/planpilot/observability.py",
+      "size": 719,
+      "sha256": "70102a4e74e587c7ea1bfa5e79b45ec0cfaf56e9d6164c1cfc6327eb3c7c9da2"
+    },
+    {
+      "path": "src/planpilot/persistence.py",
+      "size": 13014,
+      "sha256": "ec360c9fc407187c2241c0d313e20f49010be5f8f461803005165c4d13a0f89a"
+    },
+    {
+      "path": "src/planpilot/security.py",
+      "size": 2158,
+      "sha256": "5653c86a0efd2980bb77e14aa49b1ac2c042a1ff2ff439ff1365e7b6f3df10b8"
+    },
+    {
+      "path": "src/planpilot/store/__init__.py",
+      "size": 1686,
+      "sha256": "372954bf55dee3e04192719d4664d0d118354e0173d91f6ba0e0bc985f8a919e"
+    },
+    {
+      "path": "src/planpilot/store/digest.py",
+      "size": 13785,
+      "sha256": "ae01bdb43c1761c078fd81a6d3809546311b58c7fa44ebdef13268acf05e16a6"
+    },
+    {
+      "path": "src/planpilot/store/errors.py",
+      "size": 18928,
+      "sha256": "93fa444cc002e35cc7b0dad9b7675fe3eac459cb38bff9d1ff35d6b45fb29a9f"
+    },
+    {
+      "path": "src/planpilot/store/persistence_schema.py",
+      "size": 5868,
+      "sha256": "7dd168d7ea8ef425cda3893dc9c5348f42439dd8f283515efc174fce63445806"
+    },
+    {
+      "path": "src/planpilot/store/plan_store.py",
+      "size": 62114,
+      "sha256": "ca59b95c6e6388ccbc4b787e335f725dcc8d61135f3f1e10eda4b821600a3afb"
+    },
+    {
+      "path": "src/planpilot/validation/__init__.py",
+      "size": 1204,
+      "sha256": "4281ca4319e8c17e40b11dd3d8a2597dcb4a96e786f06527dfd83678b58a5210"
+    },
+    {
+      "path": "src/planpilot/validation/schema.py",
+      "size": 23283,
+      "sha256": "fd9e2a487991de093d5513893d14c1b1ea52a47c81c09821c5b6d99b3c560515"
+    },
+    {
+      "path": "src/planpilot/workflow/__init__.py",
+      "size": 91,
+      "sha256": "dde5279392af2ee95e96bf9e90472fe8f128d72427a603297db2194f55876d86"
+    },
+    {
+      "path": "src/planpilot/workflow/events.py",
+      "size": 6597,
+      "sha256": "76316ba6ee7824cf81f2af258b29f615777fa7953ac3fbd7d68e8c8d45ad892c"
+    },
+    {
+      "path": "START_HERE.md",
+      "size": 11081,
+      "sha256": "7722889f419474f28bc338fc84bd2504a537fdb202d89c945ebc832a25b7c61a"
+    },
+    {
+      "path": "tests/__init__.py",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tests/_fixtures.py",
+      "size": 13768,
+      "sha256": "5bf99b48236dc38b93484d44ff36beaf068b4d1f05d435954c53ffe61f1852fa"
+    },
+    {
+      "path": "tests/conftest.py",
+      "size": 1402,
+      "sha256": "10192ab2f7686d4ce69aefe73ab634f556d940286222fd0787f0fa7c20b2e5e8"
+    },
+    {
+      "path": "tests/evidence/approval-service/EVIDENCE.json",
+      "size": 3754,
+      "sha256": "67cf752a0aac1b385566f90a59e5fdf5cda137db67146a87b8eeeb59f556c22a"
+    },
+    {
+      "path": "tests/evidence/bedrock-web-offline-20260915.md",
+      "size": 1028,
+      "sha256": "72a705fef950711c8ddf0c676fe9c0b9f27ff7209f66788f841cc3bc8f393862"
+    },
+    {
+      "path": "tests/evidence/plan-store-and-digest/EVIDENCE.json",
+      "size": 5731,
+      "sha256": "68281924720bdda2d7d8239539079301764a3178e49b18244aecfa5730f6f179"
+    },
+    {
+      "path": "tests/evidence/runtime-eval/EVIDENCE.json",
+      "size": 22073,
+      "sha256": "20d9ca2d40d916e9cbd005350835bbb01121b3d54c44e13313044666de448600"
+    },
+    {
+      "path": "tests/evidence/runtime-eval/README.md",
+      "size": 517,
+      "sha256": "a57301e49218650f6879b45049b8e820f84a2a5c847b2e76d1a9551f04e80b0f"
+    },
+    {
+      "path": "tests/evidence/smoke-harness/EVIDENCE.json",
+      "size": 3456,
+      "sha256": "85ca17c78e3471210835ff6b9cbcf94f9b9e539f57af801dbcdbe89c3b3d55c7"
+    },
+    {
+      "path": "tests/evidence/smoke-harness/README.md",
+      "size": 572,
+      "sha256": "01f034584a8b6769fc2a6f803c76da148eb1617c28edf19256e67780d481479a"
+    },
+    {
+      "path": "tests/negative_control/__init__.py",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tests/negative_control/test_approval_service_negctl.py",
+      "size": 6611,
+      "sha256": "d865e79c66a23e07d9a4080583f7fc852a0b7141ecc851c3c1f71dc76dca0982"
+    },
+    {
+      "path": "tests/negative_control/test_plan_store_negctl.py",
+      "size": 40048,
+      "sha256": "30522089b8eac5038c5b008eefcc8fb6b7edd85fa363e349c728e6618f609355"
+    },
+    {
+      "path": "tests/unit/__init__.py",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tests/unit/test_approval_service.py",
+      "size": 27159,
+      "sha256": "9e0ecf072571d433d7d25bd358566e62798a10a7d0392cfac9e9845841427be2"
+    },
+    {
+      "path": "tests/unit/test_audit3_regressions.py",
+      "size": 29838,
+      "sha256": "e2a2cf45452d3ae4803c8183ae30c452a68445e04aef540d6a8d0b8bb29e91d7"
+    },
+    {
+      "path": "tests/unit/test_audit4_regressions.py",
+      "size": 13488,
+      "sha256": "b40ae448858659b6bb6dc0628f5bbdc0a25482132d279f4176c8238a558bf9b9"
+    },
+    {
+      "path": "tests/unit/test_audit_fixes_pinned.py",
+      "size": 14750,
+      "sha256": "9ae8fc61b0ce6c368f017bfec9d16888a6b3068dab9126ae725bcbcf2da1bbad"
+    },
+    {
+      "path": "tests/unit/test_bedrock_web.py",
+      "size": 14749,
+      "sha256": "a0d76535f75650ce88aaf86f86db4fd6ed20b374373421975a5b7689efe802ba"
+    },
+    {
+      "path": "tests/unit/test_closed_vocabularies.py",
+      "size": 14121,
+      "sha256": "60e998120d9bd3c847c67dd173d31b1ef51f944eefdd2d06908d63915f70a971"
+    },
+    {
+      "path": "tests/unit/test_contract_adapter.py",
+      "size": 957,
+      "sha256": "cd86d9720d95ddcf9a9e96afa94e1173f06beba94a3ef2d99052a793d10f8967"
+    },
+    {
+      "path": "tests/unit/test_digest_determinism.py",
+      "size": 13116,
+      "sha256": "7dc829d57388cc039edeafd3c936457035c3dc5e2904198ff8d4f96b536af537"
+    },
+    {
+      "path": "tests/unit/test_digest_identity.py",
+      "size": 8776,
+      "sha256": "511ff99553f253e5ef5fb1e3e8ed06a89c4e87533c0862439dff4401f9c189c4"
+    },
+    {
+      "path": "tests/unit/test_domain_planning.py",
+      "size": 1039,
+      "sha256": "502a7756a6f7429405bd0d38ff906c21c827a53a1409117130b7dec609121e62"
+    },
+    {
+      "path": "tests/unit/test_engine_utilities.py",
+      "size": 1533,
+      "sha256": "e26804ad7bad7c7bcb07db6a2e4911815a5fc282238a10ac124e88a6204ce967"
+    },
+    {
+      "path": "tests/unit/test_errors_schema.py",
+      "size": 14373,
+      "sha256": "cea3b19bf937bbb9aa1c2d695845b679e1590a7f2c3f98f2380165680455cbd9"
+    },
+    {
+      "path": "tests/unit/test_eval_evidence_honesty.py",
+      "size": 3793,
+      "sha256": "980d9296262fe150c8f32aab841bcb32a7da9da270852dc0ed4927962937109e"
+    },
+    {
+      "path": "tests/unit/test_event_workflow.py",
+      "size": 1891,
+      "sha256": "7019cbc684bb1cd8085dbde2efa4116294c0dca8fb5cacdd03d0cf7a43f773b5"
+    },
+    {
+      "path": "tests/unit/test_guard_bypass_regressions.py",
+      "size": 11683,
+      "sha256": "fa27d68b187f8a73405220af8e6d53f32d19ffdb16b730ed4e43ac670e2ccb67"
+    },
+    {
+      "path": "tests/unit/test_local_operations.py",
+      "size": 951,
+      "sha256": "02b45192546cd98c60cae76d0df9f7adbfc198b1caad4e7d148c1ecb58a268cf"
+    },
+    {
+      "path": "tests/unit/test_lots.py",
+      "size": 282,
+      "sha256": "461ac42642f22874f8137f75b9712416d7c84d36c074de8f252934f8419dbc14"
+    },
+    {
+      "path": "tests/unit/test_p0_audit_regressions.py",
+      "size": 32288,
+      "sha256": "8fc4cd499fbfe0c9f54cb1d1c8a62e9267739911a1b28fa614b1f96aaeda6ee9"
+    },
+    {
+      "path": "tests/unit/test_plan_store_invariants.py",
+      "size": 28453,
+      "sha256": "34ea3f3f5f58f44aa071ae7a193d9d8b79671a266f1d6f48f8a8ccdbf02e2ebe"
+    },
+    {
+      "path": "tests/unit/test_plan_store_persistence.py",
+      "size": 10453,
+      "sha256": "d922c7bb376e89bc56a814e95a176418634a9f8eac93ff0d76893f93435863ad"
+    },
+    {
+      "path": "tests/unit/test_production_workflow.py",
+      "size": 1988,
+      "sha256": "5c71da1f47208d91ad2a6119a230e16637912519c9892539000bf100bd6a2dc4"
+    },
+    {
+      "path": "tests/unit/test_requirement_delivery.py",
+      "size": 11277,
+      "sha256": "45869b8e798e97be3c3ede33d433ce24ba8867a251e3b38638a15dc8c895b8d2"
+    },
+    {
+      "path": "tests/unit/test_security.py",
+      "size": 651,
+      "sha256": "5682cfad47bb9ab629e2c93c32cfcabc01837989ad89a079db1570dc8ff529f2"
+    },
+    {
+      "path": "tools/api_server.py",
+      "size": 11022,
+      "sha256": "62f34dce441bda6391c28baf0597dc981436aa44e17bc52334864d90adfa8f35"
+    },
+    {
+      "path": "tools/backup_database.py",
+      "size": 234,
+      "sha256": "e6f393a3d3c2753f0ba4213abe5baf98b4ede4e11f7095c3fa44a5978fac643b"
+    },
+    {
+      "path": "tools/build_team_package.py",
+      "size": 6243,
+      "sha256": "8aa57e53a701314cdfb581cab8c9c1024ac27c875a27b9a2013d7c9fda2e1df9"
+    },
+    {
+      "path": "tools/check_closed_vocabularies.py",
+      "size": 33698,
+      "sha256": "00dc91378df18a756ca26db0da29ce6ede3d9ecc15f023ddcb06280924c9597b"
+    },
+    {
+      "path": "tools/check_web_render.cjs",
+      "size": 5571,
+      "sha256": "0b5ae1797883461a43f4417ff23c6ad2faf6a69d50afdb95e134fb5090b146c4"
+    },
+    {
+      "path": "tools/factcheck_approval_handoff.py",
+      "size": 3849,
+      "sha256": "e28e2e800b007a19848e8d5220d2b4996636bf2bb8bc20d401467dc6a98e8b69"
+    },
+    {
+      "path": "tools/factcheck_eval_retraction.py",
+      "size": 5222,
+      "sha256": "899deebd19f14e80082a9562a1ec26235a3a4575c70079a9d6de595d5a7c2005"
+    },
+    {
+      "path": "tools/factcheck_impl_handoff.py",
+      "size": 20306,
+      "sha256": "a37ebfd3bf39f1e4fa8843fb225e5f7bbf65dda3080ad93247caf86ca0af7114"
+    },
+    {
+      "path": "tools/generate_compliant_dataset.py",
+      "size": 9633,
+      "sha256": "bb0bb4a1891e802e42c6365ea9776fdb26a13fe561173636882981d9e1622fd4"
+    },
+    {
+      "path": "tools/generate_kiro_workspace.py",
+      "size": 42955,
+      "sha256": "497c8b3e3c5e8bf9bce8c72d89548d8bc3ed25346a0bd4ac35def8ad0619522e"
+    },
+    {
+      "path": "tools/issue_local_token.py",
+      "size": 542,
+      "sha256": "55f9d7beb8e0d5b931c1646e5b0184ee0fb234acb07613120c1f091aa5c5e9a3"
+    },
+    {
+      "path": "tools/local_acceptance.py",
+      "size": 435,
+      "sha256": "b0d654eb2faaecb0826aebb3a2cc6cb363942e2f2229a2b422c32a4564afab9a"
+    },
+    {
+      "path": "tools/negative_control_workspace.py",
+      "size": 4164,
+      "sha256": "86b20abd50e54f3ca4daeb7f9692d7d740660fe827c9106c0a3161b0bc93e30b"
+    },
+    {
+      "path": "tools/probes/probe_pyc_stale.py",
+      "size": 4872,
+      "sha256": "e65da8bbfe76003e0af78dc6f22ca5944d1a68e26ece25043654c4078170a352"
+    },
+    {
+      "path": "tools/run_agent_demo.py",
+      "size": 624,
+      "sha256": "5cabe233c2d8af6494f5e55f531b75b92ac9f096fc87e41b7a9e324ac2fe1fa8"
+    },
+    {
+      "path": "tools/run_evals.py",
+      "size": 4915,
+      "sha256": "50826c477d47c26a35259010be6c5ef441b6aeaa9f79e2e6e7d45d0525c65401"
+    },
+    {
+      "path": "tools/run_smoke_harness.py",
+      "size": 8201,
+      "sha256": "f9d5052904554ba749146664aa5292521710293da6c0747eb900cf4936b14f89"
+    },
+    {
+      "path": "tools/scheduled_backup.py",
+      "size": 1125,
+      "sha256": "7e3c24c1c420876eaba6e3f56eb6234990d7794dcfc08fbbab35ab65699e4af9"
+    },
+    {
+      "path": "tools/setup_local.ps1",
+      "size": 2280,
+      "sha256": "18d0d463061661df1ceed31c9e97ffe31a3e89585c8900faab3214d0a980785f"
+    },
+    {
+      "path": "tools/start_local.ps1",
+      "size": 2794,
+      "sha256": "fb650ae2c7358fa8daf14b163a48f74f791dc3f67f7a523d07d8bb483b599eb3"
+    },
+    {
+      "path": "tools/validate_compliant_dataset.py",
+      "size": 2690,
+      "sha256": "87e38ea0f529cf077d19be8012c34da5dfee9fa78eff51fd57e4c1b5cfd2e3ec"
+    },
+    {
+      "path": "tools/validate_kiro_workspace.py",
+      "size": 9475,
+      "sha256": "f481d1fcb85e4447a5301a44881ca22c34e922d5e4cb4e1bf1a767d344f53129"
+    },
+    {
+      "path": "tools/web/index.html",
+      "size": 20085,
+      "sha256": "ef484bbc824f072136d06e8c9806317a943c250de280e1675ac90499083863a7"
+    },
+    {
+      "path": "tools/write_evidence_approval_service.py",
+      "size": 5150,
+      "sha256": "e7f32b50bda052b93010d6f49f832e84cc7bf5b22f5bf029ecd0c40d5f67c103"
+    },
+    {
+      "path": "tools/write_evidence_plan_store.py",
+      "size": 16488,
+      "sha256": "065f07ad3d9561387b9f846bb66f047adbc58f1372eb0af1135cb42c015058e7"
+    }
+  ]
+}

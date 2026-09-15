@@ -106,6 +106,11 @@ VOCABULARIES: dict[str, set[str]] = {
     "approval_reason_code": set(DEFS["approval_reason_code"]["enum"]),
     "approval_decision_reason_code": set(DEFS["approval_decision_reason_code"]["enum"]),
     "approval_decision": {r["decision"] for r in CONTRACT["approval_rules"]},
+    "release_readiness": {
+        value
+        for value in CONTRACT["release_readiness"].values()
+        if isinstance(value, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", value)
+    },
     # Security controls carry enum-like string values that are just as closed as
     # the $defs enums. BLOCK_AND_LOG lives here, not in approval_rules.
     "security_action": {

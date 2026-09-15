@@ -1,0 +1,37 @@
+services:
+  api:
+    build: .
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      PLANPILOT_AUTH_SECRET: ${PLANPILOT_AUTH_SECRET:?Set PLANPILOT_AUTH_SECRET in .env}
+    volumes:
+      - data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    cpus: 2
+  backup:
+    build: .
+    profiles: [operations]
+    command: [python, tools/scheduled_backup.py, /data/planpilot.db, /backups, --keep, "14"]
+    volumes:
+      - data:/data
+      - backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  data:
+  backups:

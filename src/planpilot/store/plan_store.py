@@ -997,6 +997,13 @@ class PlanStore:
         # the event — resurrecting authority the event claims was withdrawn.
         event_count: dict[tuple[str, int], int] = {}
         for event in events:
+            from datetime import datetime
+            try:
+                stamp = event.get("superseded_at")
+                if not isinstance(stamp, str) or datetime.fromisoformat(stamp.replace("Z", "+00:00")).tzinfo is None:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise SchemaViolationError(SchemaValidationError([], "superseded_event", str(event.get("plan_id"))))
             key = (event["plan_id"], event["plan_version"])
             if key not in content_by_key:
                 raise PlanNotFoundError(
@@ -1199,6 +1206,14 @@ class PlanStore:
         This is audit finding P0-1. Before it existed no store write path
         validated against the contract at all.
         """
+        if def_name == "plan_lifecycle":
+            from datetime import datetime
+            ts = record.get("updated_at") if isinstance(record, dict) else None
+            try:
+                if not isinstance(ts, str) or datetime.fromisoformat(ts.replace("Z", "+00:00")).tzinfo is None:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise SchemaViolationError(SchemaValidationError([], "plan_lifecycle", entity_id))
         try:
             validate_against_contract(record, def_name, def_name, entity_id)
         except SchemaValidationError as exc:
