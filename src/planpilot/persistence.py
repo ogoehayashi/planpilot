@@ -23,13 +23,26 @@ def canonical(value):
 
 
 def now():
+    """Module default: real wall time. Database instances carry a server-owned
+    Clock instead (G1.0.1) so audit/trace/state stamps agree with lifecycle
+    stamps; do not add new authoritative writers that call this directly."""
     return datetime.now(timezone(timedelta(hours=8))).isoformat()
 
 
 class Database:
-    """Infrastructure database; contains no plan or approval business rules."""
+    """Infrastructure database; contains no plan or approval business rules.
 
-    def __init__(self, path="planpilot.db"):
+    The optional ``clock`` is the single server-owned time source for every
+    authoritative stamp written through this instance (audit chain rows,
+    factory-state rows, inference-day rollovers). Test/demo callers pass a
+    FixedClock/ScenarioClock; production defaults to WallClock semantics.
+    """
+
+    def __init__(self, path="planpilot.db", clock=None):
+        if clock is None:
+            from .clock import WallClock
+            clock = WallClock()
+        self.clock = clock
         self.lock = threading.RLock()
         self.conn = sqlite3.connect(
             str(path), check_same_thread=False, timeout=10, isolation_level=None
@@ -118,7 +131,7 @@ class Database:
             "actor": actor,
             "event": event,
             "payload": payload,
-            "created_at": now(),
+            "created_at": self.clock.now(),
         })
 
     def audit(self, plan_id, actor, event, payload):

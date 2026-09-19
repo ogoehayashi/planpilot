@@ -9,6 +9,7 @@ COPY examples ./examples
 COPY contract ./contract
 RUN useradd --uid 10001 --create-home planpilot && mkdir /data /backups && chown planpilot:planpilot /data /backups
 ENV PYTHONPATH=/app/src PYTHONUNBUFFERED=1 PLANPILOT_HOST=0.0.0.0 PLANPILOT_DB=/data/planpilot.db \
+    PLANPILOT_CLOCK_MODE=wall \
     PLANPILOT_BEDROCK_REGION=ap-southeast-1 \
     PLANPILOT_BEDROCK_MODEL=global.anthropic.claude-sonnet-4-5-20250929-v1:0 \
     PLANPILOT_FORBID_LLM_NETWORK=1

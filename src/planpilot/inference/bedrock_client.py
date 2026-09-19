@@ -11,8 +11,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from planpilot.persistence import now
-
 
 DEFAULT_BEDROCK_REGION = 'ap-southeast-1'
 DEFAULT_BEDROCK_MODEL = 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'
@@ -132,7 +130,7 @@ class BedrockClient:
         if len(raw) > 24000:
             raise InferenceError('输入摘要超过本次模型调用上限，请缩小数据范围。')
         token = self._credential()
-        call_id, day = str(uuid.uuid4()), now()[:10]
+        call_id, day = str(uuid.uuid4()), self.db.clock.now()[:10]
         reserved = len(raw) + max_tokens
         with self.db.transaction():
             calls = self.db.conn.execute('SELECT count(*) FROM inference_calls WHERE run_id=?', (run_id,)).fetchone()[0]

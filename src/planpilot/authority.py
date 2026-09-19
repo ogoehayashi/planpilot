@@ -38,7 +38,10 @@ class RuntimeAuthority:
         self.database = database
         # Every authoritative timestamp comes from this server-owned clock.
         # Callers never supply one; see planpilot.clock for the boundary rule.
-        self.clock = clock or WallClock()
+        # The Database stamp path (audit chain rows) is re-pointed here too so
+        # lifecycle and audit timestamps can never disagree (G1.0.1).
+        self.clock = clock or getattr(database, "clock", None) or WallClock()
+        database.clock = self.clock
         with self.database.lock:
             row = self.database.conn.execute(
                 "SELECT revision,plan_store_json,approval_service_json "

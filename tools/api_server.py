@@ -13,7 +13,7 @@ from planpilot.factory_state import FactoryStateRegistry
 from planpilot.observability import METRICS, Timer
 from planpilot.authority import RuntimeAuthority
 from planpilot.approval import ApprovalError
-from planpilot.clock import Clock, ScenarioClock, WallClock
+from planpilot.clock import Clock, WallClock, clock_from_env
 from planpilot.persistence import Database
 from planpilot.runtime_planning import generate_authoritative_plans_from_state
 from planpilot.security import authenticate
@@ -43,11 +43,12 @@ class Server(ThreadingHTTPServer):
         if not secret or len(secret) < 32:
             raise ValueError("PLANPILOT_AUTH_SECRET must contain at least 32 characters")
         self.db, self.secret = db, secret
-        # Server-owned clock. The scenario demo dataset is dated 2026-09-14,
-        # so a plain wall clock silently closes the approval window as real
-        # time passes (P0-1). main() builds a ScenarioClock for live demos;
-        # tests inject FixedClock. Requests can never choose the timestamp.
-        self.clock = clock or WallClock()
+        # Server-owned clock — the ONE time source for lifecycle, approval,
+        # audit chain, decision trace, security events and factory state.
+        # G1.0.1: the Database instance is re-pointed at this clock so audit
+        # stamps can never disagree with scenario stamps (dual-clock leak).
+        self.clock = clock or getattr(db, "clock", None) or WallClock()
+        db.clock = self.clock
         self.authority = RuntimeAuthority(db, self.clock)
         self.factory_states = FactoryStateRegistry(db)
         self.security_events = SecurityEventService(db)
@@ -315,29 +316,21 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    db = Database(os.environ.get("PLANPILOT_DB", "planpilot.db"))
-    # Demo/live mode against the fixed scenario dataset (planning horizon
-    # 2026-09-14..18): pin server time into the scenario so the approval
-    # window behaves, but REPORT it as scenario time everywhere the UI can
-    # see. Set PLANPILOT_SCENARIO=off to run on real wall time, in which case
-    # fresh plans must be generated against a fresh horizon (P0-1 rule: an
-    # expired plan is regenerated, never revived by a clock trick).
-    if os.environ.get("PLANPILOT_SCENARIO", "on").lower() != "off":
-        # Pinned INSIDE the scenario window so the demo is reproducible on
-        # any calendar date; the real wall clock would already be past the
-        # guard (horizon 09-18 17:00 + 24h = 09-19 17:00 SGT).
-        clock = ScenarioClock(
-            os.environ.get("PLANPILOT_SCENARIO_NOW", "2026-09-14T08:00:00+08:00"),
-            scenario={
-                "dataset": "factory_demo_v18.json",
-                "planning_start": "2026-09-14T00:00:00+08:00",
-                "horizon_end": "2026-09-18T17:00:00+08:00",
-                "note": "服务端场景时钟；过期窗口须重新生成计划，不得复活旧计划。",
-            },
-        )
-    else:
-        clock = WallClock()
-    server = Server((os.environ.get("PLANPILOT_HOST", "127.0.0.1"), int(os.environ.get("PLANPILOT_PORT", "8080"))),
+    # G1.0.1 fail-safe: unset/invalid PLANPILOT_CLOCK_MODE means REAL wall
+    # time. A deployment that forgets env config must never run on the fixed
+    # 2026-09-14 scenario clock and bless stale plans. Local demo:
+    # PLANPILOT_CLOCK_MODE=scenario (explicit; refuses public binds).
+    host = os.environ.get("PLANPILOT_HOST", "127.0.0.1")
+    try:
+        clock = clock_from_env(os.environ, host)
+    except ValueError as exc:
+        raise SystemExit(f"clock policy refused startup: {exc}") from exc
+    db = Database(os.environ.get("PLANPILOT_DB", "planpilot.db"), clock=clock)
+    if clock.kind == "scenario":
+        print(f"WARNING: scenario clock active ({clock.now()}) — demo data "
+              "only, NOT production time. Audit and approval stamps share it.",
+              flush=True)
+    server = Server((host, int(os.environ.get("PLANPILOT_PORT", "8080"))),
                     db, os.environ.get("PLANPILOT_AUTH_SECRET"), os.environ.get("PLANPILOT_FACTORY_ROOT", ROOT / "data"),
                     clock=clock)
     try:

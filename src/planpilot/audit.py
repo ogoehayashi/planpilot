@@ -8,7 +8,7 @@ import uuid
 from copy import deepcopy
 from typing import Any, Mapping
 
-from .persistence import Database, canonical, now
+from .persistence import Database, canonical
 from .tools import ToolErrorMiddleware
 from .validation import validate, validate_tool_payload
 
@@ -153,7 +153,7 @@ class DecisionTraceWriter:
                 "trace_id": f"{correlation_id}:{sequence}",
                 "correlation_id": correlation_id,
                 "sequence_no": sequence,
-                "recorded_at": now(),
+                "recorded_at": self.trail.database.clock.now(),
                 "workflow_state_before": self._text(metadata.get("workflow_state_before"), "UNKNOWN"),
                 "workflow_state_after": metadata.get("workflow_state_after"),
                 "tool_name": event["tool_name"],
@@ -192,7 +192,7 @@ class _PreparedSecurityEvent:
     def prepare(self, payload, context):
         self.payload = deepcopy(dict(payload))
         self.expected_head = self.trail.head()
-        logged_at = now()
+        logged_at = self.trail.database.clock.now()
         with self.trail.database.lock:
             next_id = self.trail.database.conn.execute(
                 "SELECT COALESCE(MAX(id),0)+1 FROM audit_chain"

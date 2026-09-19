@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .persistence import canonical, now
+from .persistence import canonical
 from .validation import validate_tool_payload
 
 
@@ -417,7 +417,7 @@ class FactoryStateRegistry:
         state_id = hashlib.sha256(canonical(identity).encode()).hexdigest()
         metadata = {"dataset_version": result["dataset_version"], "entity_counts": result["entity_counts"],
                     "warnings": result["warnings"], "source_sha256": result["source_sha256"]}
-        values = (state_id, canonical(result["state"]), canonical(result["validation"]), canonical(metadata), canonical(result["source_tables"]), now())
+        values = (state_id, canonical(result["state"]), canonical(result["validation"]), canonical(metadata), canonical(result["source_tables"]), self.db.clock.now())
         with self.db.transaction():
             existing = self.db.conn.execute("SELECT state_json,validation_json,metadata_json,source_json FROM factory_states WHERE state_id=?", (state_id,)).fetchone()
             if existing and tuple(existing) != values[1:5]:
@@ -451,7 +451,7 @@ class FactoryStateRegistry:
         metadata = {"dataset_version": dataset_version, "entity_counts": counts,
                     "warnings": [row["message"] for row in validation["warnings"]],
                     "source_sha256": hashlib.sha256(canonical(state).encode()).hexdigest()}
-        values = (state_id, canonical(state), canonical(validation), canonical(metadata), canonical({}), now())
+        values = (state_id, canonical(state), canonical(validation), canonical(metadata), canonical({}), self.db.clock.now())
         with self.db.transaction():
             existing = self.db.conn.execute("SELECT state_json,validation_json,metadata_json,source_json FROM factory_states WHERE state_id=?", (state_id,)).fetchone()
             if existing and tuple(existing) != values[1:5]:

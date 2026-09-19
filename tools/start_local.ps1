@@ -7,7 +7,12 @@ param(
     [string]$BedrockKeyFile = '',
     [string]$BedrockRegion = 'ap-southeast-1',
     [ValidateSet('global.anthropic.claude-sonnet-4-5-20250929-v1:0')]
-    [string]$BedrockModel = 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'
+    [string]$BedrockModel = 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+    # This script is the LOCAL DEMO launcher: it pins the server to the fixed
+    # scenario clock explicitly (G1.0.1 fail-safe policy makes 'wall' the
+    # default everywhere else). Pass -ClockMode wall to test real expiry.
+    [ValidateSet('scenario','wall')]
+    [string]$ClockMode = 'scenario'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,6 +49,7 @@ if ($secret -notmatch '^[0-9]{32,}$') {
 
 $env:PYTHONPATH = Join-Path $projectRoot 'src'
 $env:PLANPILOT_AUTH_SECRET = $secret
+$env:PLANPILOT_CLOCK_MODE = $ClockMode
 $python = Join-Path $projectRoot '.venv-runtime\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python)) {
     throw "Project Python environment not found: $python"
