@@ -90,7 +90,8 @@ def test_all_mutations_are_caught_in_disposable_copy_and_source_is_unchanged(san
             target.write_bytes(_replace_once(pristine, old, new, label).encode("utf-8"))
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", *FOCUSED, "-q", "--no-header", "-p", "no:cacheprovider"],
-                cwd=sandbox, env=env, capture_output=True, text=True, timeout=90,
+                cwd=sandbox, env=env, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=90,
             )
             if result.returncode == 0:
                 escaped += 1

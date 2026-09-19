@@ -82,7 +82,8 @@ def test_security_audit_mutations_are_all_caught_and_real_tree_is_unchanged(sand
             target.write_bytes(once(pristine, old, new, label).encode("utf-8"))
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", *FOCUSED, "-q", "--no-header", "-p", "no:cacheprovider"],
-                cwd=sandbox, env=env, capture_output=True, text=True, timeout=120,
+                cwd=sandbox, env=env, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=120,
             )
             if result.returncode == 0:
                 escaped += 1

@@ -14,3 +14,9 @@
 - Known-defect register carried in (to be fixed by G1/G2, see champion review):
   P0-1 approval-window clock (planning_start 2026-09-14), non-contractual publisher
   (idempotency key dropped, no output-schema/audit_log_id binding), Windows UTF-8/negctl issues.
+- Delivery hygiene (2026-09-19): PACKAGE_MANIFEST.json at repo root is a STALE
+  2026-09-15 snapshot (143 files, Nova default model) and does NOT represent this
+  branch (git currently tracks 266+ files). tools/build_team_package.py regenerates
+  it inside every export and excludes the checked-in copy, so shipped packages are
+  unaffected; the root copy stays only as historical evidence until G3 regenerates
+  or retires it. Do not cite it as a description of the current tree.

@@ -76,7 +76,8 @@ def test_model_binding_mutations_are_all_caught_and_source_is_unchanged(sandbox)
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", *FOCUSED, "-q", "-k", TEST_FILTER,
                  "--no-header", "-p", "no:cacheprovider"],
-                cwd=sandbox, env=env, capture_output=True, text=True, timeout=90,
+                cwd=sandbox, env=env, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=90,
             )
             if result.returncode == 0:
                 escaped += 1
