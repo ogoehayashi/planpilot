@@ -353,7 +353,7 @@
   - UI 横幅(index.html+p1_3.js):场景模式显示「演示场景时间」,墙钟模式显示
     「生产墙钟」,场景时间不伪装成生产时间。
   - 新增 tests/unit/test_server_clock_policy.py 5 条:stale horizon 在墙钟下仍
-    APPROVAL_WINDOW_CLOSED(合同守卫保持);ScenarioClock 全链路 HTTP 演示(当天
+    APPROVAL_WINDOW_CLOSED(合同守卫保持);ScenarioClock 演示全流程(注:当时为合成 fixture 直调 Authority,非真 HTTP;真实链路 G1.0.1 补齐)(当天
     墙钟正是炸弹日 2026-09-19 18:xx,生成→审批→发布→重启回读全绿);客户端伪造
     server_now 被拒;重启换墙钟 digest/plan_version 不变;expiry 夹紧公式
     min(now+7200, horizon_end+24h) 与合同一致。
@@ -370,8 +370,10 @@
   ——合并本身没吞任何一方日志,但 B 包 devlog 实际只写到 P1-1;P1-2 只有报告
   `P1_2_SCHEDULING_ENGINE_REMEDIATION_REPORT_20260919.md` 与证据文件、无 devlog
   条目。现按该报告回溯登记:P1-2 调度引擎修复完成(2026-09-19 12:41 SGT),
-  专项 9 passed、单元 618、全量 625;HC-014 换型上限、HC-016 零产能 fallback、
-  HC-002/017 线容量与日历一致性、产能利用率公式修正。
+  专项 9 passed、单元 618、全量 625。修复面(按原报告原话):历史换型上限误判回归、零预算 fallback、加班硬上限、
+  显式基线、重新签名后篡改换型分钟仍被 HC-011 拦截、线容量/日历一致性与产能
+  利用率公式修正。(本条旧版曾写 HC-014/016/017——合同闭词表仅 HC-001..013,
+  虚构编号已删除;HC-011 为原报告实载真实编号。)
 - 更正 4(交付卫生,评审点名):`PACKAGE_MANIFEST.json` 为 2026-09-15 旧快照
   (143 文件、Nova 默认模型),不代表本分支(git 现 266+ 文件)——已在
   IMPORT_PROVENANCE 补 STALE 声明,G3 重新生成。AGENTS.md 要求的
@@ -387,3 +389,52 @@
   - 合同 SHA 复验 b92e53f4…fe639 不变;compileall 全树干净
 - 边界:未触 AWS;EVAL 仍诚实 0 PASS / 0 FAIL / 30 BLOCKED。tag 留 G3;
   bundle 已含 G1 全部 commit 落 D:\PlanPilot_backups。
+
+## 2026-09-20 G1.0.1(评审回炉: 时钟边界 4+3 项收口, append-only 更正)
+
+独立评审确认 G0/G1 数字与备份属实,但指出 4 个实质问题 + 3 个卫生问题。
+本轮按「先小收口再开 G2」执行,历史条目一字不改,以下为追加更正:
+
+- 更正 5(虚构 HC 编号,评审点名):上文「更正 3」把 P1-2 修复面写成
+  HC-014/016/017 —— 合同封闭词表仅 HC-001..013,该编号不存在,属文档缺陷
+  (闭词表守卫不扫 docs 才漏网)。按原报告(P1_2 报告§验证)实际表述更正为:
+  历史换型上限误判回归、零预算 fallback、加班硬上限、显式基线、重新签名后
+  篡改换型分钟仍被 HC-011 拦截、线容量/日历一致性与产能利用率公式修正。
+  HC-011 为原报告实载真实编号。
+- 更正 6(G1 时钟条目两处失实,评审点名):
+  (a)「每个 authoritative timestamp 走 Clock」不实 —— 当时仅 lifecycle/
+      approval 走 ScenarioClock,audit chain/decision trace/security event/
+      factory state 仍走 persistence.now() 真实墙钟(实测同一次操作
+      lifecycle=9-14T08:00 vs audit=9-19T23:35 双轨)。G1.0.1 已统一:
+      Database 持有服务端 Clock,Server 组装时单点注入,AuditTrail/
+      DecisionTraceWriter/SecurityEventService/FactoryStateStore/
+      BedrockClient 全部经 db.clock;测试断言 lifecycle/audit/trace/
+      state 时间戳前缀一致。token expiry 有意保留真实墙钟(安全语义)。
+  (b)「ScenarioClock 全链路 HTTP 演示」过强 —— 该测试实为合成 fixture
+      直调 Authority,非真实 HTTP,也无真实关-重开。G1.0.1 补
+      test_real_http_demo_flow_survives_server_restart:真实
+      factory_demo_v18.json、HTTP /schedule→/plans→/approval/request→
+      /approval/decide→/publish、线程真停、SQLite 连接真关重开、
+      /audit/status 链验证+时间一致性。原条目保留原文,以本条为准。
+- 修复(评审 P0-1):生产假钟默认改 fail-safe —— 新增
+  PLANPILOT_CLOCK_MODE(wall|scenario),不设/空=wall,未知值(含旧
+  PLANPILOT_SCENARIO=off)启动报错,scenario 绑非本机地址拒绝启动;
+  PLANPILOT_SCENARIO 变量废除。Dockerfile 显式 wall,start_local.ps1
+  显式 scenario(本地演示器)。
+- 修复(评审卫生1):/clock metadata 手抄 horizon_end=2026-09-18T17:00
+  删除(合同 23:59/实际派生 9-19T00:00 三处矛盾),场景信息只留
+  dataset+note,horizon 一律从加载态派生。
+- 修复(评审卫生2):ScenarioClock 不再继承 FixedClock —— 按
+  base + 真实 elapsed 前进,演示开久了审批照常过期;EVAL 钉死时间用
+  FixedClock 显式注入,职责分离。
+- 修复(评审 P1 日期脆弱):test_p1_3_web_approval /
+  test_requirement_delivery 两处真实数据 HTTP 流注入 ScenarioClock
+  (anchor 从数据集 planning_start 派生,不手抄;9-20 凌晨评审预言
+  应验,修复前默认 Windows 实测 622/2 即此二条)。
+- 新增测试 5 条(test_server_clock_policy.py 5→10):真实 HTTP 重启链、
+  单钟源跨 audit/trace/state 一致、env fail-safe 策略、场景钟前进过期、
+  未来墙钟 HTTP 409 APPROVAL_WINDOW_CLOSED 回归。
+- 验收(默认 GBK Windows, env -u PYTHONUTF8): tests/unit 629 passed(收集=运行=
+  629, 基线 624+净增 5), tests/ 全套 636 passed in 428.78s EXITCODE=0(基线
+  631+5); 合同 SHA b92e53f4ff05 未动, EVAL 仍 0/0/30 BLOCKED。日期脆弱性
+  已消除: 新基线不再依赖当前日期(场景钟钉死+未来钟回归双向锁定)。
