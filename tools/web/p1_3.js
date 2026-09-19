@@ -259,4 +259,28 @@
       $('status').textContent = '计划已发布，版本与摘要已重新核对。';
     } catch (error) { showError(error); }
   };
+
+  // Server-owned clock banner. Scenario/demo time must be labelled as such —
+  // the UI never presents a pinned scenario stamp as today's production date.
+  async function refreshClock() {
+    try {
+      const response = await fetch('/clock');
+      const status = await response.json();
+      const badge = $('clockBadge');
+      if (status.kind === 'scenario') {
+        const name = status.scenario?.dataset || '固定场景数据';
+        badge.textContent = '场景时间 ' + status.now + ' · ' + name;
+        badge.title = '服务端场景时钟：演示数据锚定在其计划窗口内，并非当前生产时间';
+        badge.style.background = '#fdf3e3';
+        badge.style.color = 'var(--warn)';
+      } else {
+        badge.textContent = '服务端时间 ' + status.now;
+        badge.title = '服务端墙钟（Asia/Singapore）';
+        badge.style.background = '#e8f6ef';
+        badge.style.color = 'var(--ok)';
+      }
+    } catch (error) { $('clockBadge').textContent = '时钟不可用'; }
+  }
+  refreshClock();
+  setInterval(refreshClock, 30000);
 })();
