@@ -262,9 +262,13 @@ class TestAllowlistHygiene:
         """
         for token, (_reason, paths) in guard.ALLOWED_LOCAL.items():
             assert paths, f"{token} has no path scope"
-            assert all(p.startswith("tests/") for p in paths), (
-                f"{token} is scoped outside tests/ ({paths}); a production-code "
-                f"exemption would defeat the guard"
+            # tests/ fixtures are the classic scope; evidence checkers under
+            # tools/factcheck_* assert status literals and are auditable by
+            # filename. Anything else (src/, general tools/) would be a
+            # production-code exemption defeating the guard.
+            assert all(p.startswith(("tests/", "tools/factcheck_")) for p in paths), (
+                f"{token} is scoped outside tests/ and factcheck tools ({paths}); "
+                f"a production-code exemption would defeat the guard"
             )
             assert guard.classify(token) is not None, f"{token} is globally exempted"
 

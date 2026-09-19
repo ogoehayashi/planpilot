@@ -310,3 +310,28 @@
 - 边界:本轮所有模型测试均使用注入 transport，没有调用 AWS 或消耗额度。
   团队账号权限、Lightsail 实测、时延、费用和演示证据仍待部署环境验证；正式
   EVAL 仍为 0 PASS / 0 FAIL / 30 BLOCKED。
+
+## 2026-09-19 18:45 — G0 谱系收编:队友 B 包导入 p1-3-hardening(自我审查抓到漏文件)
+
+- 类型:集成 / 修复 / 证据
+- 内容:把无 git 的队友包 `PlanPilot-Team-20260915`(Hackton/qin/…/PlanPilot)整树导入本仓
+  `p1-3-hardening` 分支,建立其首个 git 谱系。`adbeb48` 为主导入 commit(155 文件,
+  +11098/-1230):devlog 三方合并保留本谱系第 10 轮审查与队友 P0-5..P1-2 条目;
+  本谱系独有的撤回报告/factcheck/evidence 目录以 superset 恢复;合同导入后逐字节复验
+  SHA-256 = `b92e53f4…fe639` 不变;compileall 全树干净;来源说明写入
+  `IMPORT_PROVENANCE_p1-3-hardening.md`(含已知缺陷登记 P0-1/幂等/UTF-8)。
+- 自我审查发现:导入脚本 KEEP_A 为保护父分支草稿跳过了 `src/planpilot/authority.py`,
+  导致队友 375 行 `RuntimeAuthority` 未被拷入、`planpilot.authority` 断链(7 个测试模块
+  + tools/api_server.py 依赖它)。`8d17916` 按字节恢复(SHA-256 `eba4e3a4…9a83a` 两侧一致),
+  父分支 504 行草稿仍保留在 `docs/reference/authority_draft_parent_20260919.py` 作对拍参照。
+- 合并副作用修复:A 独有的 `tools/factcheck_eval_retraction.py` 与 B 的闭词表守卫首次同树,
+  证据状态字面量 `PENDING_UNTIL_EVAL_001_TO_030_EXECUTE` 触发 UNRECOGNISED TOKEN。
+  按守卫自身说明书走 ALLOWED_LOCAL 正路:新增条目并把路径死锁到该 factcheck 文件;
+  `test_allowlist_is_path_scoped_not_global` 的 tests/-only 假设同步放开到
+  `tools/factcheck_*`(仍要求 classify() 能识别、作用域不得进 src/,未削弱否定测试)。
+- 证据:`tests/unit` 导入后 **618 passed / 1 failed**(30.67s)。唯一红灯
+  `test_http_approval_and_publish_use_runtime_authority` 实测 409 响应体 =
+  `APPROVAL_WINDOW_CLOSED, server_now 2026-09-19T18:39 > horizon_guard 17:00`,即
+  P0-1 时钟炸弹本体;在未修改的队友源包 B 原地跑同一测试得到同一 409 —— 非导入回归,
+  归 G1 修复。
+- 边界:本轮未动合同、未跑 negctl/EVAL、未触 AWS;tag 与 bundle 留待 G3 封口。

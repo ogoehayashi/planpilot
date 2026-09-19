@@ -268,6 +268,13 @@ ALLOWED_LOCAL: dict[str, tuple[str, tuple[str, ...]]] = {
         "asserts an out-of-range event id is flagged",
         (_NEGATIVE_TEST_DIR,),
     ),
+    # Evidence-status literal (not a contract vocabulary member) asserted by the
+    # EVAL-retraction factcheck against the retracted evidence JSON. Legitimate
+    # only inside that checker; everywhere else it would still be a violation.
+    "PENDING_UNTIL_EVAL_001_TO_030_EXECUTE": (
+        "expected runtime_evaluation status in the EVAL retraction factcheck",
+        ("tools/factcheck_eval_retraction.py",),
+    ),
     # Bare filename stems passed to _is_fabricated_stem() to assert it exempts
     # real documentation names. Without the ".md" suffix they are not
     # filename-shaped, so TOKEN_RE flags them — correctly, by its own rules.
