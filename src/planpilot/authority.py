@@ -11,7 +11,8 @@ from pathlib import Path
 import tempfile
 
 from .approval import ApprovalService
-from .persistence import Database, now
+from .clock import Clock, WallClock
+from .persistence import Database
 from .store import PlanNotFoundError, PlanStore
 
 
@@ -33,8 +34,11 @@ class _Unchanged:
 class RuntimeAuthority:
     """The only runtime write path for plans, approvals and publication."""
 
-    def __init__(self, database: Database):
+    def __init__(self, database: Database, clock: Clock | None = None):
         self.database = database
+        # Every authoritative timestamp comes from this server-owned clock.
+        # Callers never supply one; see planpilot.clock for the boundary rule.
+        self.clock = clock or WallClock()
         with self.database.lock:
             row = self.database.conn.execute(
                 "SELECT revision,plan_store_json,approval_service_json "
@@ -47,7 +51,7 @@ class RuntimeAuthority:
             with self.database.transaction():
                 self.database.conn.execute(
                     "INSERT OR IGNORE INTO authority_state VALUES(1,0,?,?,?)",
-                    (store_text, approval_text, now()),
+                    (store_text, approval_text, self.clock.now()),
                 )
             with self.database.lock:
                 row = self.database.conn.execute(
@@ -107,7 +111,7 @@ class RuntimeAuthority:
                 "UPDATE authority_state SET revision=?,plan_store_json=?,"
                 "approval_service_json=?,updated_at=? "
                 "WHERE singleton=1 AND revision=?",
-                (next_revision, store_text, approval_text, now(), self._revision),
+                (next_revision, store_text, approval_text, self.clock.now(), self._revision),
             )
             if cursor.rowcount != 1:
                 raise AuthorityConflictError("authority snapshot changed; reload required")
@@ -261,10 +265,11 @@ class RuntimeAuthority:
 
     def request_approval(
         self, plan_id: str, version: int, digest: str,
-        action: str, actor: str, server_now: str | None = None,
-        expires_at: str | None = None,
+        action: str, actor: str, expires_at: str | None = None,
     ) -> dict:
-        timestamp = server_now or now()
+        # `expires_at` may be caller-PROPOSED per the contract; the server
+        # clamps it against clock.now(). No caller may supply server_now.
+        timestamp = self.clock.now()
 
         def operation(store, approvals):
             snapshot = approvals.request_approval(
@@ -292,9 +297,8 @@ class RuntimeAuthority:
 
     def check_approval_status(
         self, approval_set_id: str, plan_id: str, version: int, digest: str,
-        server_now: str | None = None,
     ) -> dict:
-        timestamp = server_now or now()
+        timestamp = self.clock.now()
         return self._mutate(
             lambda _store, approvals: approvals.check_approval_status(
                 approval_set_id, plan_id, version, digest, timestamp
@@ -304,10 +308,11 @@ class RuntimeAuthority:
 
     def decide_approval(
         self, approval_request_id: str, decision: str, actor: str,
-        application_role: str, decided_at: str | None = None,
+        application_role: str,
         decision_reason: str | None = None, decision_comment: str | None = None,
     ) -> dict:
-        timestamp = decided_at or now()
+        # decided_at is server-owned: never a parameter a caller can set.
+        timestamp = self.clock.now()
         role = ROLE_LABELS.get(application_role)
         if role is None:
             raise PermissionError("unknown authenticated role")
@@ -334,11 +339,10 @@ class RuntimeAuthority:
     def publish_plan(
         self, plan_id: str, version: int, digest: str,
         approval_set_id: str, actor: str, application_role: str,
-        server_now: str | None = None,
     ) -> dict:
         if application_role != "planner":
             raise PermissionError("only Production Planner may publish")
-        timestamp = server_now or now()
+        timestamp = self.clock.now()
 
         def operation(store, approvals):
             content = store.get_content(plan_id, version)

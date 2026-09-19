@@ -12,7 +12,7 @@ from .independent_validator import approval_impacts, validate_plan_content
 from .domain.importer import factory_from_dict
 from .domain.lots import split_lots
 from .domain.planning import PROFILES, build_candidates
-from .persistence import now
+from .persistence import now  # noqa: F401  (re-export retained for legacy importers)
 from .validation.schema import validate_tool_payload
 from .v18_adapter import build_material_reservations, build_plan_content, validate_generation_state
 
@@ -155,7 +155,7 @@ def generate_authoritative_plans(
                 quarantine_impact=quarantine_impact
             ),
             lambda result: approval_impacts(result, content),
-            _horizon_end(state), now(), actor="runtime-planner",
+            _horizon_end(state), authority.clock.now(), actor="runtime-planner",
         )
         plan_validation = stored["validation_result"]
         installed.append(stored)

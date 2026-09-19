@@ -13,6 +13,7 @@ import pytest
 
 from planpilot.approval import ApprovalRequiredError, ApprovalSetInvalidatedError
 from planpilot.authority import AuthorityConflictError, RuntimeAuthority
+from planpilot.clock import FixedClock
 from planpilot.persistence import Database
 from planpilot.security import issue_token
 from planpilot.store import DigestMismatchError, SchemaViolationError, canonical_plan_digest
@@ -20,6 +21,11 @@ from planpilot.store import DigestMismatchError, SchemaViolationError, canonical
 NOW = "2026-09-14T08:00:00+08:00"
 HORIZON_END = "2026-09-18T17:00:00+08:00"
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def clock(now: str = NOW) -> FixedClock:
+    """Server-owned fixed clock; the fixture horizon ends 2026-09-18 17:00."""
+    return FixedClock(now)
 
 
 def signed_content(fixtures, *, version=1, plan_id="PLAN-RUNTIME-1"):
@@ -90,43 +96,40 @@ def test_database_has_no_parallel_plan_or_approval_business_api(tmp_path):
 def test_authoritative_round_trip_approval_and_publish(tmp_path, fixtures):
     path = tmp_path / "state.db"
     db = Database(path)
-    authority = RuntimeAuthority(db)
+    authority = RuntimeAuthority(db, clock())
     content = signed_content(fixtures)
     stored = install(authority, content)
     assert stored["lifecycle"]["status"] == "PROPOSED"
     request = authority.request_approval(
         content["plan_id"], 1, content["plan_digest"],
-        "publish_plan", "planner", NOW,
+        "publish_plan", "planner",
     )
     approval = request["approvals"][0]
     assert authority.required_permission(approval["approval_request_id"]) == "approve_publish"
     with pytest.raises(ApprovalRequiredError):
         authority.publish_plan(
             content["plan_id"], 1, content["plan_digest"],
-            request["approval_set_id"], "planner", "planner", NOW,
+            request["approval_set_id"], "planner", "planner",
         )
     decided = authority.decide_approval(
         approval["approval_request_id"], "APPROVED", "planner", "planner",
-        "2026-09-14T08:01:00+08:00",
     )
     assert decided["aggregate_status"] == "APPROVED"
     published = authority.publish_plan(
         content["plan_id"], 1, content["plan_digest"],
         request["approval_set_id"], "planner", "planner",
-        "2026-09-14T08:02:00+08:00",
     )
     assert published["status"] == "PUBLISHED" and published["published_version"] == 1
     revision = authority.revision
     assert authority.publish_plan(
         content["plan_id"], 1, content["plan_digest"],
         request["approval_set_id"], "planner", "planner",
-        "2026-09-14T08:03:00+08:00",
     ) == published
     assert authority.revision == revision
     db.close()
 
     restored_db = Database(path)
-    restored = RuntimeAuthority(restored_db)
+    restored = RuntimeAuthority(restored_db, clock("2026-09-14T09:00:00+08:00"))
     assert restored.revision == revision
     assert restored.get_plan(content["plan_id"], 1)["lifecycle"]["status"] == "PUBLISHED"
     assert restored_db.verify_audit()
@@ -135,7 +138,7 @@ def test_authoritative_round_trip_approval_and_publish(tmp_path, fixtures):
 
 def test_invalid_plan_and_unverified_evidence_fail_without_state_change(tmp_path, fixtures):
     db = Database(tmp_path / "state.db")
-    authority = RuntimeAuthority(db)
+    authority = RuntimeAuthority(db, clock())
     content = signed_content(fixtures)
     invalid = {**content, "unexpected": True}
     with pytest.raises(SchemaViolationError):
@@ -153,11 +156,11 @@ def test_invalid_plan_and_unverified_evidence_fail_without_state_change(tmp_path
 
 def test_regeneration_invalidates_old_approval_and_blocks_stale_publish(tmp_path, fixtures):
     db = Database(tmp_path / "state.db")
-    authority = RuntimeAuthority(db)
+    authority = RuntimeAuthority(db, clock())
     first = signed_content(fixtures)
     install(authority, first)
     old = authority.request_approval(
-        first["plan_id"], 1, first["plan_digest"], "publish_plan", "p", NOW
+        first["plan_id"], 1, first["plan_digest"], "publish_plan", "p"
     )
     second = signed_content(fixtures, version=2)
     install(authority, second)
@@ -165,7 +168,7 @@ def test_regeneration_invalidates_old_approval_and_blocks_stale_publish(tmp_path
     with pytest.raises(ApprovalSetInvalidatedError):
         authority.publish_plan(
             first["plan_id"], 1, first["plan_digest"], old["approval_set_id"],
-            "p", "planner", "2026-09-14T08:02:00+08:00",
+            "p", "planner",
         )
     assert authority.get_plan(first["plan_id"], 2)["lifecycle"]["status"] == "PROPOSED"
     db.close()
@@ -225,7 +228,7 @@ def test_http_approval_and_publish_use_runtime_authority(tmp_path, fixtures):
     spec.loader.exec_module(api)
     db = Database(tmp_path / "state.db")
     secret = "authority-test-secret-32-characters"
-    server = api.Server(("127.0.0.1", 0), db, secret, tmp_path)
+    server = api.Server(("127.0.0.1", 0), db, secret, tmp_path, clock=clock())
     content = signed_content(fixtures)
     install(server.authority, content)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
