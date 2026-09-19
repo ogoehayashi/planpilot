@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from planpilot.persistence import Database
 from planpilot.security import issue_token
+from planpilot.clock import ScenarioClock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,7 +23,15 @@ def test_web_assets_and_http_approval_lifecycle(tmp_path):
     api = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(api)
     db = Database(tmp_path / "planpilot.db")
-    server = api.Server(("127.0.0.1", 0), db, SECRET, ROOT / "data")
+    # G1.0.1: this drives the real fixed 2026-09-14 demo dataset through the
+    # full approval lifecycle. Under a plain wall clock the approval guard
+    # (horizon_end + 24h = 2026-09-20T00:00) closes the day after the dataset
+    # ends, so the test would auto-redden on 2026-09-20+. Inject the scenario
+    # clock — anchored at the dataset's own planning_start, never a hand-copied
+    # constant — exactly as the demo deployment does via PLANPILOT_CLOCK_MODE.
+    demo = json.loads((ROOT / "data/factory_demo_v18.json").read_text(encoding="utf-8"))
+    server = api.Server(("127.0.0.1", 0), db, SECRET, ROOT / "data",
+                        clock=ScenarioClock(demo["planning_start"]))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"

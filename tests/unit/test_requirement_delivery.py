@@ -15,6 +15,7 @@ from planpilot.agent.bedrock import BedrockIntentClient
 from planpilot.backup import backup_database
 from planpilot.domain.importer import factory_from_dict, load_factory
 from planpilot.domain.planning import solve, validate_plan, reserve_materials
+from planpilot.clock import ScenarioClock
 from planpilot.persistence import Database
 from planpilot.security import issue_token, authenticate
 
@@ -135,7 +136,11 @@ def test_http_authentication_and_full_publish_flow(tmp_path):
     spec.loader.exec_module(api)
     db = Database(tmp_path / "state.db")
     secret = "test-secret-that-is-at-least-32-characters"
-    server = api.Server(("127.0.0.1", 0), db, secret, tmp_path)
+    # G1.0.1: publish flow on the real fixed dataset needs the scenario clock
+    # or it reddens once the wall clock passes horizon_end + 24h (2026-09-20).
+    demo = json.loads((ROOT / "data/factory_demo_v18.json").read_text(encoding="utf-8"))
+    server = api.Server(("127.0.0.1", 0), db, secret, tmp_path,
+                        clock=ScenarioClock(demo["planning_start"]))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     def call(path, body=None, role="planner"):
