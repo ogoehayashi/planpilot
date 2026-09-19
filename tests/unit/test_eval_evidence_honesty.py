@@ -20,7 +20,7 @@ def load_tool(name):
 def test_every_contract_condition_is_preserved_and_blocked(tmp_path):
     runner = load_tool('run_evals')
     result = runner.run(tmp_path)
-    contract = json.loads(runner.CONTRACT.read_text())
+    contract = json.loads(runner.CONTRACT.read_text(encoding="utf-8"))
     assert (result['case_count'], result['passed'], result['failed'], result['blocked']) == (30, 0, 0, 30)
     assert result['runtime_evaluation'] == contract['release_readiness']['runtime_evaluation']
     assert [{k: row[k] for k in case} for row, case in zip(result['results'], contract['acceptance_tests'])] == contract['acceptance_tests']
@@ -28,7 +28,7 @@ def test_every_contract_condition_is_preserved_and_blocked(tmp_path):
         assert row['status'] == 'BLOCKED' and row['executed'] is False
         for needed in ('inputs', 'outputs', 'trace', 'digest', 'timing', 'approval', 'audit', 'executor'):
             assert needed in ' '.join(row['missing_evidence'])
-    assert json.loads((tmp_path / 'EVIDENCE.json').read_text()) == result
+    assert json.loads((tmp_path / 'EVIDENCE.json').read_text(encoding="utf-8")) == result
 
 
 @pytest.mark.parametrize('fabricated_check', [True, 100 < 300, {'deterministic': True, 'violations': []}])
@@ -40,14 +40,14 @@ def test_prior_green_or_placeholder_assertions_cannot_unlock_formal_cases(tmp_pa
                                capture_output=True, text=True)
     assert completed.returncode == 1, completed.stderr
     assert 'cases=30 passed=0 failed=0 blocked=30' in completed.stdout
-    evidence = json.loads((tmp_path / 'EVIDENCE.json').read_text())
+    evidence = json.loads((tmp_path / 'EVIDENCE.json').read_text(encoding="utf-8"))
     assert {row['status'] for row in evidence['results']} == {'BLOCKED'}
 
 
 @pytest.mark.parametrize('change', ['empty', 'duplicate', 'missing'])
 def test_broken_case_inventory_fails_instead_of_emitting_green(tmp_path, monkeypatch, change):
     runner = load_tool('run_evals')
-    contract = json.loads(runner.CONTRACT.read_text())
+    contract = json.loads(runner.CONTRACT.read_text(encoding="utf-8"))
     cases = contract['acceptance_tests']
     contract['acceptance_tests'] = [] if change == 'empty' else cases[:-1] + [cases[0]] if change == 'duplicate' else cases[:-1]
     path = tmp_path / 'contract.json'
@@ -64,7 +64,7 @@ def test_smoke_failure_is_nonzero_and_never_writes_formal_results(tmp_path, monk
         raise AssertionError('injected failure')
     monkeypatch.setattr(smoke, 'CHECKS', (('injected_smoke_failure', fail),))
     assert smoke.main(['--output', str(tmp_path)]) == 1
-    text = (tmp_path / 'SMOKE_EVIDENCE.json').read_text()
+    text = (tmp_path / 'SMOKE_EVIDENCE.json').read_text(encoding="utf-8")
     result = json.loads(text)
     assert result['formal_acceptance'] is False
     assert result['failed'] == 1 and result['passed'] == 0
@@ -87,9 +87,9 @@ def test_optimized_python_cannot_skip_smoke_assertions(tmp_path):
 
 
 def test_checked_in_formal_evidence_and_overview_do_not_claim_success():
-    result = json.loads((ROOT / 'tests/evidence/runtime-eval/EVIDENCE.json').read_text())
+    result = json.loads((ROOT / 'tests/evidence/runtime-eval/EVIDENCE.json').read_text(encoding="utf-8"))
     assert (result['passed'], result['failed'], result['blocked']) == (0, 0, 30)
     assert {r['status'] for r in result['results']} == {'BLOCKED'}
-    overview = (ROOT / 'PROJECT_OVERVIEW_BILINGUAL.md').read_text()
+    overview = (ROOT / 'PROJECT_OVERVIEW_BILINGUAL.md').read_text(encoding="utf-8")
     assert '30 PASS / 0 FAIL / 0 BLOCKED' not in overview
     assert overview.count('0 PASS / 0 FAIL / 30 BLOCKED') == 2

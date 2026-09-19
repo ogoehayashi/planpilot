@@ -152,7 +152,7 @@ def test_http_authentication_and_full_publish_flow(tmp_path):
         assert call("/health")[0] == 200
         assert call("/schedule", {"factory_data": raw_factory()}, role=None)[0] == 403
         assert call("/schedule", {"factory_file": "../outside.json"})[0] == 403
-        state = json.loads((ROOT / "data/factory_demo_v18.json").read_text())
+        state = json.loads((ROOT / "data/factory_demo_v18.json").read_text(encoding="utf-8"))
         status, result = call("/schedule", {"factory_data": state})
         assert status == 200
         assert result["stored_plan_count"] == 3

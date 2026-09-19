@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_facade_builds_nonempty_schema_valid_content_and_executes_all_constraints():
-    state = json.loads((ROOT / "data/factory_demo_v18.json").read_text())
+    state = json.loads((ROOT / "data/factory_demo_v18.json").read_text(encoding="utf-8"))
     solver_state, identities = _solver_state(state)
     candidate = _restore_candidate(asdict(solve(factory_from_dict(solver_state), "Balanced")), identities)
     content = to_plan_content(candidate, state, "PLAN-ADAPTER-FACADE", 1)

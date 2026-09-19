@@ -66,9 +66,13 @@ def test_model_binding_mutations_are_all_caught_and_source_is_unchanged(sandbox)
     caught = escaped = broken = 0
     for label, relative, old, new in MUTATIONS:
         target = sandbox / relative
-        pristine = target.read_text(encoding="utf-8")
+        # Byte-preserving restore (same discipline as the PlanStore/Approval
+        # negctls): text-mode writes on Windows would normalise line endings
+        # and break the byte-identity assertion below.
+        pristine_bytes = target.read_bytes()
+        pristine = pristine_bytes.decode("utf-8")
         try:
-            target.write_text(once(pristine, old, new, label), encoding="utf-8")
+            target.write_bytes(once(pristine, old, new, label).encode("utf-8"))
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", *FOCUSED, "-q", "-k", TEST_FILTER,
                  "--no-header", "-p", "no:cacheprovider"],
@@ -82,7 +86,7 @@ def test_model_binding_mutations_are_all_caught_and_source_is_unchanged(sandbox)
             broken += 1
             raise
         finally:
-            target.write_text(pristine, encoding="utf-8")
+            target.write_bytes(pristine_bytes)
     after = {path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in SUBJECTS}
     assert before == after
     assert all((sandbox / path).read_bytes() == (ROOT / path).read_bytes() for path in SUBJECTS)

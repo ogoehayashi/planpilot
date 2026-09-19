@@ -73,9 +73,13 @@ def test_security_audit_mutations_are_all_caught_and_real_tree_is_unchanged(sand
     caught = escaped = broken = 0
     for label, relative, old, new in MUTATIONS:
         target = sandbox / relative
-        pristine = target.read_text(encoding="utf-8")
+        # Byte-preserving restore (PlanStore/Approval negctl discipline):
+        # text-mode writes on Windows normalise line endings and would break
+        # the byte-identity assertion below.
+        pristine_bytes = target.read_bytes()
+        pristine = pristine_bytes.decode("utf-8")
         try:
-            target.write_text(once(pristine, old, new, label), encoding="utf-8")
+            target.write_bytes(once(pristine, old, new, label).encode("utf-8"))
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", *FOCUSED, "-q", "--no-header", "-p", "no:cacheprovider"],
                 cwd=sandbox, env=env, capture_output=True, text=True, timeout=120,
@@ -88,7 +92,7 @@ def test_security_audit_mutations_are_all_caught_and_real_tree_is_unchanged(sand
             broken += 1
             raise
         finally:
-            target.write_text(pristine, encoding="utf-8")
+            target.write_bytes(pristine_bytes)
     after = {path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in SUBJECTS}
     assert before == after
     assert all((sandbox / path).read_bytes() == (ROOT / path).read_bytes() for path in SUBJECTS)

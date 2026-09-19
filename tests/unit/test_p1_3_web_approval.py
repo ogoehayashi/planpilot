@@ -57,7 +57,7 @@ def test_web_assets_and_http_approval_lifecycle(tmp_path):
             'APPROVED', 'REJECTED', 'plan_digest',
         ))
         assert call("/audit/status", role=None)[0] == 403
-        state = json.loads((ROOT / "data/factory_demo_v18.json").read_text())
+        state = json.loads((ROOT / "data/factory_demo_v18.json").read_text(encoding="utf-8"))
         status, generation = call("/schedule", {"factory_data": state})
         assert status == 200 and len(generation["plan_options"]) == 3
         option = next(row for row in generation["plan_options"] if row["profile"] != generation["content"]["profile"])
