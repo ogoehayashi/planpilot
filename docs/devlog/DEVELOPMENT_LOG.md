@@ -335,3 +335,55 @@
   P0-1 时钟炸弹本体;在未修改的队友源包 B 原地跑同一测试得到同一 409 —— 非导入回归,
   归 G1 修复。
 - 边界:本轮未动合同、未跑 negctl/EVAL、未触 AWS;tag 与 bundle 留待 G3 封口。
+
+## 2026-09-19 深夜 — G1 服务端时钟抽象 + Windows 证据修复（含对 G0 条目的 4 处事实更正）
+
+- 类型:修复 / 测试 / 证据更正
+- G1 时钟修法（按评审更正后的目标「服务端时钟抽象与 fresh-horizon policy」执行,
+  未放宽 horizon guard——那是合同法）:
+  - 新增 `src/planpilot/clock.py`:Clock 抽象 + WallClock/ScenarioClock/FixedClock,
+    单一时区 SGT,isoformat() 'T' 分隔符。
+  - `RuntimeAuthority` 全部权威时间戳(revision/audits/approval service/授权复核)
+    改走 self.clock;删除 server_now/decided_at 客户端参数通道(合同
+    request_approval_input 无此字段且 additionalProperties:false,伪造时间戳实测
+    403+schema 400 双重拒绝)。
+  - `tools/api_server.py`:Server(..., clock=...) 缺省 WallClock(真机语义不变);
+    main() 缺省 ScenarioClock(anchor 2026-09-14T08:00+08,PLANPILOT_SCENARIO=off
+    关闭);新增免鉴权 GET /clock 返回 kind/now/scenario。
+  - UI 横幅(index.html+p1_3.js):场景模式显示「演示场景时间」,墙钟模式显示
+    「生产墙钟」,场景时间不伪装成生产时间。
+  - 新增 tests/unit/test_server_clock_policy.py 5 条:stale horizon 在墙钟下仍
+    APPROVAL_WINDOW_CLOSED(合同守卫保持);ScenarioClock 全链路 HTTP 演示(当天
+    墙钟正是炸弹日 2026-09-19 18:xx,生成→审批→发布→重启回读全绿);客户端伪造
+    server_now 被拒;重启换墙钟 digest/plan_version 不变;expiry 夹紧公式
+    min(now+7200, horizon_end+24h) 与合同一致。
+- 更正 1(测试数字环境限定,评审点名):上文 G0 条目「618 passed / 1 failed」
+  实为 **PYTHONUTF8=1 环境** 618/1;默认 GBK Windows 为 617/2。第二失败是
+  test_eval_evidence_honesty 对中文 Markdown 裸 read_text() GBK 解码错误。
+  本轮 11 处裸 read_text() 全部显式 encoding="utf-8"(commit 9494928)。
+- 更正 2(同类缺陷扩面):3 组 negctl 的 subprocess.run(text=True) 无 encoding,
+  默认 GBK 下中文断言输出会解码失败误判判决,改 encoding="utf-8"
+  errors="replace"(PlanStore 负控既有范式);3 组负控恢复段改
+  read_bytes/write_bytes 字节级还原。修复后 tests/negative_control 全套
+  7 passed,6 个受 mutate 文件 hash-object 前后完全一致。
+- 更正 3(P1-2 回溯登记,评审点名):G0 条目「保留队友 P0-5..P1-2 条目」不准确
+  ——合并本身没吞任何一方日志,但 B 包 devlog 实际只写到 P1-1;P1-2 只有报告
+  `P1_2_SCHEDULING_ENGINE_REMEDIATION_REPORT_20260919.md` 与证据文件、无 devlog
+  条目。现按该报告回溯登记:P1-2 调度引擎修复完成(2026-09-19 12:41 SGT),
+  专项 9 passed、单元 618、全量 625;HC-014 换型上限、HC-016 零产能 fallback、
+  HC-002/017 线容量与日历一致性、产能利用率公式修正。
+- 更正 4(交付卫生,评审点名):`PACKAGE_MANIFEST.json` 为 2026-09-15 旧快照
+  (143 文件、Nova 默认模型),不代表本分支(git 现 266+ 文件)——已在
+  IMPORT_PROVENANCE 补 STALE 声明,G3 重新生成。AGENTS.md 要求的
+  `contract/verify_contract.py` 等验证脚本实际在 `E:\PlanPilot-Hackathon\
+  contract-review` 而非仓库内,且 AGENTS.md 为受保护 agent 指令文件(改需授权)、
+  由 generate_kiro_workspace.py 从模板再生——登记为 G3 交付项:合同验证包收入
+  仓库或提供自包含入口。
+- 验收(全部默认 Windows 即 env -u PYTHONUTF8,utf8_mode=0/preferred=cp936 实测):
+  - tests/unit: 624 passed in 38.60s（619 原有+5 新增）
+  - tests/ 全套: 631 passed in 356.46s(收集 631 = 评审基线 626 + 新增时钟政策 5)
+  - negctl:7 passed,每组 mutation 静态计数 model 6 / security 9 / middleware 11
+    + PlanStore/Approval 组,0 escaped,受 mutate 文件前后 SHA 一致
+  - 合同 SHA 复验 b92e53f4…fe639 不变;compileall 全树干净
+- 边界:未触 AWS;EVAL 仍诚实 0 PASS / 0 FAIL / 30 BLOCKED。tag 留 G3;
+  bundle 已含 G1 全部 commit 落 D:\PlanPilot_backups。
