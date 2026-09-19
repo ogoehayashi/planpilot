@@ -1,0 +1,20 @@
+SELF-TEST: does the guard actually catch fabrication?
+  OK   | fabricated error code            expected_flag=True  got=True  [not_in_any_vocabulary]
+  OK   | near-miss error code             expected_flag=True  got=True  [near_miss_of_contract_member]
+  OK   | truncated code                   expected_flag=True  got=True  [near_miss_of_contract_member]
+  OK   | fabricated HC id                 expected_flag=True  got=True  [fabricated_hard_constraint]
+  OK   | fabricated EVAL id               expected_flag=True  got=True  [fabricated_eval_case]
+  OK   | fabricated event id              expected_flag=True  got=True  [fabricated_event]
+  OK   | real error code                  expected_flag=False got=False [-]
+  OK   | real HC id                       expected_flag=False got=False [-]
+  OK   | real lifecycle status            expected_flag=False got=False [-]
+  OK   | real security action             expected_flag=False got=False [-]
+  OK   | docstring prose                  expected_flag=False got=False [-]
+  OK   | __all__ export                   expected_flag=False got=False [-]
+  OK   | dotted prose reference           expected_flag=False got=False [-]
+  OK   | implementation namespace         expected_flag=False got=False [-]
+  OK   | lowercase identifier             expected_flag=False got=False [-]
+  OK   | mixed case class name            expected_flag=False got=False [-]
+  OK   | non-allowlisted near miss        expected_flag=True  got=True  [near_miss_of_contract_member]
+
+SELF-TEST | PASS

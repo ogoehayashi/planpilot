@@ -1,9 +1,11 @@
-"""Fail-closed structural validator for the generated V1.8 workbook."""
+"""Structural checks plus the production V1.8 importer round trip."""
 import json
 from pathlib import Path
+import sys
 from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 EXPECTED = {"README", "Assumptions", "Machines", "Workers", "Products", "Routing", "Inventory", "Orders", "Events", "Baseline Schedule", "Objectives", "Approval Policy", "Evaluation Cases", "Plan Output Schema", "Shift Calendar", "Worker Skills", "Changeovers"}
 
 
@@ -35,9 +37,28 @@ def validate(path=ROOT / "data" / "PlanPilot_Mock_Factory_Dataset.xlsx"):
         inventory = records("Inventory")
         if any(type(r["quantity_base_units"]) is not int or r["quantity_base_units"] < 0 or not r["source_id"] for r in inventory):
             raise ValueError("Inventory contains invalid integer source bucket")
-        return {"sheets": len(wb.sheetnames), "events": len(events), "eval_cases": len(evals), "products": len(products), "routing": len(routing), "inventory": len(inventory)}
+        structural = {"sheets": len(wb.sheetnames), "events": len(events), "eval_cases": len(evals), "products": len(products), "routing": len(routing), "inventory": len(inventory)}
     finally:
         wb.close()
+    from planpilot.factory_state import FactoryStateRegistry
+    from planpilot.persistence import Database, canonical
+    database = Database(":memory:")
+    try:
+        registry = FactoryStateRegistry(database)
+        first = registry.load_workbook(path)
+        second = registry.load_workbook(path)
+        if first != second:
+            raise ValueError("production importer did not produce a stable state reference")
+        record = registry.get(first["state_id"])
+        if record["validation"]["status"] == "INVALID":
+            raise ValueError("production importer marked generated workbook INVALID")
+        if canonical(record["state"]) != canonical(registry.planning_state(first["state_id"])):
+            raise ValueError("factory state round trip changed normalized content")
+        return {**structural, "state_id": first["state_id"],
+                "import_status": record["validation"]["status"],
+                "quarantined_entities": len(record["validation"]["quarantined_entities"])}
+    finally:
+        database.close()
 
 
 if __name__ == "__main__":

@@ -1,15 +1,31 @@
-from planpilot.contract_adapter import hard_constraint_report, minute_timestamp, recompute_kpis
-from planpilot.domain.importer import load_factory
+from dataclasses import asdict
+import json
+from pathlib import Path
+
+from planpilot.contract_adapter import hard_constraint_report, minute_timestamp, to_plan_content
+from planpilot.domain.importer import factory_from_dict
+from planpilot.domain.planning import solve
+from planpilot.runtime_planning import _restore_candidate, _solver_state
+from planpilot.validation.schema import is_valid
 
 
-def test_formal_timestamp_and_thirteen_constraint_report():
-    factory = load_factory("data/factory_demo_v18.json")
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_facade_builds_nonempty_schema_valid_content_and_executes_all_constraints():
+    state = json.loads((ROOT / "data/factory_demo_v18.json").read_text())
+    solver_state, identities = _solver_state(state)
+    candidate = _restore_candidate(asdict(solve(factory_from_dict(solver_state), "Balanced")), identities)
+    content = to_plan_content(candidate, state, "PLAN-ADAPTER-FACADE", 1)
+    report = hard_constraint_report(content, state)
+    assert content["operations"]
+    assert is_valid(content, "plan_content")
+    assert report == {
+        "is_feasible": True,
+        "hard_violations": [],
+        "checked_constraints": [f"HC-{number:03d}" for number in range(1, 14)],
+    }
+
+
+def test_formal_timestamp():
     assert minute_timestamp("2026-09-14T00:00:00+08:00", 60) == "2026-09-14T01:00:00+08:00"
-    report = hard_constraint_report([], factory)
-    assert report["is_feasible"] and report["checked_constraints"] == [f"HC-{i:03d}" for i in range(1, 14)]
-
-
-def test_kpi_output_has_complete_contract_keys():
-    factory = load_factory("data/factory_demo_v18.json")
-    kpis = recompute_kpis([], factory)
-    assert set(kpis) == {"on_time_rate", "eligible_orders", "on_time_orders", "eligible_order_coverage_rate", "late_orders", "total_tardiness_min", "overtime_hours", "changeover_count", "total_changeover_min", "schedule_stability", "unscheduled_operations", "secondary_skill_assignment_count"}

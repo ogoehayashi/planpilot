@@ -58,15 +58,34 @@ def stability(reference: Iterable[dict], current: Iterable[dict]) -> float:
     return unchanged / len(union)
 
 
-def framework_error(error_code: str, details: dict, correlation_id: str, retryable: bool = False) -> dict:
-    """Create the bounded common error envelope used by tool adapters."""
-    import json
-    if not isinstance(correlation_id, str) or len(correlation_id) > 64:
-        raise ValueError("correlation_id is invalid")
-    value = {"error_code": error_code, "retryable": bool(retryable), "correlation_id": correlation_id, "details": details}
-    if len(json.dumps(value, ensure_ascii=False).encode()) > 4096:
-        return {"error_code": "INTERNAL_ERROR", "retryable": False, "correlation_id": correlation_id, "details": {"message": "error envelope exceeded 4096 bytes"}}
-    return value
+def framework_error(
+    error_code: str,
+    details: dict,
+    correlation_id: str,
+    retryable: bool | None = None,
+    message: str = "The tool request could not be completed.",
+) -> dict:
+    """Compatibility facade for the contract-valid public error builder.
+
+    Retryability is registry-owned.  The optional legacy argument is accepted
+    only when it agrees with the pinned contract, so old callers cannot alter
+    wire semantics.
+    """
+    from planpilot.tools.correlation import valid_uuid4
+    from planpilot.tools.errors import FrameworkDomainError, validated_failure
+    from planpilot.tools.registry import resolve_error
+
+    if not valid_uuid4(correlation_id):
+        raise ValueError("correlation_id must be a lowercase RFC 4122 UUIDv4")
+    expected = resolve_error(error_code).retryable
+    if retryable is not None and bool(retryable) is not expected:
+        raise ValueError("retryability is fixed by the contract registry")
+    payload, _wire = validated_failure(
+        "load_factory_state",
+        FrameworkDomainError(error_code, message, details),
+        correlation_id,
+    )
+    return payload
 
 
 def aggregate_approval_status(statuses: Iterable[str], invalidated: bool = False) -> str:

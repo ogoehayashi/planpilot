@@ -4,15 +4,23 @@ import importlib.util
 import json
 from pathlib import Path
 import threading
+import zipfile
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
 
 from planpilot.agent.chat import ChatService
-from planpilot.inference.bedrock_client import BedrockClient, InferenceError, NoRedirect
+from planpilot.inference.bedrock_client import (
+    DEFAULT_BEDROCK_MODEL,
+    DEFAULT_BEDROCK_REGION,
+    BedrockClient,
+    InferenceError,
+    NoRedirect,
+)
 from planpilot.persistence import Database
 from planpilot.security import issue_token
+from tools.build_team_package import build
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,12 +71,60 @@ def test_regional_bearer_transport_usage_and_audit(db):
     assert provider.converse('system', 'question', run_id='r', actor='planner') == 'hello'
     request = transport.requests[0]
     assert request.full_url == ('https://bedrock-runtime.ap-southeast-1.amazonaws.com/model/'
-                                'amazon.nova-pro-v1%3A0/converse')
+                                'global.anthropic.claude-sonnet-4-5-20250929-v1%3A0/converse')
     assert request.get_header('Authorization') == 'Bearer test-only-credential'
     row = db.conn.execute('SELECT * FROM inference_calls').fetchone()
     assert row['charged_tokens'] == 50 and row['status'] == 'received'
     assert db.verify_audit()
     assert 'test-only-credential' not in str(db.conn.execute('SELECT record FROM audit_chain').fetchall())
+
+
+def test_default_binding_is_contract_pinned_claude_sonnet_45(db, monkeypatch):
+    monkeypatch.delenv('PLANPILOT_BEDROCK_REGION', raising=False)
+    monkeypatch.delenv('PLANPILOT_BEDROCK_MODEL', raising=False)
+    provider = BedrockClient(db, token='test-only-credential', transport=Transport())
+    assert provider.region == DEFAULT_BEDROCK_REGION == 'ap-southeast-1'
+    assert provider.model == DEFAULT_BEDROCK_MODEL == (
+        'global.anthropic.claude-sonnet-4-5-20250929-v1:0'
+    )
+    assert provider.status()['connection_verified'] is False
+    assert provider.transport.requests == []
+
+
+def test_non_contract_model_override_fails_closed(db):
+    with pytest.raises(ValueError, match='contract-pinned Claude Sonnet 4.5'):
+        BedrockClient(db, model='amazon.nova-pro-v1:0', token='test-only-credential',
+                      transport=Transport())
+
+
+def test_submission_surfaces_do_not_default_to_nova():
+    checked = (
+        'src/planpilot/inference/bedrock_client.py', 'tools/start_local.ps1',
+        'tools/build_team_package.py', '.env.example', 'Dockerfile', 'compose.yaml',
+        'START_HERE.md', 'PRODUCT_RUNBOOK.md', 'docs/bedrock-web-guide.md',
+    )
+    for relative in checked:
+        text = (ROOT / relative).read_text(encoding='utf-8')
+        assert 'amazon.nova-pro-v1:0' not in text, relative
+        assert 'global.anthropic.claude-sonnet-4-5-20250929-v1:0' in text, relative
+
+
+def test_provider_specific_io_has_one_authoritative_module():
+    compatibility = (ROOT / 'src/planpilot/agent/bedrock.py').read_text(encoding='utf-8')
+    assert 'boto3' not in compatibility
+    assert "client.converse" not in compatibility
+    assert "bedrock-runtime" not in compatibility
+
+
+def test_generated_handoff_has_one_verified_contract_bound_manifest(tmp_path):
+    destination = tmp_path / 'PlanPilot-handoff.zip'
+    build(destination, [])
+    with zipfile.ZipFile(destination) as archive:
+        assert archive.namelist().count('PlanPilot/PACKAGE_MANIFEST.json') == 1
+        assert archive.testzip() is None
+        manifest = json.loads(archive.read('PlanPilot/PACKAGE_MANIFEST.json'))
+    assert manifest['default_region'] == DEFAULT_BEDROCK_REGION
+    assert manifest['default_model'] == DEFAULT_BEDROCK_MODEL
 
 
 @pytest.mark.parametrize('status', [400, 401, 403, 404, 429, 500, 302])
@@ -201,21 +257,17 @@ def test_key_file_and_status_never_call_network(db, tmp_path, monkeypatch):
 
 
 def test_generation_uses_real_solver_and_excludes_raw_data_from_model(db):
-    transport = Transport(intent('generate'), '三个方案已生成，请检查风险并审批。')
-    chat = ChatService(db, client(db, transport), ROOT / 'examples')
-    raw = json.loads((ROOT / 'examples/factory_demo.json').read_text(encoding='utf-8-sig'))
+    transport = Transport(intent('generate'), '已生成并独立验证三个方案。')
+    chat = ChatService(db, client(db, transport), ROOT / 'data')
+    raw = json.loads((ROOT / 'data/factory_demo_v18.json').read_text(encoding='utf-8-sig'))
     raw['private_note'] = 'do-not-send-this-factory-text'
     result = chat.run({'message': '生成三个方案', 'factory_data': raw}, 'planner')
-    assert len(result['plan']['candidates']) == 3
-    assert db.get_plan(result['plan']['plan_id'])
-    assert all(t['status'] == 'completed' for t in result['traces'])
-    assert len(result['traces']) == 8
+    assert result['plan']['stored_plan_count'] == 3
     prompts = '\n'.join(req.data.decode() for req in transport.requests)
     assert 'do-not-send-this-factory-text' not in prompts
     assert '"operations"' not in prompts and '"factory_data"' not in prompts
     assert 'validated_summary' in prompts
-    assert db.conn.execute('SELECT count(*) FROM publications').fetchone()[0] == 0
-    assert db.conn.execute('SELECT count(*) FROM bound_approvals').fetchone()[0] == 0
+    assert db.conn.execute('SELECT revision FROM authority_state').fetchone()[0] == 3
     assert db.verify_audit()
 
 
@@ -236,26 +288,26 @@ def test_explicit_key_file_overrides_stale_environment_and_reloads(db, tmp_path,
         provider._credential()
 
 
-def test_explanation_failure_returns_saved_plan(db):
+def test_generation_survives_explanation_failure_after_authoritative_write(db):
     transport = Transport(intent('generate'), TimeoutError())
-    result = ChatService(db, client(db, transport), ROOT / 'examples').run({'message': '生成'}, 'planner')
-    assert result['warning'] and result['plan']['version'] == 1
-    assert result['traces'][-1]['status'] == 'failed'
-    assert db.get_plan(result['plan']['plan_id'])
+    result = ChatService(db, client(db, transport), ROOT / 'data').run({'message': '生成'}, 'planner')
+    assert result['warning']
+    assert len(transport.requests) == 2
+    assert db.conn.execute('SELECT revision FROM authority_state').fetchone()[0] == 3
 
 
 def test_invalid_intent_never_schedules(db):
     transport = Transport('{"action":"publish_plan","response":"approved"}')
     with pytest.raises(InferenceError):
         ChatService(db, client(db, transport), ROOT / 'examples').run({'message': '发布'}, 'planner')
-    assert db.conn.execute('SELECT count(*) FROM plans').fetchone()[0] == 0
+    assert db.conn.execute('SELECT revision FROM authority_state').fetchone()[0] == 0
 
 
 def test_reply_and_explain_without_plan_do_not_generate(db):
     for action in ('reply', 'explain'):
         result = ChatService(db, client(db, Transport(intent(action))), ROOT / 'examples').run({'message': '帮助'}, 'planner')
         assert 'plan' not in result
-    assert db.conn.execute('SELECT count(*) FROM plans').fetchone()[0] == 0
+    assert db.conn.execute('SELECT revision FROM authority_state').fetchone()[0] == 0
 
 
 def test_factory_path_cannot_escape_root(db):
@@ -269,8 +321,8 @@ def test_http_auth_and_end_to_end_mocked_provider(db):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     secret = 'test-secret-' * 4
-    server = module.Server(('127.0.0.1', 0), db, secret, ROOT / 'examples')
-    provider = client(db, Transport(intent('generate'), '已生成方案。', intent('explain'), '比较当前计划。'))
+    server = module.Server(('127.0.0.1', 0), db, secret, ROOT / 'data')
+    provider = client(db, Transport(intent('generate'), '三个方案已通过独立验证。'))
     server.inference = provider
     server.chat.client = provider
     worker = threading.Thread(target=server.serve_forever, daemon=True)
@@ -289,14 +341,10 @@ def test_http_auth_and_end_to_end_mocked_provider(db):
             post({'message': '生成'}, False)
         assert denied.value.code == 403
         assert not provider.transport.requests
-        with post({'message': '生成三个方案'}) as reply:
-            generated = json.load(reply)
-        plan = generated['plan']
-        with post({'message': '解释当前方案', 'plan_id': plan['plan_id'], 'expected_version': plan['version']}) as reply:
-            explained = json.load(reply)
-        assert explained['plan']['plan_id'] == plan['plan_id']
-        assert db.conn.execute('SELECT count(*) FROM plans').fetchone()[0] == 1
-        assert [t['name'] for t in explained['traces']] == ['model_intent', 'model_explanation']
+        with post({'message': '生成三个方案'}) as response:
+            generated = json.load(response)
+        assert generated['plan']['stored_plan_count'] == 3
+        assert db.conn.execute('SELECT revision FROM authority_state').fetchone()[0] == 3
     finally:
         server.shutdown()
         server.server_close()

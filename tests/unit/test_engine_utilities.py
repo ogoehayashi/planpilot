@@ -17,10 +17,25 @@ def test_overtime_and_stability_are_recomputed():
 
 
 def test_error_envelope_is_bounded():
-    error = framework_error("RATE_LIMITED", {"retry_after_seconds": 1}, "corr-1", True)
+    correlation_id = "12345678-1234-4234-9234-123456789abc"
+    error = framework_error(
+        "RATE_LIMITED",
+        {"retry_after_seconds": 1, "limit_scope": "tool"},
+        correlation_id,
+        True,
+    )
     assert error["retryable"] is True
-    bounded = framework_error("INTERNAL_ERROR", {"message": "x" * 10000}, "corr-1")
-    assert len(__import__("json").dumps(bounded).encode()) < 4096
+    bounded = framework_error(
+        "INTERNAL_ERROR",
+        {"diagnostic_class": "Oversize", "safe_detail": "🙂" * 500},
+        correlation_id,
+        True,
+        "🙂" * 500,
+    )
+    assert bounded["details"]["diagnostic_class"] == "ToolMiddlewareFailure"
+    assert len(__import__("json").dumps(bounded, ensure_ascii=False).encode()) < 4096
+    with pytest.raises(ValueError, match="fixed by the contract"):
+        framework_error("RATE_LIMITED", {"retry_after_seconds": 1, "limit_scope": "tool"}, correlation_id, False)
 
 
 def test_approval_aggregate_precedence_is_fail_closed():

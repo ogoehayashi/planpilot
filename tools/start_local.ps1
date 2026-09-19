@@ -6,7 +6,8 @@ param(
     [switch]$Bedrock,
     [string]$BedrockKeyFile = '',
     [string]$BedrockRegion = 'ap-southeast-1',
-    [string]$BedrockModel = 'amazon.nova-pro-v1:0'
+    [ValidateSet('global.anthropic.claude-sonnet-4-5-20250929-v1:0')]
+    [string]$BedrockModel = 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'
 )
 
 $ErrorActionPreference = 'Stop'

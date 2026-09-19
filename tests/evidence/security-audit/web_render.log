@@ -1,0 +1,2 @@
+PASS: real solver candidates, profile selection, KPI fields, reservation map, shortages, inbound materials, unscheduled work, violations, quarantine impact, safe text, complete Gantt details, approval binding, empty/missing data.
+PASS: Agent chat request, plan synchronization, version binding, real trace display, error recovery (DOM simulation).

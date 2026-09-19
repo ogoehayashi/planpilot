@@ -1,0 +1,106 @@
+{
+  "evidence_version": 1,
+  "generated_at_utc": "2026-09-19T07:01:50+00:00",
+  "module": "p1-2-scheduling-engine",
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "repository_form": "restored archive without .git metadata",
+  "subject_sha256": {
+    "src/planpilot/domain/calendar.py": "e138fa477c625e1cb8aef12ad86037701da711d93b05b4571f8c662f4a87861d",
+    "src/planpilot/domain/objectives.py": "ea8d3d9cecc5a6a18f2ab2309383e61e1b22b0cc88681d2ad778ce13126b9ecf",
+    "src/planpilot/domain/lots.py": "ddbbef1cd88ee9512d7ef5e826d2de869814e53fbbccf1158816bdebd7f80263",
+    "src/planpilot/domain/models.py": "bd836d0a6c15a9321bb49a20ed0ce391ef7f8ee749d9d8121ffbda2bc7e7cc61",
+    "src/planpilot/domain/importer.py": "adbd03b8f2c58db442ee074c13f183a83463a70d565c2abab20cec6a4ece6278",
+    "src/planpilot/domain/planning.py": "0a055bf4c182bd63e35b867932245d5caff4ea1884534692a41b568d3c644bdc",
+    "src/planpilot/runtime_planning.py": "135b06c7e29d51b2db73cb64320961c383a5a835cf3c5a1dd752e9a903e156df",
+    "src/planpilot/v18_adapter.py": "91048d09d66162f85f192c239fdd1e1f3f435554709fc3f6c8d7c7d7ad6a097d",
+    "src/planpilot/independent_validator.py": "4aca50164244a1f45384b3b308e67dd5ab907df195eb42d27ea7604296f32ddf",
+    "tests/unit/test_p1_2_engine.py": "04f6e4f349208fc832fa7b2ae5a19791a91c9caa818701356da3b24723f8815b",
+    ".kiro/specs/p1-2-scheduling-engine/design.md": "1164add7cf5f124ccf55985738e2af2afa46f137ee9cab781ab5bf10a598eec8",
+    ".kiro/specs/p1-2-scheduling-engine/tasks.md": "e9ec5075f9f014a7a5208d3c6e4374aab09abaeba651f6d796da3e96e912bf68"
+  },
+  "results": {
+    "focused": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit/test_p1_2_engine.py",
+        "-q"
+      ],
+      "exit_code": 0,
+      "passed": 9,
+      "log_sha256": "326955965c2c2262cf59135016efd088ba4bde466eb75acb85bcc11c6f9fe195"
+    },
+    "unit": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit",
+        "-q"
+      ],
+      "exit_code": 0,
+      "passed": 618,
+      "log_sha256": "fa93f64ce6bf78e4968fbb97dd9fd8bd2ea9546f486b596c62d28df84ee143e5"
+    },
+    "full": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q"
+      ],
+      "exit_code": 0,
+      "passed": 625,
+      "log_sha256": "31e11154d36c308df1d648c95b641fe18838b14255b12ef5e841bbc5827ca2e3"
+    },
+    "compile": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "compileall",
+        "-q",
+        "src",
+        "tools"
+      ],
+      "exit_code": 0,
+      "passed": null,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "closed_vocabularies": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/check_closed_vocabularies.py"
+      ],
+      "exit_code": 0,
+      "passed": null,
+      "log_sha256": "f09b0c0c2873431bbe0d4b73303e7548c80442e84e42525f32e86385ff76bd30"
+    },
+    "workspace": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/validate_kiro_workspace.py"
+      ],
+      "exit_code": 0,
+      "passed": null,
+      "log_sha256": "8ff57544dbf1a4abc570eafe632282a4d4f0f669d49ee4aa18ec995fe319465f"
+    },
+    "formal_eval_readiness": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/run_evals.py"
+      ],
+      "exit_code": 1,
+      "passed": 30,
+      "log_sha256": "1589e6e8ce750f8368e14146b1df403acece1ec393a86423fc7d675e487cd467"
+    }
+  },
+  "formal_eval": {
+    "passed": 0,
+    "failed": 0,
+    "blocked": 30
+  },
+  "all_green_offline": true,
+  "scope_statement": "Offline deterministic implementation checks only. Formal EVAL, full 40-second escalation, cross-state published-baseline discovery and large-factory SLA remain unverified."
+}

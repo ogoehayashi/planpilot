@@ -1,0 +1,51 @@
+{
+  "evidence_kind": "compact_smoke",
+  "formal_acceptance": false,
+  "generated_at": "2026-09-19T09:20:27.292820+00:00",
+  "python": "3.11.5 (tags/v3.11.5:cce6ba9, Aug 24 2023, 14:38:34) [MSC v.1936 64 bit (AMD64)]",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "fixture_sha256": "5331297ff00699b979ce48b091c992e01db2a0cf5bc9a7d06f224671085812f4",
+  "runner_sha256": "47da9ba988bacf4e7b0e4fa79f929b8711c5825ccb26e114749501e1a849ba26",
+  "scope_statement": "Compact demo/utility assertions only; no full V1.8 validation, authority integration, trace or approval/publication acceptance is established.",
+  "check_count": 6,
+  "passed": 6,
+  "failed": 0,
+  "results": [
+    {
+      "check": "compact_candidates_repeatability_and_local_guards",
+      "status": "PASS",
+      "reason": "Named compact smoke assertions completed",
+      "elapsed_seconds": 0.39419940000152565
+    },
+    {
+      "check": "approval_status_utility",
+      "status": "PASS",
+      "reason": "Named compact smoke assertions completed",
+      "elapsed_seconds": 4.300000000512227e-06
+    },
+    {
+      "check": "overtime_overlap_utility",
+      "status": "PASS",
+      "reason": "Named compact smoke assertions completed",
+      "elapsed_seconds": 3.9000005926936865e-06
+    },
+    {
+      "check": "lot_utility_repeatability",
+      "status": "PASS",
+      "reason": "Named compact smoke assertions completed",
+      "elapsed_seconds": 1.4299999747890979e-05
+    },
+    {
+      "check": "stability_utility_changes",
+      "status": "PASS",
+      "reason": "Named compact smoke assertions completed",
+      "elapsed_seconds": 1.4500001270789653e-05
+    },
+    {
+      "check": "compact_importer_rejects_optional_splitting",
+      "status": "PASS",
+      "reason": "Named compact smoke assertions completed",
+      "elapsed_seconds": 0.00043820000064442866
+    }
+  ]
+}

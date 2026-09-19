@@ -2,6 +2,8 @@ import copy
 
 from planpilot.domain.importer import load_factory
 from planpilot.workflow.events import EventWorkflow, apply_event
+from planpilot.audit import SecurityEventService
+from planpilot.persistence import Database
 
 
 def events():
@@ -28,12 +30,18 @@ def test_breakdown_and_absence_become_resource_blocks():
         assert result["event_id"] == event_id
 
 
-def test_prompt_injection_is_blocked_and_logged():
+def test_prompt_injection_is_quarantined_logged_and_planning_continues():
     data, event_map = events()
-    result = EventWorkflow(data).replan(event_map["EVT-005"])
-    assert result["state"] == "BLOCKED"
-    assert result["security_event"]["action"] == "BLOCKED"
-    assert result["traces"][0]["tool"] == "log_security_event"
+    db = Database(":memory:")
+    try:
+        result = EventWorkflow(data, SecurityEventService(db)).replan(event_map["EVT-005"])
+        assert result["state"] == "AWAITING_APPROVAL"
+        assert result["candidates"]
+        assert result["quarantine_impact"] == ["EVT-005"]
+        assert result["security_events"][0]["security_event_id"].startswith("SEC-")
+        assert db.verify_audit()
+    finally:
+        db.close()
 
 
 def test_event_changes_are_atomic_and_unknown_references_rejected():

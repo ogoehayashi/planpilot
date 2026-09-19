@@ -9,6 +9,7 @@ assert.equal(candidates.length, 3);
 const html = fs.readFileSync(path.join(__dirname, 'web/index.html'), 'utf8');
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 scripts.forEach(source => new vm.Script(source));
+new vm.Script(fs.readFileSync(path.join(__dirname, 'web/p1_3.js'), 'utf8'));
 class Element {
   constructor() { this.children = []; this.style = {}; this.value = ''; this.textContent = ''; }
   append(...nodes) { this.children.push(...nodes); }
@@ -33,17 +34,15 @@ const context = vm.createContext({
   Option, candidates
 });
 vm.runInContext(scripts[0], context);
-vm.runInContext("current = {plan_id:'render-check', version:2, candidates}; render();", context);
+vm.runInContext("current = {plan_id:'render-check', version:2, candidates, quarantine_impact:['EVT-005']}; render();", context);
 assert.equal(element('candidate').children.length, 3);
+assert(allText(element('risks')).includes('EVT-005'));
 for (const candidate of candidates) {
   element('candidate').value = candidate.profile;
   vm.runInContext('draw()', context);
   assert.equal(element('ontime').textContent, (candidate.kpis.on_time_rate * 100).toFixed(1) + '%');
   assert.equal(element('risk').textContent,
     String(Object.values(candidate.material_reservations).filter(r => r.status === 'SHORTAGE').length));
-  const binding = vm.runInContext('bind()', context);
-  assert.equal(binding.candidate_id, candidate.profile);
-  assert.equal(binding.expected_version, 2);
   assert.equal(element('gantt').children.at(-1).children[1].textContent.split('\n').filter(Boolean).length,
     candidate.operations.length);
 }
@@ -68,7 +67,7 @@ vm.runInContext('delete current.candidates[0].material_reservations; draw();', c
 assert.equal(element('risk').textContent, '未提供');
 vm.runInContext('current.candidates = []; render();', context);
 assert.equal(element('risks').textContent, '暂无候选方案');
-console.log('PASS: real solver candidates, profile selection, KPI fields, reservation map, shortages, inbound materials, unscheduled work, violations, safe text, complete Gantt details, approval binding, empty/missing data.');
+console.log('PASS: real solver candidates, profile selection, KPI fields, reservation map, shortages, inbound materials, unscheduled work, violations, quarantine impact, safe text, complete Gantt details, empty/missing data.');
 
 async function checkChat() {
   const calls = [];

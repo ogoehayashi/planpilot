@@ -1,0 +1,155 @@
+{
+  "evidence_version": 1,
+  "generated_at_utc": "2026-09-18T14:46:15+00:00",
+  "module": "contract-model-binding",
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "repository_form": "restored archive without .git metadata",
+  "binding": {
+    "service": "AWS Bedrock",
+    "region": "ap-southeast-1",
+    "model": "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+  },
+  "live_bedrock_called": false,
+  "subject_sha256": {
+    "src/planpilot/inference/bedrock_client.py": "91e1d87bb58039a3015aea13935f8131512594efddbd4f9ee03adf05c132143b",
+    "src/planpilot/agent/bedrock.py": "5a2a7e9cf9a047b68fda7b9f15e466afb007a89479aaeded1364c91a371e37cc",
+    "tests/unit/test_bedrock_web.py": "730274c4a2d09a714703e828906d97ef8934540326e80418b8de9e795216b08a",
+    "tests/negative_control/test_model_binding_negctl.py": "ebb7bf371917ce9531355723cbc7ffc6d0f4ab1eda4fbd14766aef385756cc4d",
+    "tools/start_local.ps1": "0696e6c188fcc5c8ed53eeaf8a958e781a40491ed0b3c47c6a84ef5d0481dea2",
+    "tools/build_team_package.py": "e553153561910897cf5f50ede35abb04826aac34982488c156bb13b0d19ea8cf",
+    "tools/generate_kiro_workspace.py": "bd98bd6b84d9c67c0130fb8f5b61a8f02aa2fc7e361275eda4977bcdad0eb09a",
+    ".env.example": "8d905d12d3df37a39ab4b341af514c6d15ea8edf10eb688e56cb2a25a4731eef",
+    "Dockerfile": "2379818bf65ed955351b7fbee37ca531735784d0f62f18598d2e6c5ab97d9544",
+    "compose.yaml": "217de888396f35c13bc77e60cc03cb47bb9d5e14d6869c0a322af507d38dfd06",
+    "START_HERE.md": "ed266c64cdeb1aa3929eafe5222fcb84ade2f61d69cce12249bebe14a2a74ad4",
+    "PRODUCT_RUNBOOK.md": "ca73747f42e906e0c141a765e00be2e023287635be81710ff7093ecd0e265e13",
+    "docs/bedrock-web-guide.md": "a8d50213a8ea1a03926a8b89397908043e4c2f8fe9b5c8e28832bbe5f7282be6",
+    ".kiro/specs/bedrock-web/design.md": "1d524010da7def219b5de582d5e5b38c836093fa7a77277a6e0b92aaf80a10ab",
+    ".kiro/specs/bedrock-web/tasks.md": "e3e55860dce7dd103a02902870c4fe6c85f40dc31c6e36cd4816110484b562e8",
+    ".kiro/specs/model-binding/design.md": "34a72a906871895483a00d86ec8861e16ef407d9bd6f0789fa3e0e677dac9fc7",
+    ".kiro/specs/model-binding/tasks.md": "3c9f3ac3e35d6326b01ed6442e28125738920e1efbae80a7972af3ee1e35d9cc",
+    "P1_1_MODEL_BINDING_REMEDIATION_REPORT_20260918.md": "68ec97aa6a902b2690a6deb4735ea9e33f8e250d69d20506f74e8fb5f337ba3a",
+    "tools/write_evidence_model_binding.py": "09621205066400910a66ba2327dba48144bcec4ca8c407b368b7c910f46dfe57",
+    "tools/factcheck_model_binding_handoff.py": "9449bd48fb70501352e19341ebb53788026820ef26f455549cdc2ea9beedae7b"
+  },
+  "results": {
+    "focused": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit/test_bedrock_web.py",
+        "tests/unit/test_requirement_delivery.py",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "47 passed, 2 warnings in 1.74s"
+    },
+    "negative_control": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/negative_control/test_model_binding_negctl.py",
+        "-q",
+        "-s"
+      ],
+      "exit_code": 0,
+      "summary": "1 passed in 2.00s"
+    },
+    "unit": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "609 passed, 2 warnings in 6.88s"
+    },
+    "full": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "616 passed, 2 warnings in 64.36s (0:01:04)"
+    },
+    "closed_vocabularies": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/check_closed_vocabularies.py"
+      ],
+      "exit_code": 0,
+      "summary": "CLOSED VOCABULARY CHECK | PASS"
+    },
+    "closed_vocabularies_self_test": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/check_closed_vocabularies.py",
+        "--self-test"
+      ],
+      "exit_code": 0,
+      "summary": "SELF-TEST | PASS"
+    },
+    "workspace": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/validate_kiro_workspace.py"
+      ],
+      "exit_code": 0,
+      "summary": "WORKSPACE VALIDATION | ok=190 fail=0"
+    },
+    "compile": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "compileall",
+        "-q",
+        "src",
+        "tools"
+      ],
+      "exit_code": 0,
+      "summary": ""
+    },
+    "formal_eval_readiness": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/run_evals.py"
+      ],
+      "exit_code": 1,
+      "summary": "cases=30 passed=0 failed=0 blocked=30"
+    },
+    "package": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/build_team_package.py",
+        "--output",
+        "/var/folders/kc/8j5wrtkx0f3gv7_qby58n0q40000gn/T/planpilot-model-binding-0rdigguf/PlanPilot-handoff.zip"
+      ],
+      "exit_code": 0,
+      "summary": "{\"archive\": \"/private/var/folders/kc/8j5wrtkx0f3gv7_qby58n0q40000gn/T/planpilot-model-binding-0rdigguf/PlanPilot-handoff.zip\", \"files\": 195, \"bytes\": 631897, \"sha256\": \"4ef5e0fd7ee465f29b44655712e2f6e41666996e8a125506b6643e242ae5995d\", \"integrity\": \"verified\"}"
+    }
+  },
+  "negative_control": {
+    "caught": 6,
+    "escaped": 0,
+    "broken": 0,
+    "total": 6
+  },
+  "package_manifest_binding": {
+    "default_region": "ap-southeast-1",
+    "default_model": "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+  },
+  "formal_eval": {
+    "passed": 0,
+    "failed": 0,
+    "blocked": 30
+  },
+  "all_green": true,
+  "scope_statement": "P1-1 offline binding evidence only. Team-account permission, live Bedrock response, Lightsail, pricing reconciliation and formal EVAL execution remain unverified."
+}

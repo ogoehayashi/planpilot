@@ -7,6 +7,10 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       PLANPILOT_AUTH_SECRET: ${PLANPILOT_AUTH_SECRET:?Set PLANPILOT_AUTH_SECRET in .env}
+      PLANPILOT_BEDROCK_REGION: ${PLANPILOT_BEDROCK_REGION:-ap-southeast-1}
+      PLANPILOT_BEDROCK_MODEL: ${PLANPILOT_BEDROCK_MODEL:-global.anthropic.claude-sonnet-4-5-20250929-v1:0}
+      PLANPILOT_FORBID_LLM_NETWORK: ${PLANPILOT_FORBID_LLM_NETWORK:-1}
+      PLANPILOT_BEDROCK_API_KEY: ${PLANPILOT_BEDROCK_API_KEY:-}
     volumes:
       - data:/data
     read_only: true

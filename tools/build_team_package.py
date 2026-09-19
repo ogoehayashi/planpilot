@@ -13,15 +13,16 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORIES = {'src', 'tools', 'tests', 'docs', 'examples', 'data', 'contract', 'deploy', '.kiro'}
-EXCLUDED = {'.git', '__pycache__', '.pytest_cache', 'secrets', 'dist', 'node_modules', '_scratch'}
-SUFFIXES = {'.py', '.md', '.json', '.txt', '.log', '.html', '.css', '.js', '.cjs', '.ps1', '.yaml', '.yml',
+EXCLUDED = {
+    '.git', '__pycache__', '.pytest_cache', 'secrets', 'dist', 'node_modules', '_scratch',
+    'PACKAGE_MANIFEST.json',
+}
+SUFFIXES = {'.py', '.md', '.json', '.txt', '.html', '.css', '.js', '.cjs', '.ps1', '.yaml', '.yml',
             '.service', '.timer', '.xlsx', '.ini', '.cfg', '.toml', '.bat', '.sh', '.svg', '.png', '.jpg'}
 SPECIAL = {'.env.example', '.gitignore', '.dockerignore', '.gitattributes', 'Dockerfile'}
 
 
 def included(relative):
-    if relative.as_posix() == 'PACKAGE_MANIFEST.json':
-        return False
     if any(p in EXCLUDED or p.startswith(('.venv', '.pycache')) for p in relative.parts):
         return False
     if relative.name.startswith('.env') and relative.name != '.env.example':
@@ -42,7 +43,10 @@ def check_secrets(data, known, name):
         raise ValueError(f'Credential-shaped content found in {name}; packaging stopped')
 
 
-def collect_files(secret_files):
+def build(destination, secret_files):
+    destination = destination.resolve()
+    if destination.suffix.lower() != '.zip' or destination.exists():
+        raise ValueError('Output must be a new .zip file; existing archives are never overwritten')
     known = []
     for filename in secret_files:
         secret = filename.read_text(encoding='utf-8-sig').strip()
@@ -69,32 +73,11 @@ def collect_files(secret_files):
                 'contract/planpilot_agent_contract_v1.8.json'}
     if not required.issubset({name for name, _ in files}):
         raise ValueError('Required handoff files are missing')
-    return files
-
-
-def make_manifest(files):
-    return {'created_at': datetime.now(timezone.utc).isoformat(), 'format': 'source-handoff',
-            'python': '3.11', 'default_region': 'ap-southeast-1', 'default_model': 'amazon.nova-pro-v1:0',
-            'files': [{'path': name, 'size': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
-                      for name, raw in files]}
-
-
-def refresh_manifest(secret_files):
-    manifest = make_manifest(collect_files(secret_files))
-    target = ROOT / 'PACKAGE_MANIFEST.json'
-    temporary = ROOT / 'PACKAGE_MANIFEST.json.tmp'
-    temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    temporary.replace(target)
-    print(json.dumps({'manifest': str(target), 'files': len(manifest['files']),
-                      'integrity': 'refreshed'}, ensure_ascii=False))
-
-
-def build(destination, secret_files):
-    destination = destination.resolve()
-    if destination.suffix.lower() != '.zip' or destination.exists():
-        raise ValueError('Output must be a new .zip file; existing archives are never overwritten')
-    files = collect_files(secret_files)
-    manifest = make_manifest(files)
+    manifest = {'created_at': datetime.now(timezone.utc).isoformat(), 'format': 'source-handoff',
+                'python': '3.11', 'default_region': 'ap-southeast-1',
+                'default_model': 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+                'files': [{'path': name, 'size': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
+                          for name, raw in files]}
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(destination, 'x', compression=zipfile.ZIP_DEFLATED) as archive:
         for name, raw in files:
@@ -115,13 +98,8 @@ def build(destination, secret_files):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument('--output', type=Path)
-    mode.add_argument('--refresh-manifest', action='store_true')
+    parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--secret-file', type=Path, action='append', default=[],
                         help='Additional external credential file to check for accidental inclusion; never archived')
     args = parser.parse_args()
-    if args.refresh_manifest:
-        refresh_manifest(args.secret_file)
-    else:
-        build(args.output, args.secret_file)
+    build(args.output, args.secret_file)

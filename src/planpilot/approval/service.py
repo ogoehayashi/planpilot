@@ -329,6 +329,12 @@ class ApprovalService:
         self._commit_set(set_id, candidate)
         return self._snapshot(candidate)
 
+    def requirement_for_request(self, approval_request_id: str) -> dict:
+        """Return the server-owned action and role for HTTP authorization."""
+        set_id, index = self._find_request(approval_request_id)
+        approval = self._sets[set_id]["approvals"][index]
+        return {"action": approval["action"], "approver_role": approval["approver_role"]}
+
     def require_approved(
         self,
         approval_set_id: str,

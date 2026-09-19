@@ -1,10 +1,17 @@
-# Formal runtime acceptance evidence
+# Formal EVAL readiness — BLOCKED
 
-`python tools/run_evals.py` is a fail-closed gate, not a smoke-test runner. It
-writes one result for every contract case, preserves the exact scenario and
-pass condition, and exits with code 2 while any case is blocked.
+Run `python tools/run_evals.py` from the project root. Expected exit code: **1**.
+Current status: **0 PASS / 0 FAIL / 30 BLOCKED**. No formal scenario was executed.
 
-The current artifact intentionally reports `0 PASS / 0 FAIL / 30 BLOCKED`.
-There are no dedicated end-to-end case runners or reviewable per-case artifacts
-yet. Unit tests and compact-fixture checks live under `smoke-harness` and cannot
-promote an EVAL case.
+Every case preserves its contract scenario and complete pass condition. The
+inventory lists missing executors and evidence: inputs, outputs, traces,
+canonical digest or verified no-plan outcome, timings, approvals or verified
+non-applicability, and audit hash-chain/failure-atomicity verification.
+A present workbook or passing compact assertion cannot establish acceptance.
+No evidence-upload or automatic promotion path exists yet.
+
+`EVIDENCE.json` replaces the invalid old green artifact. Its timestamp records
+inventory generation, not execution of the blocked cases. Prior evidence is
+explicitly retracted in `../retracted/`; never include it in acceptance totals.
+Compact checks use `python tools/run_smoke_harness.py` and write separately to
+`../compact-smoke/SMOKE_EVIDENCE.json`, without formal case identifiers.

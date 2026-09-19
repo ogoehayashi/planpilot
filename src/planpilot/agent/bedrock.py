@@ -1,5 +1,7 @@
+"""Compatibility home for bounded intent validation; provider I/O lives in inference/."""
 from __future__ import annotations
-import json, os
+
+
 class BedrockIntentClient:
     @staticmethod
     def validate_output(value):
@@ -15,10 +17,3 @@ class BedrockIntentClient:
         if 'event_id' in constraints and constraints['event_id'] not in ('EVT-001','EVT-002','EVT-003','EVT-004','EVT-005','EVT-006','EVT-007'):
             raise ValueError('unsupported event')
         return value
-    def __init__(self,model_id=None,region=None):
-        import boto3
-        key='BED'+'ROCK'+'_'+'MODEL'+'_'+'ID'; region_key='AWS'+'_'+'REGION'; self.model_id=model_id or os.environ[key]; self.client=boto3.client('bedrock-runtime',region_name=region or os.environ.get(region_key,'us-east-1'))
-    def parse(self,request):
-        response=self.client.converse(modelId=self.model_id,messages=[{'role':'user','content':[{'text':request}]}],inferenceConfig={'temperature':0,'maxTokens':500})
-        text=response['output']['message']['content'][0]['text']; value=json.loads(text)
-        return self.validate_output(value)

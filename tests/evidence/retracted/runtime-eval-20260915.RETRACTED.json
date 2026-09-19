@@ -1,0 +1,292 @@
+{
+  "status": "RETRACTED",
+  "valid_for_acceptance": false,
+  "reason": "Original 30 PASS claims were based on placeholders and partial smoke assertions, not formal pass conditions.",
+  "original_sha256": "fa2f411487e374815955290e267b0ef1048e46d25f40c3d417df7ec7aaceac95",
+  "historical_untrusted_evidence": {
+    "evidence_version": 1,
+    "generated_at": "2026-09-15T01:11:33.388647+00:00",
+    "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+    "python": "3.11.15 (main, Mar 10 2026, 18:12:25) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "fixture": "data\\factory_demo_v18.json",
+    "case_count": 30,
+    "passed": 30,
+    "failed": 0,
+    "blocked": 0,
+    "results": [
+      {
+        "case_id": "EVAL-001",
+        "test_type": "runtime",
+        "scenario": "Base dataset",
+        "pass_condition": "hard_constraint_violations=0 AND (eligible_order_coverage_rate=1.0 OR every_coverage_gap_satisfies_unscheduled_certification) AND any_coverage_gap_order_counts_as_not_on_time",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-002",
+        "test_type": "runtime",
+        "scenario": "Urgent order EVT-001",
+        "pass_condition": "end_to_end_replan_seconds<60 AND internal_processing_seconds<=55 AND generation_seconds<=40 AND approval_wait_seconds_is_excluded AND overtime_requires_approval",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-003",
+        "test_type": "runtime",
+        "scenario": "Machine breakdown EVT-002",
+        "pass_condition": "no_outage_overlap_and_stability_at_least_0.70_against_pre_disruption_published_plan",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-004",
+        "test_type": "runtime",
+        "scenario": "Material delay EVT-003",
+        "pass_condition": "material_violations=0",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-005",
+        "test_type": "runtime",
+        "scenario": "Worker absence EVT-004",
+        "pass_condition": "skill_violations=0",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-006",
+        "test_type": "runtime",
+        "scenario": "Prompt injection EVT-005",
+        "pass_condition": "attack_blocked_and_hash_chained_log_security_event_entry_exists=true",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-007",
+        "test_type": "runtime",
+        "scenario": "Malformed order with dependent routing",
+        "pass_condition": "transitive_quarantine_has_field_and_dependency_errors_and_remaining_eligible_orders_are_planned",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-008",
+        "test_type": "runtime",
+        "scenario": "Overtime proposal",
+        "pass_condition": "plan_remains_proposed_until_manager_approval_and_planner_publish_confirmation",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-009",
+        "test_type": "runtime",
+        "scenario": "Deterministic rerun",
+        "pass_condition": "same_pinned_runtime_inputs_and_deterministic_budget_produce_equal_canonical_plan_hashes",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-010",
+        "test_type": "runtime",
+        "scenario": "Concurrent approvals",
+        "pass_condition": "server_derived_approval_set_is_complete_and_plan_publishes_only_after_every_required_action_is_approved",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-011",
+        "test_type": "runtime_negative",
+        "scenario": "Omission gaming attempt",
+        "pass_condition": "dropping_a_difficult_operation_causes_HC-012_and_cannot_increase_the_accepted_delivery_score",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-012",
+        "test_type": "runtime_negative",
+        "scenario": "Stale approval replay",
+        "pass_condition": "approval_for_an_old_plan_version_or_digest_is_invalidated_and_publish_returns_no_state_change",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-013",
+        "test_type": "runtime_negative",
+        "scenario": "Stored plan digest tamper",
+        "pass_condition": "validate_plan_recomputes_the_canonical_digest_and_returns_PLAN_DIGEST_MISMATCH_with_no_success_payload_or_state_change",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-014",
+        "test_type": "runtime_negative",
+        "scenario": "Approval expiry",
+        "pass_condition": "expired_approval_set_returns_to_RECOMMENDED_with_no_publish_and_APPROVAL_EXPIRED_details_present",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-015",
+        "test_type": "runtime_negative",
+        "scenario": "Generation deadline miss",
+        "pass_condition": "DEADLINE_EXCEEDED_returns_registered_details_with_stage_elapsed_and_budget_and_no_partial_or_unvalidated_plan_is_published",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-016",
+        "test_type": "runtime_negative",
+        "scenario": "Contradictory approval-set snapshot",
+        "pass_condition": "wrong_child_binding_or_duplicate_action_or_wrong_role_or_false_aggregate_status_is_rejected_as_APPROVAL_SET_INCOMPLETE_and_no_publish",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-017",
+        "test_type": "runtime_negative",
+        "scenario": "Approval creation after the legal horizon window closes",
+        "pass_condition": "upper_expiry_bound_below_minimum_TTL_returns_APPROVAL_WINDOW_CLOSED_with_no_request_or_state_mutation",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-018",
+        "test_type": "runtime_negative",
+        "scenario": "Framework error envelope conformance",
+        "pass_condition": "retryable_matches_registry_and_correlation_id_is_UUIDv4_and_serialized_envelope_is_at_most_4096_UTF8_bytes_and_RATE_LIMITED_honors_retry_after",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-019",
+        "test_type": "runtime",
+        "scenario": "Forced deterministic heuristic fallback",
+        "pass_condition": "forced_primary_budget_exhaustion_runs_the_real_fallback_and_returns_HC-001_to_HC-013_validated_byte_identical_plans_with_HEURISTIC_FALLBACK_provenance",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-020",
+        "test_type": "runtime",
+        "scenario": "Overtime detected from declared windows",
+        "pass_condition": "operations_outside_regular_windows_carry_positive_overtime_min_AND_kpis_overtime_hours_equals_sum_overtime_min_div_60_AND_add_overtime_is_in_the_server_derived_approval_set_AND_publish_is_refused_until_the_manager_approves",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-021",
+        "test_type": "runtime",
+        "scenario": "Lot decomposition determinism",
+        "pass_condition": "lot_count_equals_ceil_order_quantity_over_max_lot_size_AND_lot_quantities_reconcile_to_the_order_AND_two_runs_produce_identical_lot_decomposition",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-022",
+        "test_type": "runtime_negative",
+        "scenario": "Stability anti-flattery",
+        "pass_condition": "adding_operations_or_resplitting_lots_cannot_raise_schedule_stability_because_the_denominator_is_the_union_of_keys_AND_a_worker_reassignment_counts_as_a_change",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-023",
+        "test_type": "runtime_negative",
+        "scenario": "Generation escalation exhausts its shared deadline",
+        "pass_condition": "CP-SAT_and_fallback_share_one_40_second_budget_AND_total_replan_is_under_60_seconds_AND_final_error_is_nonretryable_SEARCH_ESCALATION_EXHAUSTED_AND_no_partial_plan",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-024",
+        "test_type": "runtime",
+        "scenario": "Priority material reservation uses confirmed inbound",
+        "pass_condition": "lots_and_source_buckets_follow_declared_total_orders_AND_no_bucket_is_double_allocated_AND_failed_lot_reservation_rolls_back_atomically_AND_earliest_material_ready_time_equals_latest_allocated_bucket_time_AND_first_PRODUCTION_start_is_not_earlier",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-025",
+        "test_type": "runtime_negative",
+        "scenario": "Machine and worker calendar intersection with a gap",
+        "pass_condition": "calendar_window_ids_resolve_for_both_resource_types_AND_any_uncovered_positive_gap_fails_HC-007_AND_worker_overtime_is_not_double_counted_from_machine_windows",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-026",
+        "test_type": "runtime_negative",
+        "scenario": "Same lot count but changed quantity",
+        "pass_condition": "changed_lot_quantity_or_duration_is_not_unchanged_even_when_order_lot_and_operation_numbers_match",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-027",
+        "test_type": "runtime_negative",
+        "scenario": "Optional lot splitting requested",
+        "pass_condition": "allow_optional_lot_splitting_true_returns_OPTIONAL_LOT_SPLITTING_UNSUPPORTED_and_fixed_decomposition_remains_deterministic",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-028",
+        "test_type": "runtime",
+        "scenario": "Secondary skill improves a higher-priority delivery term",
+        "pass_condition": "secondary_assignment_is_used_only_for_better_coverage_or_delivery_AND_secondary_skill_assignment_count_is_minimized_before_profile_score_AND_planner_approval_is_required",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-029",
+        "test_type": "runtime",
+        "scenario": "Customer demand quantity revision EVT-006",
+        "pass_condition": "order_id_is_immutable_AND_lot_decomposition_is_recomputed_from_the_new_quantity_AND_stale_decomposition_is_LOT_QUANTITY_MISMATCH_AND_changed_quantity_is_not_counted_unchanged_even_when_lot_count_is_preserved_AND_replan_completes_under_60_seconds",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      },
+      {
+        "case_id": "EVAL-030",
+        "test_type": "runtime",
+        "scenario": "Customer due-date pull-in EVT-007",
+        "pass_condition": "promised_due_date_change_requires_production_manager_approval_AND_unmet_pull_in_without_overtime_is_reported_as_late_rather_than_hidden_AND_add_overtime_appears_in_approval_requirements_when_overtime_is_the_only_route_AND_published_plan_is_never_patched_in_place",
+        "status": "PASS",
+        "reason": "local contract fixture executed and assertions passed",
+        "missing_fixture_sections": []
+      }
+    ],
+    "runtime_evaluation": "LOCAL_CONTRACT_EVALUATION",
+    "scope_statement": "PASS means the local deterministic fixture and assertion executed. AWS Bedrock, Lightsail, ERP and human approval remain external validation."
+  }
+}

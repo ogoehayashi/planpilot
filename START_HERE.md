@@ -42,23 +42,25 @@ Token，不是 AWS 密钥。同一服务运行期间，新 Token 必须用同一
 打开 http://127.0.0.1:8080/ ，将剪贴板内容粘贴到页面顶部的 Bearer token
 输入框，**不要额外加 `Bearer ` 前缀**。默认一小时后过期。
 
-点击“生成三套方案”。默认读取 `examples/factory_demo.json`，页面中保留
-`factory_demo.json` 即可，不要填 `examples/factory_demo.json`。
+点击“生成三套方案”。默认读取 `data/factory_demo_v18.json`，页面中保留
+`factory_demo_v18.json` 即可，不要填写目录前缀。
 
 在“计划与方案”比较 Balanced、Delivery First、Cost First，切换候选方案
 查看 KPI 和排程。在“风险中心”查看缺料、待到货、延期、未排工序和约束违规。
 也可通过上传框选择 `data/factory_demo_v18.json`。网页上传目前仅支持 JSON；
-附带的 Excel 用于数据阅读和后端导入测试，不可直接上传到此 JSON 输入框。
+附带的 17-sheet Excel 已接入后端生产导入器，可通过 API 的
+`factory_file` 使用，但不可直接放入这个 JSON 上传框。
 
 关闭服务时回到终端按 Ctrl+C。重启后填写新 Token；多个队友各自在自己电脑
 运行即可，不需要共享数据库。默认仅绑定本机，不是公网协作服务。
 
 ## 3. 启用真实模型对话（可选）
 
-当前默认：**Amazon Nova Pro**，模型 ID `amazon.nova-pro-v1:0`，区域
-`ap-southeast-1`（新加坡）。Bedrock Converse 接口通过后端调用。
-原始比赛合同指定 Claude Sonnet 4.5；由于实际 Anthropic 地区访问阻塞，
-当前运行配置按用户要求使用 Nova。比赛提交前须确认主办方允许此变更。
+当前默认并强制绑定 **Bedrock Claude Sonnet 4.5**，全局推理配置 ID
+`global.anthropic.claude-sonnet-4-5-20250929-v1:0`，源区域
+`ap-southeast-1`（新加坡）。Bedrock Converse 接口只通过后端调用。此组合与
+V1.8 比赛合同一致；全局推理配置可从新加坡源区域调用，但账号权限和实际连通性
+仍须在部署环境验证。
 
 包内没有 AWS 密钥。每位队友使用有权使用的 Bedrock API Key，保存为外部
 TXT 文件，只保留完整单行密钥，不要加变量名、引号或 Bearer 前缀。
@@ -68,7 +70,7 @@ IAM Access Key ID/Secret Access Key 不能当作此接口的 Bearer API Key。
 
 ```powershell
 $keyPath = Read-Host '输入 Bedrock API Key TXT 文件的完整路径'
-powershell -ExecutionPolicy Bypass -File .\tools\start_local.ps1 -Bedrock -BedrockKeyFile $keyPath -BedrockRegion ap-southeast-1 -BedrockModel amazon.nova-pro-v1:0
+powershell -ExecutionPolicy Bypass -File .\tools\start_local.ps1 -Bedrock -BedrockKeyFile $keyPath -BedrockRegion ap-southeast-1 -BedrockModel global.anthropic.claude-sonnet-4-5-20250929-v1:0
 ```
 
 也可自行创建 `secrets/bedrock-api-key.txt`；使用 `-Bedrock` 时脚本可自动找到它。
@@ -94,17 +96,35 @@ powershell -ExecutionPolicy Bypass -File .\tools\start_local.ps1 -Bedrock -Bedro
 |---|---|
 | 本地生成三方案、切换、Gantt、风险查看 | 已实现 |
 | Bedrock 意图识别、固定工具流程、结果解释 | 接口已实现；需各自验证 AWS 访问 |
-| 前端工具执行记录 | 显示实际紧凑适配器步骤；不是完整 V1.8 决策轨迹协议 |
+| 前端工具执行记录 | 显示实际生成、独立验证和权威写入步骤；完整 V1.8 决策轨迹协议仍待后续实现 |
 | 聊天直接修改库存、班次、交期或应用事件 | 未开放；修改源数据后重新导入 |
-| 网页“读取计划”按钮 | 目前未接通，不能依赖它恢复历史计划 |
-| 网页发起审批和发布 | 有后端调用，受角色、版本及审批检查约束 |
-| 网页批准/拒绝审批按钮 | 目前缺少，纯网页不能完成审批闭环 |
+| 网页“读取计划”按钮 | 已接通：输入计划 ID 和可选版本，读取服务端权威内容与生命周期 |
+| 网页发起审批和发布 | 已接通；选中方案的版本和摘要绑定服务端审批集合 |
+| 网页批准/拒绝审批按钮 | 已接通；逐项显示角色、影响和到期时间，拒绝需选合同原因 |
+| 网页审计 | 显示计划摘要、真实 Agent 步骤及服务端审计链验证状态 |
 | MES/ERP 下发生产任务 | 未实现 |
 
-## 5. 后端审批测试
+## 5. 网页审批与后端核查
 
-已保存计划才能发起审批。以下在**另一个项目目录的 PowerShell**中执行，
-不会替代人工判断。只对自己有权审批的动作操作。
+在方案比较中选择要发布的候选，点击“发起审批”。审批队列会从服务端读取
+**全部**所需动作。Production Planner 使用页面顶部的 Planner Token；若出现
+`add_overtime` 或 `change_promised_due_date`，请由有权限的经理签发 Manager
+Token，填入审批队列的“经理 Token”。各角色分别点击对应审批项的“批准”或
+“拒绝”；拒绝时需选择合同原因。所有必需项均批准后，Planner 点击“发布选中
+方案”。审批状态、版本、plan_digest 和审计链可在同一网页查看。
+
+用“读取计划”可检查先前的版本。重新生成后，旧版本的审批集合会失效，网页
+刷新显示 `INVALIDATED`；旧版本不能继续发布。网页发布只写本项目数据库，不会
+向 MES/ERP 下发任务。Planner 和 Manager Token 必须由同一服务密钥签发；
+不要把 AWS API Key 填入这两个输入框。
+
+以下命令保留为后端核查方式：
+
+P0-3 整改后，`/schedule` 会把明确声明完整权威字段的 JSON 状态转换为 V1.8
+`plan_content`，并由分离实现的 validator 重算 digest、物料预留、HC-001～013
+和 KPI。只有验证通过的候选会经 `RuntimeAuthority.install_validated_plan`
+写入。以下命令可用于刚生成的权威计划；旧 compact JSON 因缺少权威字段会
+失败关闭。
 
 ```powershell
 $env:PYTHONPATH = Join-Path $PWD 'src'
@@ -116,10 +136,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Token 签发失败' }
 $headers = @{ Authorization = 'Bearer ' + $token.Trim() }
 $planId = Read-Host '输入网页上的计划 ID'
 $version = [int](Read-Host '输入计划版本')
-$candidate = Read-Host '输入方案：Balanced、Delivery First 或 Cost First'
-$body = @{plan_id=$planId; candidate_id=$candidate; expected_version=$version} | ConvertTo-Json
+$digest = Read-Host '输入权威计划的 plan_digest'
+$body = @{plan_id=$planId; plan_version=$version; plan_digest=$digest; action='publish_plan'} | ConvertTo-Json
 $queue = Invoke-RestMethod http://127.0.0.1:8080/approval/request -Method Post -Headers $headers -ContentType application/json -Body $body
-$queue.approvals | Format-Table request_id,action,role,status
+$queue.approvals | Format-Table approval_request_id,action,approver_role,status
 ```
 
 根据返回的 `role` 确认当前 Token 有权操作。planner 负责发布确认和次级技能
@@ -136,7 +156,9 @@ Invoke-RestMethod http://127.0.0.1:8080/approval/decide -Method Post -Headers $h
 `$body` 及 planner `$headers` 的终端执行：
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8080/publish -Method Post -Headers $headers -ContentType application/json -Body $body
+$idempotencyKey = 'planpilot-publish-' + [guid]::NewGuid().ToString()
+$publishBody = @{plan_id=$planId; expected_plan_version=$version; plan_digest=$digest; approval_set_id=$queue.approval_set_id; idempotency_key=$idempotencyKey} | ConvertTo-Json
+Invoke-RestMethod http://127.0.0.1:8080/publish -Method Post -Headers $headers -ContentType application/json -Body $publishBody
 ```
 
 发布是本项目内的数据库记录，不是向工厂设备下发任务。不要用重新生成方案
@@ -149,16 +171,10 @@ $env:PYTHONPATH = Join-Path $PWD 'src'
 $env:PLANPILOT_FORBID_LLM_NETWORK = '1'
 .\.venv-runtime\Scripts\python.exe -m pytest tests/unit -q
 .\.venv-runtime\Scripts\python.exe tools/check_closed_vocabularies.py
-.\.venv-runtime\Scripts\python.exe tools/run_smoke_harness.py
-.\.venv-runtime\Scripts\python.exe tools/run_evals.py
 Invoke-RestMethod http://127.0.0.1:8080/health
 ```
 
 健康检查要求服务正在运行。单元测试和词汇检查不需要服务或 AWS。
-`run_smoke_harness.py` 只验证紧凑数据上的组件行为，不代表正式 EVAL 通过。
-`run_evals.py` 是 fail-closed 正式验收门；当前应输出
-`0 PASS / 0 FAIL / 30 BLOCKED` 并返回退出码 2。只有逐案执行准确场景、证明准确
-pass condition，并保存可独立检查的证据后，某个 EVAL 才能改为 PASS。
 Node.js 为可选开发工具，仅前端 DOM 模拟回归脚本使用，网页运行不需要 Node。
 
 | 问题 | 处理 |
@@ -169,8 +185,8 @@ Node.js 为可选开发工具，仅前端 DOM 模拟回归脚本使用，网页�
 | 8080 端口占用 | 停止旧服务；不要多开两个启动终端 |
 | Bedrock 密钥格式错误 | 复制完整 Bedrock API Key，不用 IAM 密钥 |
 | Bedrock 403 | 检查页面 AWS 原因、密钥有效期、模型权限，必要时联系 AWS Support |
-| Anthropic 地区限制 | 这是服务访问资格问题，代码不能解除；本包默认已采用 Nova |
-| 需要 inference profile | 从控制台复制当前区域可用的实际 ID，通过 -BedrockModel 指定 |
+| Claude 403 | 检查团队 API Key、Claude 权限及提供商首次使用要求 |
+| inference profile 不可用 | 核对源区域为 `ap-southeast-1` 且账号允许合同固定的全局推理配置 |
 | 已生成但模型解释失败 | 计划已保存，查看确定性结果或另发解释请求，不必重复生成 |
 
 ## 7. 包内容与交付验证
@@ -193,7 +209,8 @@ paste the generated clipboard token into http://127.0.0.1:8080/ . Click the gene
 button for offline scheduling. AWS credentials are not included.
 
 For model chat, stop the server and restart with `-Bedrock -BedrockKeyFile` pointing
-to your own one-line Bedrock API key file. Defaults are Nova Pro and Singapore.
+to your own one-line Bedrock API key file. Defaults are Claude Sonnet 4.5 via its
+global inference profile, with Singapore as the source region.
 The web token and AWS key are different credentials. Model chat can incur charges.
-AWS access is not guaranteed by offline tests. The original competition contract
-pins Claude, so confirm acceptance of Nova with the organizer before submission.
+AWS access is not guaranteed by offline tests. The runtime, startup script and
+package manifest all enforce the contract-pinned Claude Sonnet 4.5 profile.

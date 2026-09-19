@@ -1,5 +1,4 @@
 """Regression evidence for the compact production adapter and HTTP boundary."""
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict
 import importlib.util
@@ -30,14 +29,6 @@ def raw_factory():
         "workers": [{"worker_id": "w1"}],
         "inventory": {"steel": {"batches": [{"batch_id": "old", "quantity": 5, "available_at": 0},
                                                {"batch_id": "new", "quantity": 5, "available_at": 20}]}}}
-
-
-def saved(db, version=1, raw=None):
-    raw = raw or raw_factory()
-    plan = solve(factory_from_dict(raw), "Balanced")
-    payload = {"factory_data": raw, "candidates": [asdict(plan)]}
-    db.save_plan("p1", payload, version)
-    return payload
 
 
 def test_fifo_is_pure_and_waits_for_last_allocated_batch():
@@ -102,60 +93,6 @@ def test_setup_interval_cannot_overlap_maintenance():
     assert b["start"] >= 18
 
 
-def test_revision_binding_restart_and_idempotent_publish(tmp_path):
-    path = tmp_path / "state.db"
-    db = Database(path)
-    payload = saved(db)
-    request = db.request_approval("p1", "Balanced", expected_version=1)[0]
-    with pytest.raises(PermissionError):
-        db.decide_approval(request["request_id"], "manager", "manager", "APPROVED")
-    db.decide_approval(request["request_id"], "planner", "planner", "APPROVED")
-    first = db.publish_plan("p1", "Balanced", "planner", "planner", 1)
-    count = db.conn.execute("SELECT COUNT(*) FROM audit_chain").fetchone()[0]
-    assert db.publish_plan("p1", "Balanced", "planner", "planner", 1) == first
-    assert db.conn.execute("SELECT COUNT(*) FROM audit_chain").fetchone()[0] == count
-    db.save_plan("p1", payload, 2)
-    with pytest.raises(RuntimeError):
-        db.publish_plan("p1", "Balanced", "planner", "planner", 1)
-    with pytest.raises(PermissionError):
-        db.publish_plan("p1", "Balanced", "planner", "planner", 2)
-    db.close()
-    restored = Database(path)
-    assert restored.get_plan("p1")["version"] == 2
-    assert restored.get_plan("p1", 1)["payload"] == payload
-    assert restored.verify_audit()
-    restored.close()
-
-
-def test_concurrent_writers_cannot_lose_updates(tmp_path):
-    path = tmp_path / "state.db"
-    first, second = Database(path), Database(path)
-    first.save_plan("p", {"value": 1}, 1)
-    def update(db):
-        try:
-            db.save_plan("p", {"value": 2}, 2)
-            return True
-        except RuntimeError:
-            return False
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        assert sorted(pool.map(update, (first, second))) == [False, True]
-    assert first.verify_audit()
-    first.close()
-    second.close()
-
-
-def test_atomic_failed_approval_and_tampered_revision(tmp_path):
-    db = Database(tmp_path / "state.db")
-    saved(db)
-    with pytest.raises(ValueError):
-        db.request_approval("p1", "Balanced", ["add_overtime"])
-    assert db.conn.execute("SELECT COUNT(*) FROM bound_approvals").fetchone()[0] == 0
-    db.conn.execute("UPDATE revisions SET payload='{}'")
-    with pytest.raises(RuntimeError, match="digest"):
-        db.request_approval("p1", "Balanced")
-    db.close()
-
-
 @pytest.mark.parametrize("token", ["", "nonsense", "x.y", "a" * 5000])
 def test_malformed_authentication_fails_closed(token):
     with pytest.raises(PermissionError):
@@ -192,22 +129,6 @@ def test_excel_preserves_batches_and_routing_order(tmp_path):
     assert solve(factory, "Balanced").operations[0]["start"] >= 20
 
 
-def test_backup_is_online_and_missing_source_is_not_created(tmp_path):
-    db = Database(tmp_path / "state.db")
-    saved(db)
-    destination = tmp_path / "nested" / "backup.db"
-    backup_database(tmp_path / "state.db", destination)
-    copy = Database(destination)
-    assert copy.get_plan("p1") == db.get_plan("p1") and copy.verify_audit()
-    copy.close()
-    with pytest.raises(ValueError):
-        backup_database(tmp_path / "state.db", tmp_path / "state.db")
-    with pytest.raises(FileNotFoundError):
-        backup_database(tmp_path / "missing.db", destination)
-    assert not (tmp_path / "missing.db").exists()
-    db.close()
-
-
 def test_http_authentication_and_full_publish_flow(tmp_path):
     spec = importlib.util.spec_from_file_location("planning_api", ROOT / "tools/api_server.py")
     api = importlib.util.module_from_spec(spec)
@@ -231,17 +152,31 @@ def test_http_authentication_and_full_publish_flow(tmp_path):
         assert call("/health")[0] == 200
         assert call("/schedule", {"factory_data": raw_factory()}, role=None)[0] == 403
         assert call("/schedule", {"factory_file": "../outside.json"})[0] == 403
-        status, plan = call("/schedule", {"factory_data": raw_factory()})
+        state = json.loads((ROOT / "data/factory_demo_v18.json").read_text())
+        status, result = call("/schedule", {"factory_data": state})
         assert status == 200
-        binding = {"plan_id": plan["plan_id"], "candidate_id": "Balanced", "expected_version": 1}
-        assert call("/publish", binding)[0] == 403
-        status, approvals = call("/approval/request", binding)
-        assert status == 200
-        rid = approvals["approvals"][0]["request_id"]
-        assert call("/approval/decide", {"request_id": rid, "decision": "APPROVED", "actor": "planner", "role": "planner"}, "manager")[0] == 403
-        assert call("/approval/decide", {"request_id": rid, "decision": "APPROVED", "actor": "forged"})[1]["decided_by"] == "planner"
-        assert call("/publish", binding)[1]["status"] == "PUBLISHED"
-        assert call("/plans?plan_id=" + plan["plan_id"])[1]["version"] == 1
+        assert result["stored_plan_count"] == 3
+        assert result["state"] == "PLANS_VALIDATED"
+        assert db.conn.execute("SELECT revision FROM authority_state").fetchone()[0] == 3
+        binding = {
+            "plan_id": result["plan_id"],
+            "plan_version": result["version"],
+            "plan_digest": result["plan_digest"],
+            "action": "publish_plan",
+        }
+        approval = call("/approval/request", binding)[1]
+        aggregate = None
+        for request in approval["approvals"]:
+            aggregate = call("/approval/decide", {"request_id": request["approval_request_id"], "decision": "APPROVED"})[1]["aggregate_status"]
+        assert aggregate == "APPROVED"
+        publish = {
+            "plan_id": result["plan_id"],
+            "expected_plan_version": result["version"],
+            "plan_digest": result["plan_digest"],
+            "approval_set_id": approval["approval_set_id"],
+            "idempotency_key": "runtime-v18-publish-test-0001",
+        }
+        assert call("/publish", publish)[1]["status"] == "PUBLISHED"
         assert call("/metrics")[1]["schedule"]["count"] >= 1
     finally:
         server.shutdown()

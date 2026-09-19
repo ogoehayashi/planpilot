@@ -1,0 +1,34 @@
+contract: planpilot_agent_contract_v1.8.json
+vocabularies: 26 sets, 160 known members
+scanning 110 modules under src/ tests/ tools/
+
+allowlist: 13 entries
+  ANOTHER_ONE — used by tests/unit/test_closed_vocabularies.py
+      reason: asserts __all__ export names are not treated as vocabulary claims
+  EVAL-031 — used by tests/unit/test_closed_vocabularies.py, tests/unit/test_guard_bypass_regressions.py
+      reason: asserts an out-of-range EVAL id is flagged
+  EVT-009 — used by tests/unit/test_closed_vocabularies.py
+      reason: asserts an out-of-range event id is flagged
+  FABRICATED_CODE — used by tests/unit/test_closed_vocabularies.py
+      reason: asserts the guard rejects an invented error code
+  HACKED_PUBLISHED — used by tests/unit/test_audit_fixes_pinned.py
+      reason: fabricated lifecycle status proving load_state rejects out-of-enum records (audit F1)
+  HC-014 — used by tests/unit/test_closed_vocabularies.py, tests/unit/test_guard_bypass_regressions.py
+      reason: asserts an out-of-range hard-constraint id is flagged
+  HC-099 — used by tests/unit/test_closed_vocabularies.py
+      reason: appears in the guard's test module as a string constant holding probe source; from the OUTER file's view that is a fabricated id needing the allowlist, even though INSIDE the probe it is docstring prose and is not scanned. Two levels, two different truths — this entry covers the outer one.
+  IMPLEMENTATION_NOTES — used by tests/unit/test_guard_bypass_regressions.py
+      reason: bare filename stem used to prove _is_fabricated_stem exempts real docs
+  NOT_A_REASON — used by tests/unit/test_approval_service.py
+      reason: negative approval-decision fixture proving unregistered reasons are refused
+  PLAN_DIGEST_MISMATCHED — used by tests/unit/test_closed_vocabularies.py, tests/unit/test_guard_bypass_regressions.py
+      reason: near-miss fixture proving edit-distance detection works
+  REVIEW_HANDOFF_FOR_CODEX — used by tests/unit/test_guard_bypass_regressions.py
+      reason: bare filename stem used to prove _is_fabricated_stem exempts real docs
+  SEARCH_ESCALATION_EXHAUST — used by tests/unit/test_closed_vocabularies.py, tests/unit/test_guard_bypass_regressions.py
+      reason: truncation fixture proving near-miss detection
+  SOME_LOCAL_CONSTANT — used by tests/unit/test_closed_vocabularies.py
+      reason: asserts __all__ export names are not treated as vocabulary claims
+all entries genuinely outside the contract, all used, all paths exist
+no near misses, no unrecognised tokens
+CLOSED VOCABULARY CHECK | PASS

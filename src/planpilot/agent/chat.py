@@ -1,4 +1,4 @@
-"""Model intent and explanation around the compact deterministic planning adapter.
+"""Model intent and explanation around authoritative V1.8 planning.
 
 This is not the V1.8 tool-wire runtime: the model cannot author tool arguments,
 factory records, approvals or plan structures. Each HTTP request is stateless.
@@ -10,29 +10,54 @@ from pathlib import Path
 import time
 import uuid
 
-from planpilot.agent.planning_tools import compare_candidates, generate_candidates, validate_candidates, validate_input
 from planpilot.domain.importer import read_factory
+from planpilot.factory_state import FactoryStateRegistry
 from planpilot.inference.bedrock_client import InferenceError
+from planpilot.runtime_planning import generate_authoritative_plans_from_state
 
 
 class ChatService:
-    def __init__(self, db, client, factory_root):
+    def __init__(self, db, client, factory_root, authority=None, security_events=None):
+        if authority is None:
+            from planpilot.authority import RuntimeAuthority
+            authority = RuntimeAuthority(db)
         self.db, self.client = db, client
+        self.authority = authority
+        self.security_events = security_events
+        self.factory_states = FactoryStateRegistry(db)
         self.factory_root = Path(factory_root).resolve()
 
     @staticmethod
     def summary(plan):
         if not plan:
             return None
-        return {'plan_id': plan['plan_id'], 'version': plan['version'], 'digest': plan['digest'],
-                'candidates': [{'profile': c['profile'], 'kpis': c['kpis'],
-                                'solver_status': c['solver_status'], 'violations': c['violations'],
-                                'unscheduled_operations': c['unscheduled_operations'],
-                                'material_risks': {key: {'status': value['status'], 'ready_at': value['ready_at']}
-                                                   for key, value in c['material_reservations'].items()
-                                                   if value['status'] == 'SHORTAGE' or (value['ready_at'] or 0) > 0},
-                                'required_actions': c['required_actions']}
-                               for c in plan['candidates']]}
+        candidates = []
+        source = plan.get('plan_options', plan['candidates'])
+        for candidate in source:
+            if 'engine' in candidate:
+                candidates.append({
+                    'profile': candidate['profile'], 'kpis': candidate['kpis'],
+                    'solver_status': candidate['engine']['solver_status'],
+                    'unscheduled_operations': candidate.get('unscheduled_operations', candidate['kpis']['unscheduled_operations']),
+                    'material_risks': [r for r in candidate.get('material_reservations', [])
+                                       if r['status'] != 'READY'],
+                    'authoritative': True,
+                })
+            else:
+                candidates.append({
+                    'profile': candidate['profile'], 'kpis': candidate['kpis'],
+                    'solver_status': candidate['solver_status'],
+                    'violations': candidate['violations'],
+                    'unscheduled_operations': candidate['unscheduled_operations'],
+                    'material_risks': {key: {'status': value['status'], 'ready_at': value['ready_at']}
+                                       for key, value in candidate['material_reservations'].items()
+                                       if value['status'] == 'SHORTAGE' or (value['ready_at'] or 0) > 0},
+                    'required_actions': candidate['required_actions'],
+                    'authoritative': False,
+                })
+        return {'plan_id': plan['plan_id'], 'version': plan['version'],
+                'digest': plan.get('plan_digest', plan.get('digest')), 'candidates': candidates,
+                'quarantine_impact': list(plan.get('quarantine_impact', []))}
 
     def run(self, body, actor):
         message = body.get('message')
@@ -45,10 +70,12 @@ class ChatService:
             version = body.get('expected_version')
             if type(version) is not int or version < 1:
                 raise ValueError('expected_version must be a positive integer')
-            stored = self.db.get_plan(body['plan_id'], version)
+            stored = self.authority.get_plan(body['plan_id'], version)
             if not stored:
                 raise ValueError('referenced plan version not found')
-            plan = {**stored, 'plan_id': body['plan_id'], 'candidates': stored['payload']['candidates']}
+            content = stored['content']
+            plan = {'plan_id': content['plan_id'], 'version': content['plan_version'],
+                    'digest': content['plan_digest'], 'candidates': [content]}
         run_id, traces = str(uuid.uuid4()), []
 
         def step(name, operation):
@@ -92,27 +119,32 @@ class ChatService:
                 raise InferenceError('模型未提供有效回复。')
             return {'response': intent['response'], 'traces': traces, 'run_id': run_id, 'mode': 'bedrock'}
         if intent['action'] == 'generate':
+            logged_security_events = []
             def load():
                 if body.get('factory_data') is not None:
-                    return body['factory_data']
-                filename = body.get('factory_file', 'factory_demo.json')
+                    return body['factory_data'], None
+                filename = body.get('factory_file', 'factory_demo_v18.json')
                 if not isinstance(filename, str):
                     raise ValueError('factory_file must be a string')
                 path = (self.factory_root / filename).resolve()
                 if not path.is_relative_to(self.factory_root):
                     raise PermissionError('factory file is outside configured import directory')
-                return read_factory(path)
-            raw = step('read_factory', load)
-            data = {'request': message, 'factory_data': raw}
-            step('validate_input', lambda: validate_input(data))
-            data.update(step('generate_candidates', lambda: generate_candidates(data)))
-            data.update(step('validate_candidates', lambda: validate_candidates(data)))
-            compared = step('compare_candidates', lambda: compare_candidates(data))
-            candidates = data['validated_candidates']
-            identity = str(uuid.uuid4())
-            saved = step('save_plan', lambda: self.db.save_plan(identity, {'factory_data': raw, 'candidates': candidates}, 1, actor))
-            plan = {**saved, 'candidates': candidates, 'recommended_plan': compared['recommendation'],
-                    'approval_required': compared['approval_required'], 'publish_ready': False}
+                if path.suffix.lower() == '.xlsx':
+                    loaded = self.factory_states.load_workbook(path)
+                    if self.security_events is not None:
+                        logged_security_events.extend(
+                            self.security_events.log_factory_quarantine(
+                                self.factory_states.get(loaded['state_id'])
+                            )
+                        )
+                    return self.factory_states.planning_state(loaded['state_id']), loaded['state_id']
+                return read_factory(path), None
+            raw, state_id = step('read_factory', load)
+            if state_id is None:
+                state_id = step('register_factory_state', lambda: self.factory_states.register_normalized(raw)['state_id'])
+            plan = step('generate_validate_store', lambda: generate_authoritative_plans_from_state(state_id, self.factory_states, self.authority))
+            if logged_security_events:
+                plan['security_events'] = logged_security_events
         if not plan:
             return {'response': '请先生成计划，再询问方案差异或风险。', 'traces': traces, 'run_id': run_id, 'mode': 'bedrock'}
         warning = None

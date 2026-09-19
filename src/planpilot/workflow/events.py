@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone, timedelta
-import hashlib
-import json
-import re
+from dataclasses import asdict
+from datetime import datetime
 
 from planpilot.domain.importer import factory_from_dict
 from planpilot.domain.planning import build_candidates
@@ -15,19 +12,6 @@ from planpilot.approval.policy import ordered_actions
 EVENT_IDS = {f"EVT-{i:03d}" for i in range(1, 8)}
 STATES = ("RECEIVED", "DATA_LOADED", "INPUT_VALIDATED", "PLANS_GENERATED", "PLANS_VALIDATED", "RECOMMENDED", "AWAITING_APPROVAL")
 INJECTION_MARKERS = ("ignore", "system instruction", "publish immediately", "bypass", "override")
-
-
-@dataclass(frozen=True)
-class SecurityEvent:
-    event_id: str
-    action: str
-    context: str
-    excerpt: str
-    event_hash: str
-
-
-def _hash(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
 def _event_type(event):
@@ -43,9 +27,8 @@ def apply_event(factory_data: dict, event: dict):
     kind = _event_type(event)
     security = None
     payload = event.get("Payload_JSON", "")
-    if event_id == "EVT-005" or any(marker in str(payload).lower() for marker in INJECTION_MARKERS):
-        excerpt = re.sub(r"[\r\n\t]+", " ", str(payload))[:500]
-        security = SecurityEvent(event_id, "BLOCKED", "Events.Payload_JSON", excerpt, _hash({"event_id": event_id, "excerpt": excerpt}))
+    if event_id == "EVT-005" or kind == "PROMPT_INJECTION" or any(marker in str(payload).lower() for marker in INJECTION_MARKERS):
+        security = {"event_id": event_id, "payload": payload, "context": f"Events.Payload_JSON event_id={event_id}"}
         return raw, security
     if event_id == "EVT-001":
         order_id = event.get("order_id")
@@ -81,10 +64,12 @@ def apply_event(factory_data: dict, event: dict):
 
 class EventWorkflow:
     """Synchronous state machine with one event, one reload and one replan."""
-    def __init__(self, factory_data):
+    def __init__(self, factory_data, security_logger=None):
         self.factory_data = deepcopy(factory_data)
+        self.security_logger = security_logger
         self.state = "RECEIVED"
         self.security_events = []
+        self.quarantine_impact = []
         self.traces = []
 
     def _transition(self, expected, next_state):
@@ -98,10 +83,13 @@ class EventWorkflow:
         if event is not None:
             data, security = apply_event(data, event)
             if security:
-                self.security_events.append(asdict(security))
-                self.traces.append({"tool": "log_security_event", "event_id": event["event_id"], "status": "BLOCKED"})
-                self.state = "BLOCKED"
-                return {"state": self.state, "security_event": asdict(security), "candidates": [], "traces": self.traces}
+                if self.security_logger is None:
+                    raise RuntimeError("prompt injection requires the authoritative security logger")
+                logged = self.security_logger.log_untrusted_instruction(
+                    security["payload"], context=security["context"], workflow_state=self.state,
+                )
+                self.security_events.append(logged)
+                self.quarantine_impact.append(event["event_id"])
         self.factory_data = data
         self._transition("DATA_LOADED", "INPUT_VALIDATED")
         factory = factory_from_dict(data)
@@ -121,4 +109,4 @@ class EventWorkflow:
             actions = ordered_actions([*actions, "publish_plan"])
         if recommended:
             self._transition("RECOMMENDED", "AWAITING_APPROVAL")
-        return {"state": self.state, "event_id": event.get("event_id") if event else None, "candidates": [asdict(p) for p in candidates], "recommended_profile": recommended.profile if recommended else None, "required_approvals": actions, "security_events": self.security_events, "traces": self.traces}
+        return {"state": self.state, "event_id": event.get("event_id") if event else None, "candidates": [asdict(p) for p in candidates], "recommended_profile": recommended.profile if recommended else None, "required_approvals": actions, "quarantine_impact": list(self.quarantine_impact), "security_events": self.security_events, "traces": self.traces}

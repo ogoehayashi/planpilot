@@ -1,0 +1,162 @@
+{
+  "evidence_version": 1,
+  "generated_at_utc": "2026-09-17T19:50:15+00:00",
+  "module": "security-audit-and-decision-traces",
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "repository_form": "restored archive without .git metadata",
+  "subject_sha256": {
+    "src/planpilot/audit.py": "f1bc2a6d1ea12707fe3dfe227b91b954022904c9747d360614d69b48a63dce0b",
+    "src/planpilot/persistence.py": "73da7a066a2b355066e706f7f4fbdbb39c5a7e9b24829ee56eacb5aded25e88b",
+    "src/planpilot/tools/middleware.py": "f35b3ad5f0a0911e0753828dbc8f372a868c654d8e63965bd76a263b698cc6de",
+    "src/planpilot/workflow/events.py": "819d6026e6eba7fa6be6a4e8d6944f8866c9d0f76d74bfc7876305646d54dd85",
+    "src/planpilot/factory_state.py": "2d5fe8b55ab13532dbeb0410e3fd668affe3507399f5a5491fdc64368882d929",
+    "src/planpilot/runtime_planning.py": "2c0c33e1054ecf58590c1a501ade32c2b1f3207c3e315c44079ce1fc73c6c87d",
+    "src/planpilot/independent_validator.py": "5fddb8320e133e86d7d2d84b46379d952e33c1b2f5a392104985c286d118b39e",
+    "src/planpilot/agent/chat.py": "ca470e7934aeb56777af424f6cce948221125009775ed02950d382b87a99f910",
+    "tools/api_server.py": "9f5aca98f770d0368977d04584e96f8177c881998af97805ea005e8a6e505a37",
+    "tools/web/index.html": "fd2d2384109a42ec2acb961c49de91943fc20a193de14459cf74211ff4695e83",
+    "tools/check_web_render.cjs": "602746cd5eb6eeed2963ecb874f98d36a29d3acb59b20d0755b9070cb6fe070a",
+    "tests/unit/test_security_audit.py": "8379f510d3a969823254ec047b09cc02c975bca3de92c13987acd80095116b35",
+    "tests/unit/test_event_workflow.py": "5de50b2813817f497351b37fc566a611cdf614f8815c2e37e5c86d254f433ba4",
+    "tests/negative_control/test_security_audit_negctl.py": "79ea885f171e50d141730a3f4f78d28251956561524275d79878fe7ae910e2f0",
+    ".kiro/specs/audit-hash-chain/design.md": "ccccd076a305088a8ceda9d8f4a321173626062816d8ed32e5597aac83689846",
+    ".kiro/specs/audit-hash-chain/tasks.md": "ece2f5398626373c2fcec7961037bb7f73aa9ca90ef049e67b02daf83ea6efe1",
+    ".kiro/specs/decision-traces/design.md": "2f2308b2dd2a8f54ae343b6da494565f2df520194d9f89d9ed724f73dfea89e0",
+    ".kiro/specs/decision-traces/tasks.md": "715660286feff7fd69f89c674a76d05c9b512d69205ac345005c52085690be1e",
+    "P0_6_SECURITY_AUDIT_REMEDIATION_REPORT_20260918.md": "b1c07b7fa3a0c77398115232ebd7c192d2866635f9b501ef4747390ef714261a",
+    "tools/write_evidence_security_audit.py": "c001536b27761d1d18ec1536d166078112560ffc6072edcb5e444ff420300e0a",
+    "tools/factcheck_security_audit_handoff.py": "33796ae7f14c0915317733f4b032947f41f80200a4d42d5e0b71a1ff934e1d67"
+  },
+  "results": {
+    "focused": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit/test_security_audit.py",
+        "tests/unit/test_event_workflow.py",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "13 passed, 2 warnings in 1.10s"
+    },
+    "negative_control": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/negative_control/test_security_audit_negctl.py",
+        "-q",
+        "-s"
+      ],
+      "exit_code": 0,
+      "summary": "1 passed in 12.00s"
+    },
+    "p0_5_negative_regression": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/negative_control/test_tool_error_middleware_negctl.py",
+        "-q",
+        "-s"
+      ],
+      "exit_code": 0,
+      "summary": "1 passed in 3.27s"
+    },
+    "unit": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "604 passed, 2 warnings in 8.05s"
+    },
+    "full": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "610 passed, 2 warnings in 68.10s (0:01:08)"
+    },
+    "closed_vocabularies": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/check_closed_vocabularies.py"
+      ],
+      "exit_code": 0,
+      "summary": "CLOSED VOCABULARY CHECK | PASS"
+    },
+    "closed_vocabularies_self_test": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/check_closed_vocabularies.py",
+        "--self-test"
+      ],
+      "exit_code": 0,
+      "summary": "SELF-TEST | PASS"
+    },
+    "workspace": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/validate_kiro_workspace.py"
+      ],
+      "exit_code": 0,
+      "summary": "WORKSPACE VALIDATION | ok=190 fail=0"
+    },
+    "web_render": {
+      "command": [
+        "/Users/linxiaoyue/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "tools/check_web_render.cjs"
+      ],
+      "exit_code": 0,
+      "summary": "PASS: Agent chat request, plan synchronization, version binding, real trace display, error recovery (DOM simulation)."
+    },
+    "compile": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "compileall",
+        "-q",
+        "src",
+        "tools/api_server.py"
+      ],
+      "exit_code": 0,
+      "summary": ""
+    },
+    "formal_eval_readiness": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/run_evals.py"
+      ],
+      "exit_code": 1,
+      "summary": "cases=30 passed=0 failed=0 blocked=30"
+    }
+  },
+  "negative_control": {
+    "caught": 9,
+    "escaped": 0,
+    "broken": 0,
+    "total": 9
+  },
+  "p0_5_negative_regression": {
+    "caught": 11,
+    "escaped": 0,
+    "broken": 0,
+    "total": 11
+  },
+  "formal_eval": {
+    "passed": 0,
+    "failed": 0,
+    "blocked": 30
+  },
+  "all_green": true,
+  "scope_statement": "P0-6 implementation evidence only. The remaining seven business handlers, publisher, Bedrock, deployment and formal EVAL-001..030 execution are outside scope."
+}

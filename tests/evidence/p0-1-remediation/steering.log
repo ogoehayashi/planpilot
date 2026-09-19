@@ -1,0 +1,21 @@
+source contract: planpilot_agent_contract_v1.8.json
+  sha256: b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639
+  schema_version: 1.8.0
+
+  wrote .kiro/steering/product.md (6887 bytes)
+  wrote .kiro/steering/tech.md (10674 bytes)
+  wrote .kiro/steering/structure.md (4784 bytes)
+  wrote .kiro/steering/contract-authority.md (9237 bytes)
+  wrote .kiro/steering/guardrails.md (9913 bytes)
+  wrote .kiro/steering/engine-rules.md (12453 bytes)
+  wrote .kiro/steering/observability.md (8070 bytes)
+  wrote AGENTS.md (2968 bytes)
+  wrote .kiro/hooks/verify-on-save.json (628 bytes)
+  wrote .kiro/hooks/guard-spec-tasks.json (847 bytes)
+  wrote .gitignore (298 bytes)
+  wrote .env.example (559 bytes)
+  wrote .kiro/specs/README.md (1978 bytes)
+
+contract sha256: b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639
+steering files: 7
+hooks: 2

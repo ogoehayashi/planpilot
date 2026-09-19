@@ -1,0 +1,210 @@
+=== A. every expected file exists and is non-trivial ===
+  OK   | product.md exists and >1.5 KB (6887 B)
+  OK   | tech.md exists and >1.5 KB (10674 B)
+  OK   | structure.md exists and >1.5 KB (4784 B)
+  OK   | contract-authority.md exists and >1.5 KB (9237 B)
+  OK   | guardrails.md exists and >1.5 KB (9913 B)
+  OK   | engine-rules.md exists and >1.5 KB (12453 B)
+  OK   | observability.md exists and >1.5 KB (8070 B)
+  OK   | AGENTS.md exists
+  OK   | specs/README.md exists
+
+=== B. front matter is valid YAML and inclusion mode is correct ===
+  OK   | contract-authority.md: has a front matter block at the very top
+  OK   | contract-authority.md: declares an inclusion mode
+  OK   | contract-authority.md: has a substantive body after front matter
+  OK   | engine-rules.md: has a front matter block at the very top
+  OK   | engine-rules.md: declares an inclusion mode
+  OK   | engine-rules.md: has a substantive body after front matter
+  OK   | guardrails.md: has a front matter block at the very top
+  OK   | guardrails.md: declares an inclusion mode
+  OK   | guardrails.md: has a substantive body after front matter
+  OK   | observability.md: has a front matter block at the very top
+  OK   | observability.md: declares an inclusion mode
+  OK   | observability.md: has a substantive body after front matter
+  OK   | product.md: has a front matter block at the very top
+  OK   | product.md: declares an inclusion mode
+  OK   | product.md: has a substantive body after front matter
+  OK   | structure.md: has a front matter block at the very top
+  OK   | structure.md: declares an inclusion mode
+  OK   | structure.md: has a substantive body after front matter
+  OK   | tech.md: has a front matter block at the very top
+  OK   | tech.md: declares an inclusion mode
+  OK   | tech.md: has a substantive body after front matter
+     inclusion modes: {'contract-authority.md': 'always', 'engine-rules.md': 'fileMatch', 'guardrails.md': 'always', 'observability.md': 'fileMatch', 'product.md': 'always', 'structure.md': 'always', 'tech.md': 'always'}
+  OK   | engine-rules.md is fileMatch (context-heavy, not always-on)
+  OK   | observability.md is fileMatch
+  OK   | exactly 5 always-on files (actual 5): ['contract-authority.md', 'guardrails.md', 'product.md', 'structure.md', 'tech.md']
+
+=== C. no unresolved f-string artefacts leaked into the prose ===
+  OK   | contract-authority.md: no unrendered subscript expression
+  OK   | contract-authority.md: no unrendered chr(10)
+  OK   | contract-authority.md: no unrendered len()
+  OK   | contract-authority.md: no unrendered str()
+  OK   | contract-authority.md: no unrendered json.dumps
+  OK   | contract-authority.md: no unrendered join
+  OK   | contract-authority.md: no bare None in prose
+  OK   | contract-authority.md: no NaN leaked
+  OK   | contract-authority.md: no empty braces
+  OK   | contract-authority.md: no python repr leaked
+  OK   | contract-authority.md: no OrderedDict repr leaked
+  OK   | engine-rules.md: no unrendered subscript expression
+  OK   | engine-rules.md: no unrendered chr(10)
+  OK   | engine-rules.md: no unrendered len()
+  OK   | engine-rules.md: no unrendered str()
+  OK   | engine-rules.md: no unrendered json.dumps
+  OK   | engine-rules.md: no unrendered join
+  OK   | engine-rules.md: no bare None in prose
+  OK   | engine-rules.md: no NaN leaked
+  OK   | engine-rules.md: no empty braces
+  OK   | engine-rules.md: no python repr leaked
+  OK   | engine-rules.md: no OrderedDict repr leaked
+  OK   | guardrails.md: no unrendered subscript expression
+  OK   | guardrails.md: no unrendered chr(10)
+  OK   | guardrails.md: no unrendered len()
+  OK   | guardrails.md: no unrendered str()
+  OK   | guardrails.md: no unrendered json.dumps
+  OK   | guardrails.md: no unrendered join
+  OK   | guardrails.md: no bare None in prose
+  OK   | guardrails.md: no NaN leaked
+  OK   | guardrails.md: no empty braces
+  OK   | guardrails.md: no python repr leaked
+  OK   | guardrails.md: no OrderedDict repr leaked
+  OK   | observability.md: no unrendered subscript expression
+  OK   | observability.md: no unrendered chr(10)
+  OK   | observability.md: no unrendered len()
+  OK   | observability.md: no unrendered str()
+  OK   | observability.md: no unrendered json.dumps
+  OK   | observability.md: no unrendered join
+  OK   | observability.md: no bare None in prose
+  OK   | observability.md: no NaN leaked
+  OK   | observability.md: no empty braces
+  OK   | observability.md: no python repr leaked
+  OK   | observability.md: no OrderedDict repr leaked
+  OK   | product.md: no unrendered subscript expression
+  OK   | product.md: no unrendered chr(10)
+  OK   | product.md: no unrendered len()
+  OK   | product.md: no unrendered str()
+  OK   | product.md: no unrendered json.dumps
+  OK   | product.md: no unrendered join
+  OK   | product.md: no bare None in prose
+  OK   | product.md: no NaN leaked
+  OK   | product.md: no empty braces
+  OK   | product.md: no python repr leaked
+  OK   | product.md: no OrderedDict repr leaked
+  OK   | structure.md: no unrendered subscript expression
+  OK   | structure.md: no unrendered chr(10)
+  OK   | structure.md: no unrendered len()
+  OK   | structure.md: no unrendered str()
+  OK   | structure.md: no unrendered json.dumps
+  OK   | structure.md: no unrendered join
+  OK   | structure.md: no bare None in prose
+  OK   | structure.md: no NaN leaked
+  OK   | structure.md: no empty braces
+  OK   | structure.md: no python repr leaked
+  OK   | structure.md: no OrderedDict repr leaked
+  OK   | tech.md: no unrendered subscript expression
+  OK   | tech.md: no unrendered chr(10)
+  OK   | tech.md: no unrendered len()
+  OK   | tech.md: no unrendered str()
+  OK   | tech.md: no unrendered json.dumps
+  OK   | tech.md: no unrendered join
+  OK   | tech.md: no bare None in prose
+  OK   | tech.md: no NaN leaked
+  OK   | tech.md: no empty braces
+  OK   | tech.md: no python repr leaked
+  OK   | tech.md: no OrderedDict repr leaked
+  OK   | AGENTS.md: no unrendered subscript expression
+  OK   | AGENTS.md: no unrendered chr(10)
+  OK   | AGENTS.md: no unrendered len()
+  OK   | AGENTS.md: no unrendered str()
+  OK   | AGENTS.md: no unrendered json.dumps
+  OK   | AGENTS.md: no unrendered join
+  OK   | AGENTS.md: no bare None in prose
+  OK   | AGENTS.md: no NaN leaked
+  OK   | AGENTS.md: no empty braces
+  OK   | AGENTS.md: no python repr leaked
+  OK   | AGENTS.md: no OrderedDict repr leaked
+  OK   | README.md: no unrendered subscript expression
+  OK   | README.md: no unrendered chr(10)
+  OK   | README.md: no unrendered len()
+  OK   | README.md: no unrendered str()
+  OK   | README.md: no unrendered json.dumps
+  OK   | README.md: no unrendered join
+  OK   | README.md: no bare None in prose
+  OK   | README.md: no NaN leaked
+  OK   | README.md: no empty braces
+  OK   | README.md: no python repr leaked
+  OK   | README.md: no OrderedDict repr leaked
+
+=== D. escaped braces rendered correctly ===
+  OK   | the event_id regex rendered as ^EVT-\d{3}$ (not ^EVT-\d{{3}}$)
+  OK   | no doubled braces survived
+
+=== E. key numbers in the generated text match the contract ===
+  OK   | all 30 EVAL cases referenced
+  OK   | last hard constraint referenced
+  OK   | the V1.7 final error code referenced
+  OK   | the newest validation code referenced
+  OK   | model pinned in generated text
+  OK   | host pinned in generated text
+  OK   | inference service pinned
+  OK   | solver pin present
+  OK   | jsonschema pin present
+  OK   | official track title present
+  OK   | the mis-transcription 'Product Planning' did NOT leak into steering
+  OK   | shortlisting deadline present
+  OK   | finale date present
+  OK   | team code placeholder present
+  OK   | trace record referenced
+  OK   | spec workflow guidance present
+
+=== F. closed vocabularies are fully enumerated for the agent ===
+  OK   | all 13 hard constraints enumerated
+  OK   | all 11 workflow states enumerated
+  OK   | all 18 error codes enumerated
+  OK   | all 3 plan profiles enumerated
+  OK   | all 12 KPIs enumerated
+  OK   | all 11 decision reason codes enumerated
+  OK   | all 23 non-HC validation codes enumerated
+  OK   | all 7 events enumerated
+  OK   | all 17 dataset sheets enumerated
+
+=== G. hooks are valid JSON with real trigger names ===
+  OK   | guard-spec-tasks.json parses as JSON
+  OK   | guard-spec-tasks.json declares version v1
+  OK   | guard-spec-tasks.json: trigger 'PreTaskExec' is a real Kiro trigger
+  OK   | guard-spec-tasks.json: action type is command or prompt
+  OK   | guard-spec-tasks.json: hook is named
+  OK   | verify-on-save.json parses as JSON
+  OK   | verify-on-save.json declares version v1
+  OK   | verify-on-save.json: trigger 'PostFileSave' is a real Kiro trigger
+  OK   | verify-on-save.json: action type is command or prompt
+  OK   | verify-on-save.json: hook is named
+  OK   | verify-on-save.json: command is non-empty
+  OK   | verify-on-save.json: trigger 'PostFileSave' is a real Kiro trigger
+  OK   | verify-on-save.json: action type is command or prompt
+  OK   | verify-on-save.json: hook is named
+  OK   | verify-on-save.json: command is non-empty
+
+=== H. no credentials or secrets present ===
+  OK   | contract-authority.md contains no secret material
+  OK   | engine-rules.md contains no secret material
+  OK   | guardrails.md contains no secret material
+  OK   | observability.md contains no secret material
+  OK   | product.md contains no secret material
+  OK   | structure.md contains no secret material
+  OK   | tech.md contains no secret material
+  OK   | AGENTS.md contains no secret material
+  OK   | README.md contains no secret material
+  OK   | .env.example contains no secret material
+  OK   | .gitignore contains no secret material
+  OK   | .gitignore excludes .env
+  OK   | .env.example has an EMPTY key placeholder
+  OK   | .env.example key value is blank, not a fabricated credential
+  OK   | .env.example defaults to forbidding LLM network in dev
+
+=== I. generation is idempotent (re-run produces identical bytes) ===
+  OK   | re-running the generator changes nothing (changed: [])
+
+WORKSPACE VALIDATION | ok=190 fail=0

@@ -106,11 +106,6 @@ VOCABULARIES: dict[str, set[str]] = {
     "approval_reason_code": set(DEFS["approval_reason_code"]["enum"]),
     "approval_decision_reason_code": set(DEFS["approval_decision_reason_code"]["enum"]),
     "approval_decision": {r["decision"] for r in CONTRACT["approval_rules"]},
-    "release_readiness": {
-        value
-        for value in CONTRACT["release_readiness"].values()
-        if isinstance(value, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", value)
-    },
     # Security controls carry enum-like string values that are just as closed as
     # the $defs enums. BLOCK_AND_LOG lives here, not in approval_rules.
     "security_action": {
@@ -121,6 +116,15 @@ VOCABULARIES: dict[str, set[str]] = {
     "participation_placeholder": {
         v for v in CONTRACT["hackathon_participation"].values()
         if isinstance(v, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", v)
+    },
+    "factory_validation_status": set(
+        next(t for t in CONTRACT["tools"] if t["name"] == "validate_factory_state")
+        ["output_schema"]["properties"]["status"]["enum"]
+    ),
+    "calendar_resource_type": {"MACHINE_GROUP", "WORKER_GROUP"},
+    "workbook_event_type": {
+        "URGENT_ORDER", "MACHINE_BREAKDOWN", "MATERIAL_DELAY", "WORKER_ABSENCE",
+        "PROMPT_INJECTION", "QUANTITY_REVISION", "DUE_DATE_PULL_IN",
     },
 }
 

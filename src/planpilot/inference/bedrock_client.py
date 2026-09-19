@@ -14,6 +14,10 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from planpilot.persistence import now
 
 
+DEFAULT_BEDROCK_REGION = 'ap-southeast-1'
+DEFAULT_BEDROCK_MODEL = 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'
+
+
 class InferenceError(RuntimeError):
     """Safe, user-visible inference error without credentials or provider body."""
 
@@ -67,12 +71,16 @@ def provider_error_detail(error, token):
 class BedrockClient:
     def __init__(self, db, *, region=None, model=None, token=None, transport=None):
         self.db = db
-        self.region = region or os.environ.get('PLANPILOT_BEDROCK_REGION', 'ap-southeast-1')
-        self.model = model or os.environ.get('PLANPILOT_BEDROCK_MODEL', 'amazon.nova-pro-v1:0')
+        self.region = region or os.environ.get('PLANPILOT_BEDROCK_REGION', DEFAULT_BEDROCK_REGION)
+        self.model = model or os.environ.get('PLANPILOT_BEDROCK_MODEL', DEFAULT_BEDROCK_MODEL)
         if not re.fullmatch(r'[a-z]{2}(?:-[a-z]+)+-\d', self.region):
             raise ValueError('Invalid Bedrock region')
         if not self.model or len(self.model) > 2048 or any(c.isspace() for c in self.model):
             raise ValueError('Invalid Bedrock model identifier')
+        if self.model != DEFAULT_BEDROCK_MODEL:
+            raise ValueError(
+                'Bedrock model must match the contract-pinned Claude Sonnet 4.5 inference profile'
+            )
         self._token = token
         self.transport = transport or build_opener(NoRedirect()).open
         self.daily_limit = int(os.environ.get('PLANPILOT_BEDROCK_DAILY_TOKENS', '100000'))

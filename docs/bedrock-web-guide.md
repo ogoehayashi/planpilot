@@ -3,16 +3,16 @@
 ## 已配置的默认值
 
 - 区域：`ap-southeast-1`（新加坡）。
-- 模型：Amazon Nova Pro，`amazon.nova-pro-v1:0`。
+- 模型：Bedrock Claude Sonnet 4.5，全局推理配置
+  `global.anthropic.claude-sonnet-4-5-20250929-v1:0`。
 - 密钥文件：用 `-BedrockKeyFile` 指定，只包含一行 Bedrock API Key。
   原开发机可指定 `D:\hackrathon\claudeapi.txt`；队友应使用自己的文件路径。
 - 推理接口：Bedrock Runtime Converse，后端通过 HTTPS Bearer 认证调用。
 
-用户在 Claude 的 API 和控制台试验场均遇到 Anthropic 服务地区限制后，
-明确要求更换模型，当前默认采用 Amazon Nova Pro。原始比赛合同仍指定
-Claude Sonnet 4.5；此运行配置偏离已获用户授权，但比赛提交前须向主办方
-确认是否允许。Nova 的权限及区域可用性尚未实测；若 AWS 要求推理配置
-文件，使用控制台给出的实际 ID，不自动猜测前缀或切换区域。
+运行配置、启动脚本和交付 manifest 统一使用比赛合同指定的 Claude Sonnet 4.5。
+AWS 官方模型卡列明该全局推理配置支持以 `ap-southeast-1` 为源区域。程序不会
+自动降级到其他模型、猜测其他前缀或切换源区域；团队账号权限及真实调用仍须在
+部署环境验证。
 
 没有将密钥复制进代码、HTML、日志或配置示例。网页访问 Token 与 AWS
 API Key 是两种凭证，不要把 AWS Key 粘贴进网页 Token 输入框。
@@ -49,7 +49,9 @@ AWS Key。脚本生成的网页 Token 会复制到剪贴板。
    generate_candidates、validate_candidates、compare_candidates、save_plan、
    model_explanation。它们是实际紧凑适配器步骤，不是 V1.8 工具调用协议标识。
 5. 输入“解释当前计划的缺料、延期和未排工序”。这次只解释现有计划，不重复生成。
-6. 审批和发布仍须通过对应的人工作业接口。聊天不能代替批准，也不自动发布。
+6. 在网页“审批队列”发起审批，逐项由有权限的人点击批准或拒绝；全部批准后由
+   Planner 点击“发布选中方案”。经理审批需在独立的 Manager Token 输入框填写
+   同一服务密钥签发的经理 Token。聊天不能代替批准，也不自动发布。
 
 当前消息请求不携带历史对话，使用的是当前计划版本。修改库存、班次、交期、
 自然语言应用事件或调整目标权重还不支持；应先修改源数据再导入生成。
@@ -64,12 +66,12 @@ AWS Key。脚本生成的网页 Token 会复制到剪贴板。
 | 未配置或密钥文件无法读取 | 检查路径，使用 `-Bedrock` 启动 |
 | 网页 HTTP 403 | 检查网页 Token 是否与本次启动的本地数字密钥匹配 |
 | Bedrock 401/403 | 检查 AWS Key 有效期、模型权限及首次使用要求 |
-| Bedrock 400/404 | 确认模型在所选区域的调用方式；如果需要推理配置文件，填写实际 ID |
+| Bedrock 400/404 | 核对源区域及合同固定的 Claude Sonnet 4.5 全局推理配置 ID |
 | Bedrock 429 | 等待后手动重试；程序没有自动重试 |
 | 网络超时 | 检查后端到区域 Bedrock Runtime 的 HTTPS 连通性 |
 | 已生成计划但解释失败 | 计划已保存并返回网页，直接查看确定性方案数据或重新请求解释 |
 
-模型或推理配置文件可通过启动参数明确覆盖，不自动猜测或切换区域：
+启动参数可显式重复指定合同固定的推理配置，脚本不会接受其他模型：
 
 ```powershell
 Get-Help .\tools\start_local.ps1 -Full
@@ -95,5 +97,5 @@ Get-Help .\tools\start_local.ps1 -Full
 ## 验证边界
 
 本地测试使用模拟 Bedrock 响应、真实求解器和本地 HTTP 服务，不消耗 AWS
-额度。AWS Key 权限、新加坡模型可用性和真实回复质量，需要运行上面的部署/
+额度。AWS Key 权限、全局推理配置访问和真实回复质量，需要运行上面的部署/
 演示流程验证。接口已接好不等于真实 AWS 验证通过。

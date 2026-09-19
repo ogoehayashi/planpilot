@@ -1,34 +1,64 @@
 {
   "planning_start": "2026-09-14T00:00:00+08:00",
   "horizon": 7200,
+  "products": [
+    {
+      "product_id": "BRACKET-A",
+      "max_lot_size": 50,
+      "requires_material": true,
+      "bom": [
+        {
+          "material_id": "AL-6061",
+          "material_uom": "EA",
+          "quantity_per_unit": 1
+        }
+      ]
+    },
+    {
+      "product_id": "SHAFT-B",
+      "max_lot_size": 50,
+      "requires_material": true,
+      "bom": [
+        {
+          "material_id": "SS-304",
+          "material_uom": "EA",
+          "quantity_per_unit": 1
+        }
+      ]
+    }
+  ],
   "orders": [
     {
       "order_id": "ORD-1001",
       "product_id": "BRACKET-A",
       "quantity": 60,
       "due_date": "2026-09-16",
+      "due_at": 2880,
       "priority": 2,
       "operations": [
         {
           "operation_no": 1,
+          "operation_type": "PRODUCTION",
           "machine_id": "CNC-01",
           "worker_id": "W-01",
           "duration": 120,
-          "material_id": "AL-6061",
-          "material_qty": 60
+          "required_skill": "CNC"
         },
         {
           "operation_no": 2,
+          "operation_type": "PRODUCTION",
           "machine_id": "MILL-01",
           "worker_id": "W-02",
-          "duration": 90
+          "duration": 90,
+          "required_skill": "MILL"
         },
         {
           "operation_no": 3,
+          "operation_type": "INSPECTION",
           "machine_id": "QC-01",
           "worker_id": "W-03",
           "duration": 20,
-          "operation_type": "INSPECTION"
+          "required_skill": "QC"
         }
       ]
     },
@@ -37,28 +67,32 @@
       "product_id": "SHAFT-B",
       "quantity": 40,
       "due_date": "2026-09-17",
+      "due_at": 4320,
       "priority": 1,
       "operations": [
         {
           "operation_no": 1,
+          "operation_type": "PRODUCTION",
           "machine_id": "CNC-01",
           "worker_id": "W-01",
           "duration": 150,
-          "material_id": "SS-304",
-          "material_qty": 40
+          "required_skill": "CNC"
         },
         {
           "operation_no": 2,
+          "operation_type": "PRODUCTION",
           "machine_id": "GRIND-01",
           "worker_id": "W-03",
-          "duration": 60
+          "duration": 60,
+          "required_skill": "GRIND"
         },
         {
           "operation_no": 3,
+          "operation_type": "INSPECTION",
           "machine_id": "QC-01",
           "worker_id": "W-03",
           "duration": 20,
-          "operation_type": "INSPECTION"
+          "required_skill": "QC"
         }
       ]
     },
@@ -67,138 +101,556 @@
       "product_id": "BRACKET-A",
       "quantity": 20,
       "due_date": "2026-09-15",
+      "due_at": 1440,
       "priority": 5,
       "operations": [
         {
           "operation_no": 1,
+          "operation_type": "PRODUCTION",
           "machine_id": "CNC-01",
           "worker_id": "W-01",
-          "duration": 45,
-          "material_id": "AL-6061",
-          "material_qty": 20
+          "duration": 120,
+          "required_skill": "CNC"
         },
         {
           "operation_no": 2,
+          "operation_type": "PRODUCTION",
           "machine_id": "MILL-01",
           "worker_id": "W-02",
-          "duration": 30
+          "duration": 90,
+          "required_skill": "MILL"
         },
         {
           "operation_no": 3,
+          "operation_type": "INSPECTION",
           "machine_id": "QC-01",
           "worker_id": "W-03",
-          "duration": 15,
-          "operation_type": "INSPECTION"
+          "duration": 20,
+          "required_skill": "QC"
         }
       ]
     }
   ],
   "inventory": {
     "AL-6061": {
+      "material_uom": "EA",
       "batches": [
         {
           "batch_id": "AL-ONHAND-001",
           "quantity": 80,
-          "available_at": 0
+          "available_at": 0,
+          "source_type": "ON_HAND"
         },
         {
           "batch_id": "AL-INBOUND-001",
           "quantity": 40,
-          "available_at": 1440
+          "available_at": 1440,
+          "source_type": "CONFIRMED_INBOUND"
         }
       ]
     },
     "SS-304": {
+      "material_uom": "EA",
       "batches": [
         {
           "batch_id": "SS-ONHAND-001",
           "quantity": 40,
-          "available_at": 0
+          "available_at": 0,
+          "source_type": "ON_HAND"
         }
       ]
     }
   },
   "machines": [
     {
-      "machine_id": "CNC-01",
+      "capacity_minutes": 2400,
       "machine_group_id": "CNC",
-      "capacity_minutes": 2400
+      "machine_id": "CNC-01"
     },
     {
-      "machine_id": "MILL-01",
+      "capacity_minutes": 2400,
       "machine_group_id": "MILL",
-      "capacity_minutes": 2400
+      "machine_id": "MILL-01"
     },
     {
-      "machine_id": "GRIND-01",
+      "capacity_minutes": 2400,
       "machine_group_id": "GRIND",
-      "capacity_minutes": 2400
+      "machine_id": "GRIND-01"
     },
     {
-      "machine_id": "QC-01",
+      "capacity_minutes": 2400,
       "machine_group_id": "QC",
-      "capacity_minutes": 2400
+      "machine_id": "QC-01"
     }
   ],
   "workers": [
     {
-      "worker_id": "W-01",
+      "available": true,
       "name": "Ari",
-      "available": true
+      "worker_id": "W-01",
+      "skills": [
+        {
+          "skill_id": "CNC",
+          "proficiency_level": 5,
+          "is_primary": true
+        }
+      ]
     },
     {
-      "worker_id": "W-02",
+      "available": true,
       "name": "Bao",
-      "available": true
+      "worker_id": "W-02",
+      "skills": [
+        {
+          "skill_id": "MILL",
+          "proficiency_level": 5,
+          "is_primary": true
+        }
+      ]
     },
     {
-      "worker_id": "W-03",
+      "available": true,
       "name": "Chen",
-      "available": true
+      "worker_id": "W-03",
+      "skills": [
+        {
+          "skill_id": "GRIND",
+          "proficiency_level": 5,
+          "is_primary": true
+        },
+        {
+          "skill_id": "QC",
+          "proficiency_level": 3,
+          "is_primary": false
+        }
+      ]
     }
   ],
   "shifts": [
     {
-      "machine_id": "CNC-01",
+      "calendar_window_id": "CAL-M-CNC-01-0-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
       "start": 0,
-      "end": 480
+      "end": 480,
+      "machine_id": "CNC-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-CNC-01-1-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 1440,
+      "end": 1920,
+      "machine_id": "CNC-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-CNC-01-2-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 2880,
+      "end": 3360,
+      "machine_id": "CNC-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-CNC-01-3-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 4320,
+      "end": 4800,
+      "machine_id": "CNC-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-CNC-01-4-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 5760,
+      "end": 6240,
+      "machine_id": "CNC-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-MILL-01-0-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 0,
+      "end": 480,
+      "machine_id": "MILL-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-MILL-01-1-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 1440,
+      "end": 1920,
+      "machine_id": "MILL-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-MILL-01-2-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 2880,
+      "end": 3360,
+      "machine_id": "MILL-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-MILL-01-3-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 4320,
+      "end": 4800,
+      "machine_id": "MILL-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-MILL-01-4-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 5760,
+      "end": 6240,
+      "machine_id": "MILL-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-GRIND-01-0-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 0,
+      "end": 480,
+      "machine_id": "GRIND-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-GRIND-01-1-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 1440,
+      "end": 1920,
+      "machine_id": "GRIND-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-GRIND-01-2-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 2880,
+      "end": 3360,
+      "machine_id": "GRIND-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-GRIND-01-3-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 4320,
+      "end": 4800,
+      "machine_id": "GRIND-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-GRIND-01-4-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 5760,
+      "end": 6240,
+      "machine_id": "GRIND-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-QC-01-0-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 0,
+      "end": 480,
+      "machine_id": "QC-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-QC-01-1-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 1440,
+      "end": 1920,
+      "machine_id": "QC-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-QC-01-2-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 2880,
+      "end": 3360,
+      "machine_id": "QC-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-QC-01-3-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 4320,
+      "end": 4800,
+      "machine_id": "QC-01"
+    },
+    {
+      "calendar_window_id": "CAL-M-QC-01-4-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 5760,
+      "end": 6240,
+      "machine_id": "QC-01"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-01-0-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 0,
+      "end": 480,
+      "worker_id": "W-01"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-01-1-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 1440,
+      "end": 1920,
+      "worker_id": "W-01"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-01-2-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 2880,
+      "end": 3360,
+      "worker_id": "W-01"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-01-3-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 4320,
+      "end": 4800,
+      "worker_id": "W-01"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-01-4-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 5760,
+      "end": 6240,
+      "worker_id": "W-01"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-02-0-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 0,
+      "end": 480,
+      "worker_id": "W-02"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-02-1-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 1440,
+      "end": 1920,
+      "worker_id": "W-02"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-02-2-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 2880,
+      "end": 3360,
+      "worker_id": "W-02"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-02-3-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 4320,
+      "end": 4800,
+      "worker_id": "W-02"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-02-4-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 5760,
+      "end": 6240,
+      "worker_id": "W-02"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-03-0-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 0,
+      "end": 480,
+      "worker_id": "W-03"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-03-1-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 1440,
+      "end": 1920,
+      "worker_id": "W-03"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-03-2-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 2880,
+      "end": 3360,
+      "worker_id": "W-03"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-03-3-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 4320,
+      "end": 4800,
+      "worker_id": "W-03"
+    },
+    {
+      "calendar_window_id": "CAL-W-W-03-4-REG",
+      "window_type": "REGULAR",
+      "overtime_allowed": false,
+      "start": 5760,
+      "end": 6240,
+      "worker_id": "W-03"
+    }
+  ],
+  "maintenance": [],
+  "changeovers": [
+    {
+      "machine_id": "CNC-01",
+      "from_product_id": "BRACKET-A",
+      "to_product_id": "BRACKET-A",
+      "minutes": 0
+    },
+    {
+      "machine_id": "CNC-01",
+      "from_product_id": "BRACKET-A",
+      "to_product_id": "SHAFT-B",
+      "minutes": 15
+    },
+    {
+      "machine_id": "CNC-01",
+      "from_product_id": "SHAFT-B",
+      "to_product_id": "BRACKET-A",
+      "minutes": 15
+    },
+    {
+      "machine_id": "CNC-01",
+      "from_product_id": "SHAFT-B",
+      "to_product_id": "SHAFT-B",
+      "minutes": 0
     },
     {
       "machine_id": "MILL-01",
-      "start": 0,
-      "end": 480
+      "from_product_id": "BRACKET-A",
+      "to_product_id": "BRACKET-A",
+      "minutes": 0
+    },
+    {
+      "machine_id": "MILL-01",
+      "from_product_id": "BRACKET-A",
+      "to_product_id": "SHAFT-B",
+      "minutes": 15
+    },
+    {
+      "machine_id": "MILL-01",
+      "from_product_id": "SHAFT-B",
+      "to_product_id": "BRACKET-A",
+      "minutes": 15
+    },
+    {
+      "machine_id": "MILL-01",
+      "from_product_id": "SHAFT-B",
+      "to_product_id": "SHAFT-B",
+      "minutes": 0
     },
     {
       "machine_id": "GRIND-01",
-      "start": 0,
-      "end": 480
+      "from_product_id": "BRACKET-A",
+      "to_product_id": "BRACKET-A",
+      "minutes": 0
+    },
+    {
+      "machine_id": "GRIND-01",
+      "from_product_id": "BRACKET-A",
+      "to_product_id": "SHAFT-B",
+      "minutes": 15
+    },
+    {
+      "machine_id": "GRIND-01",
+      "from_product_id": "SHAFT-B",
+      "to_product_id": "BRACKET-A",
+      "minutes": 15
+    },
+    {
+      "machine_id": "GRIND-01",
+      "from_product_id": "SHAFT-B",
+      "to_product_id": "SHAFT-B",
+      "minutes": 0
     },
     {
       "machine_id": "QC-01",
-      "start": 0,
-      "end": 480
+      "from_product_id": "BRACKET-A",
+      "to_product_id": "BRACKET-A",
+      "minutes": 0
     },
     {
-      "worker_id": "W-01",
-      "start": 0,
-      "end": 480
+      "machine_id": "QC-01",
+      "from_product_id": "BRACKET-A",
+      "to_product_id": "SHAFT-B",
+      "minutes": 15
     },
     {
-      "worker_id": "W-02",
-      "start": 0,
-      "end": 480
+      "machine_id": "QC-01",
+      "from_product_id": "SHAFT-B",
+      "to_product_id": "BRACKET-A",
+      "minutes": 15
     },
     {
-      "worker_id": "W-03",
-      "start": 0,
-      "end": 480
+      "machine_id": "QC-01",
+      "from_product_id": "SHAFT-B",
+      "to_product_id": "SHAFT-B",
+      "minutes": 0
     }
   ],
-  "maintenance": [
+  "assumptions": {
+    "overtime_cap_hours": 16,
+    "changeover_reference_min": 15,
+    "stability_drift_min": 30,
+    "allow_optional_lot_splitting": false,
+    "max_overtime_min_per_worker_per_day": 240
+  },
+  "events": [
     {
+      "event_id": "EVT-001",
+      "event_type": "URGENT_ORDER",
+      "order_id": "ORD-URGENT"
+    },
+    {
+      "end": 360,
+      "event_id": "EVT-002",
+      "event_type": "MACHINE_BREAKDOWN",
       "machine_id": "CNC-01",
-      "start": 300,
-      "end": 360
+      "start": 300
+    },
+    {
+      "available_at": 1440,
+      "event_id": "EVT-003",
+      "event_type": "MATERIAL_DELAY",
+      "material_id": "AL-6061"
+    },
+    {
+      "end": 240,
+      "event_id": "EVT-004",
+      "event_type": "WORKER_ABSENCE",
+      "start": 120,
+      "worker_id": "W-02"
+    },
+    {
+      "event_id": "EVT-006",
+      "event_type": "QUANTITY_REVISION",
+      "order_id": "ORD-1001",
+      "quantity": 80
+    },
+    {
+      "due_date": "2026-09-15",
+      "event_id": "EVT-007",
+      "event_type": "DUE_DATE_PULL_IN",
+      "order_id": "ORD-1002"
     }
   ]
 }

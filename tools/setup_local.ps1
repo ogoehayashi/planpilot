@@ -32,7 +32,7 @@ if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
 }
 & $venvPython -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 11) and sys.maxsize > 2**32 else 1)"
 if ($LASTEXITCODE -ne 0) { throw 'Existing virtual environment is not Python 3.11 (64-bit).' }
-$installArgs = @('-X', 'utf8', '-m', 'pip', 'install', '-r', 'requirements.txt', '-r', 'requirements-import.txt')
+$installArgs = @('-m', 'pip', 'install', '-r', 'requirements.txt', '-r', 'requirements-import.txt')
 if ($Dev) { $installArgs += @('-r', 'requirements-dev.txt') }
 & $venvPython @installArgs
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Check network access and pip output.' }

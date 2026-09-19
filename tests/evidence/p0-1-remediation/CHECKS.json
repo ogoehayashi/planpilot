@@ -1,0 +1,61 @@
+[
+  {
+    "name": "formal-gate",
+    "command": [
+      "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+      "tools/run_evals.py"
+    ],
+    "cwd": "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/outputs/PlanPilot-Mac-Migration-20260916-v2/PlanPilot-Team-20260915/PlanPilot",
+    "started_at": "2026-09-16T14:15:20.328181+00:00",
+    "finished_at": "2026-09-16T14:15:20.360317+00:00",
+    "exit_code": 1,
+    "expected_exit_code": 1,
+    "log": "formal-gate.log",
+    "log_sha256": "1589e6e8ce750f8368e14146b1df403acece1ec393a86423fc7d675e487cd467"
+  },
+  {
+    "name": "smoke",
+    "command": [
+      "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+      "tools/run_smoke_harness.py"
+    ],
+    "cwd": "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/outputs/PlanPilot-Mac-Migration-20260916-v2/PlanPilot-Team-20260915/PlanPilot",
+    "started_at": "2026-09-16T14:15:20.360361+00:00",
+    "finished_at": "2026-09-16T14:15:28.543924+00:00",
+    "exit_code": 0,
+    "expected_exit_code": 0,
+    "log": "smoke.log",
+    "log_sha256": "d8879917ba02ac7ae3cd1d202a1cd7b1afd2aa32a89555e8e63bf58f15858f56"
+  },
+  {
+    "name": "unit",
+    "command": [
+      "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+      "-m",
+      "pytest",
+      "tests/unit",
+      "-q"
+    ],
+    "cwd": "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/outputs/PlanPilot-Mac-Migration-20260916-v2/PlanPilot-Team-20260915/PlanPilot",
+    "started_at": "2026-09-16T14:15:28.543957+00:00",
+    "finished_at": "2026-09-16T14:15:33.341373+00:00",
+    "exit_code": 0,
+    "expected_exit_code": 0,
+    "log": "unit.log",
+    "log_sha256": "3d0b6523b247f775750eced39d28cc8f727a0630580a4983a20d99626fc43878"
+  },
+  {
+    "name": "vocabulary",
+    "command": [
+      "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+      "tools/check_closed_vocabularies.py"
+    ],
+    "cwd": "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/outputs/PlanPilot-Mac-Migration-20260916-v2/PlanPilot-Team-20260915/PlanPilot",
+    "started_at": "2026-09-16T14:15:33.341408+00:00",
+    "finished_at": "2026-09-16T14:15:33.972883+00:00",
+    "exit_code": 0,
+    "expected_exit_code": 0,
+    "log": "vocabulary.log",
+    "log_sha256": "fb18a827631f677f19eb0ecad408c685764939fd88d610716ba435a2fd2c6707"
+  }
+]

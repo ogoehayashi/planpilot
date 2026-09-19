@@ -1,0 +1,119 @@
+{
+  "evidence_version": 1,
+  "generated_at_utc": "2026-09-17T19:51:37+00:00",
+  "module": "tool-error-middleware",
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "repository_form": "restored archive without .git metadata",
+  "subject_sha256": {
+    "src/planpilot/tools/__init__.py": "b7843dbad115754252c91cd63d596c2cb572c4dfb757aeca86f14ffcd3ad0e38",
+    "src/planpilot/tools/correlation.py": "ab79de6c19563f6c843ef12287e52a9faa25ac882d65ace12caa72598b23d0ad",
+    "src/planpilot/tools/errors.py": "f51c506fb748b93425f3dfbb914f6bdae20c21d78c75b59b1987c4300c5d1974",
+    "src/planpilot/tools/middleware.py": "f35b3ad5f0a0911e0753828dbc8f372a868c654d8e63965bd76a263b698cc6de",
+    "src/planpilot/tools/registry.py": "969d7b6461f1172a25bcaf8e50d41968f66e1cea2b67639ccf00cf9afb99cb3a",
+    "src/planpilot/tools/serialization.py": "1db414022198fc61858d73c25a8257657e2318788100d31cfd34d5a5086575da",
+    "src/planpilot/tools/transaction.py": "1043300f03a828443c4b638931b579206895ec4b1ff0d1e18b8e65241b3752fc",
+    "src/planpilot/engine.py": "ae7d4d7104201e3728568c4d1f32870a4610387ead13f644f2a395bcab51439e",
+    "tests/unit/test_tool_error_middleware.py": "b5a5545e03886fa8130d2ce83cfc18913a15856d19ae1a8b134cf788f10825a7",
+    "tests/negative_control/test_tool_error_middleware_negctl.py": "1b4b888045fbe05486f10c0282c383fb4c33fa358a25b197cb5cd47b5a6d387a",
+    ".kiro/specs/tool-error-middleware/tasks.md": "edb8e493d9e8643b58c6e05f3837710aea09ee55779daf2407b1536c3552ac8b",
+    "P0_5_TOOL_ERROR_MIDDLEWARE_REPORT_20260918.md": "44a43982be34e9f08d394d182b7d5f490a08db90ee2417474fd9315f14368bfb",
+    "tools/write_evidence_tool_error_middleware.py": "19edd8e00739678f6f31dab08f5ceba9747f7ac5d78f6277e31c42e8c7e6373f",
+    "tools/factcheck_tool_error_handoff.py": "83896689ddfda26b4c8ceb817a1af969d52c6756d9750279539abd73a360683e"
+  },
+  "results": {
+    "focused": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit/test_tool_error_middleware.py",
+        "tests/unit/test_engine_utilities.py",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "35 passed in 0.05s"
+    },
+    "negative_control": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/negative_control/test_tool_error_middleware_negctl.py",
+        "-q",
+        "-s"
+      ],
+      "exit_code": 0,
+      "summary": "1 passed in 2.37s"
+    },
+    "unit": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "604 passed, 2 warnings in 6.72s"
+    },
+    "full": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q"
+      ],
+      "exit_code": 0,
+      "summary": "610 passed, 2 warnings in 59.84s"
+    },
+    "closed_vocabularies": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/check_closed_vocabularies.py"
+      ],
+      "exit_code": 0,
+      "summary": "CLOSED VOCABULARY CHECK | PASS"
+    },
+    "closed_vocabularies_self_test": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/check_closed_vocabularies.py",
+        "--self-test"
+      ],
+      "exit_code": 0,
+      "summary": "SELF-TEST | PASS"
+    },
+    "workspace": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "tools/validate_kiro_workspace.py"
+      ],
+      "exit_code": 0,
+      "summary": "WORKSPACE VALIDATION | ok=190 fail=0"
+    },
+    "compile": {
+      "command": [
+        "/Users/linxiaoyue/Documents/Codex/2026-09-16/qin/work/planpilot-test-env/bin/python",
+        "-m",
+        "compileall",
+        "-q",
+        "src/planpilot/tools"
+      ],
+      "exit_code": 0,
+      "summary": ""
+    }
+  },
+  "negative_control": {
+    "caught": 11,
+    "escaped": 0,
+    "broken": 0,
+    "total": 11
+  },
+  "all_green": true,
+  "reference_failure_wire": {
+    "utf8_hex": "7b22636f7272656c6174696f6e5f6964223a2231323334353637382d313233342d343233342d393233342d313233343536373839616263222c2264657461696c73223a7b226c696d69745f73636f7065223a22746f6f6c222c2272657472795f61667465725f7365636f6e6473223a337d2c226572726f725f636f6465223a22524154455f4c494d49544544222c226d657373616765223a225265717565737420726174652065786365656465642e222c22726574727961626c65223a747275657d",
+    "byte_length": 194
+  },
+  "scope_statement": "P0-5 implementation evidence only. Public business handlers, publisher, audit-chain, decision-trace persistence, Bedrock, deployment and EVAL-001..030 are outside scope."
+}

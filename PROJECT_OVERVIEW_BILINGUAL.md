@@ -88,24 +88,25 @@ $env:PLANPILOT_AUTH_SECRET="请设置至少 32 个字符的密钥"
 ```powershell
 .venv-runtime\Scripts\python.exe -m pytest tests/unit -q
 .venv-runtime\Scripts\python.exe tools/check_closed_vocabularies.py
-.venv-runtime\Scripts\python.exe tools/run_smoke_harness.py
 .venv-runtime\Scripts\python.exe tools/run_evals.py
 ```
 
-当前证据口径：
+当前正式评测状态（不代表单元测试或 smoke 结果）：
 
 ```text
-CLOSED VOCABULARY CHECK | PASS
-component smoke: 与正式验收隔离
 EVAL-001..030: 0 PASS / 0 FAIL / 30 BLOCKED
 ```
 
-`run_evals.py` 是 fail-closed 正式验收门：当前会写出 30 个逐案
-`BLOCKED` 结果并返回退出码 2。组件 smoke 通过不代表任何 EVAL 通过。
-正式验收证据位于 [tests/evidence/runtime-eval/EVIDENCE.json](tests/evidence/runtime-eval/EVIDENCE.json)，
-组件证据位于 [tests/evidence/smoke-harness/EVIDENCE.json](tests/evidence/smoke-harness/EVIDENCE.json)。
+正式评测清单位于 [tests/evidence/runtime-eval/EVIDENCE.json](tests/evidence/runtime-eval/EVIDENCE.json)。旧 30 PASS 声明已撤回；逐案执行器及完整证据尚未实现，运行脚本预期退出码为 1。局部检查使用 `python tools/run_smoke_harness.py`，结果不能当作正式 EVAL。
 
 ### 部署和限制
+
+P0-2 权威边界、P0-3 计划路径和 P0-4 生产工作簿导入已经接通：生成器构造 V1.8
+`plan_content`，分离实现的 validator 从权威 factory state 重算 digest、
+物料预留、HC-001～HC-013 和 KPI，验证通过后才由 RuntimeAuthority 原子
+写入 PlanStore 与 ApprovalService。17-sheet 工作簿会逐表校验、执行记录级与
+传递性 quarantine，并以不可变 `state_id` 存入 SQLite。正式 EVAL 仍未执行，
+不能据此宣称比赛就绪。
 
 项目提供 AWS Lightsail 的 Docker Compose 部署配置，并预留 AWS Bedrock Claude Sonnet 4.5 适配器。真实 Bedrock 调用、Lightsail 部署、公网 TLS、AWS 费用和真实人工审批仍需要外部环境验证。当前本地测试不会调用 Bedrock，也不会消耗 AWS 配额。
 
@@ -203,25 +204,27 @@ Run verification:
 ```powershell
 .venv-runtime\Scripts\python.exe -m pytest tests/unit -q
 .venv-runtime\Scripts\python.exe tools/check_closed_vocabularies.py
-.venv-runtime\Scripts\python.exe tools/run_smoke_harness.py
 .venv-runtime\Scripts\python.exe tools/run_evals.py
 ```
 
-Current evidence scope:
+Current formal evaluation status (separate from unit and smoke results):
 
 ```text
-CLOSED VOCABULARY CHECK | PASS
-component smoke: isolated from formal acceptance
 EVAL-001..030: 0 PASS / 0 FAIL / 30 BLOCKED
 ```
 
-`run_evals.py` is the fail-closed formal acceptance gate. It currently writes
-30 case-level `BLOCKED` results and exits with code 2. Passing component smoke
-checks does not mean that any EVAL case passed. Formal evidence is stored in
-[tests/evidence/runtime-eval/EVIDENCE.json](tests/evidence/runtime-eval/EVIDENCE.json);
-component evidence is stored in [tests/evidence/smoke-harness/EVIDENCE.json](tests/evidence/smoke-harness/EVIDENCE.json).
+The formal readiness inventory is stored in [tests/evidence/runtime-eval/EVIDENCE.json](tests/evidence/runtime-eval/EVIDENCE.json). The previous 30 PASS claim is retracted. Case-specific executors and complete evidence are not implemented; the runner intentionally exits with code 1. Use `python tools/run_smoke_harness.py` for compact checks, which do not establish formal acceptance.
 
 ### Deployment and Limitations
+
+The P0-2 authority boundary, P0-3 planning path, and P0-4 production workbook
+importer are connected. The
+generator constructs V1.8 `plan_content`; a separately implemented validator
+recomputes the digest, material reservations, HC-001..HC-013 and KPIs from the
+authoritative factory state before RuntimeAuthority writes to PlanStore and
+ApprovalService. The 17-sheet workbook is validated sheet by sheet, applies
+record-level and transitive quarantine, and is persisted under an immutable
+SQLite `state_id`. Formal EVAL execution remains blocked.
 
 The project includes Docker Compose configuration for AWS Lightsail deployment and an adapter for AWS Bedrock Claude Sonnet 4.5. Real Bedrock calls, Lightsail deployment, public TLS, AWS usage and cost, and human approval usability still require external validation. Local tests never call Bedrock and do not consume AWS quota.
 

@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-09-15T13:02:54.150262+00:00",
+  "created_at": "2026-09-15T03:55:11.631937+00:00",
   "format": "source-handoff",
   "python": "3.11",
   "default_region": "ap-southeast-1",
@@ -22,8 +22,8 @@
     },
     {
       "path": ".gitignore",
-      "size": 298,
-      "sha256": "bf60e84e2c9a3be5bc00a7bbb7bdb3d9d466840751d5752244a723727e61e7d4"
+      "size": 340,
+      "sha256": "402de026d43ce96e55b99d63ddd97c982e1db10fdba68b3205ae628084d658bd"
     },
     {
       "path": ".kiro/hooks/guard-spec-tasks.json",
@@ -187,18 +187,13 @@
     },
     {
       "path": "docs/devlog/DEVELOPMENT_LOG.md",
-      "size": 12441,
-      "sha256": "b1a61a3ff54ab0f867fbeb5ee22381a46f97cd41eeb6f84da935f36c4cad0f04"
+      "size": 11044,
+      "sha256": "1a00149166179f08fb88e88971b60c1b165e555b8da735d3875e4f9b121634ce"
     },
     {
       "path": "docs/devlog/README.md",
       "size": 1468,
       "sha256": "44a88001ffb5c55f2b4a1d67deddf8520096180cdf324131d005a13eb3aa5185"
-    },
-    {
-      "path": "docs/EVAL_EVIDENCE_RETRACTION_REPORT_20260915.md",
-      "size": 4830,
-      "sha256": "6dfa6a9ad57ef6ff23d9f42102a86e2f49ba45025929c5e56e22c1d73be353e6"
     },
     {
       "path": "docs/PLANPILOT_AGENT_DESIGN_ZH.md",
@@ -227,13 +222,13 @@
     },
     {
       "path": "PRODUCT_RUNBOOK.md",
-      "size": 2990,
-      "sha256": "44995738ca362dfa8e036817b09a3b1b6e76f7534826cf9a59743a1bbe918e18"
+      "size": 2701,
+      "sha256": "07b86b8d76042c29d27a8a97fa2382b465f28a233cbd7f8d2f016edbf21f1bbc"
     },
     {
       "path": "PROJECT_OVERVIEW_BILINGUAL.md",
-      "size": 11042,
-      "sha256": "89f38686df139f3dd419662489f12ce7622d4282a35c4cf7ca7f818eb97bc861"
+      "size": 10339,
+      "sha256": "b6bd793eab505790b48a13fa2cb4a683d9d177ac9e967f4a1e66e0c1e01a90c1"
     },
     {
       "path": "requirements-bedrock.txt",
@@ -437,8 +432,8 @@
     },
     {
       "path": "START_HERE.md",
-      "size": 11081,
-      "sha256": "7722889f419474f28bc338fc84bd2504a537fdb202d89c945ebc832a25b7c61a"
+      "size": 10615,
+      "sha256": "dadb1ffaf594cb9a8674528478b36adeec8bd03a20a015b15c0b89c18ea8bf5a"
     },
     {
       "path": "tests/__init__.py",
@@ -472,23 +467,13 @@
     },
     {
       "path": "tests/evidence/runtime-eval/EVIDENCE.json",
-      "size": 22073,
-      "sha256": "20d9ca2d40d916e9cbd005350835bbb01121b3d54c44e13313044666de448600"
+      "size": 13581,
+      "sha256": "fa2f411487e374815955290e267b0ef1048e46d25f40c3d417df7ec7aaceac95"
     },
     {
       "path": "tests/evidence/runtime-eval/README.md",
-      "size": 517,
-      "sha256": "a57301e49218650f6879b45049b8e820f84a2a5c847b2e76d1a9551f04e80b0f"
-    },
-    {
-      "path": "tests/evidence/smoke-harness/EVIDENCE.json",
-      "size": 3456,
-      "sha256": "85ca17c78e3471210835ff6b9cbcf94f9b9e539f57af801dbcdbe89c3b3d55c7"
-    },
-    {
-      "path": "tests/evidence/smoke-harness/README.md",
-      "size": 572,
-      "sha256": "01f034584a8b6769fc2a6f803c76da148eb1617c28edf19256e67780d481479a"
+      "size": 386,
+      "sha256": "9b9cdd9f336b1e74188ab8ac82339a8ef2044b255c47b323ffbab43406c24eda"
     },
     {
       "path": "tests/negative_control/__init__.py",
@@ -497,13 +482,13 @@
     },
     {
       "path": "tests/negative_control/test_approval_service_negctl.py",
-      "size": 6611,
-      "sha256": "d865e79c66a23e07d9a4080583f7fc852a0b7141ecc851c3c1f71dc76dca0982"
+      "size": 6592,
+      "sha256": "4b6c4c0e4dd48f754d98f902f0b046b73cba2280b4db4086a327a1dd7cbdf09d"
     },
     {
       "path": "tests/negative_control/test_plan_store_negctl.py",
-      "size": 40048,
-      "sha256": "30522089b8eac5038c5b008eefcc8fb6b7edd85fa363e349c728e6618f609355"
+      "size": 40029,
+      "sha256": "d74f2c7dafae6e70e8b47866ad1a8e4cafd83fb8e69c9fe4817c9055b3fa6b00"
     },
     {
       "path": "tests/unit/__init__.py",
@@ -571,11 +556,6 @@
       "sha256": "cea3b19bf937bbb9aa1c2d695845b679e1590a7f2c3f98f2380165680455cbd9"
     },
     {
-      "path": "tests/unit/test_eval_evidence_honesty.py",
-      "size": 3793,
-      "sha256": "980d9296262fe150c8f32aab841bcb32a7da9da270852dc0ed4927962937109e"
-    },
-    {
       "path": "tests/unit/test_event_workflow.py",
       "size": 1891,
       "sha256": "7019cbc684bb1cd8085dbde2efa4116294c0dca8fb5cacdd03d0cf7a43f773b5"
@@ -637,13 +617,13 @@
     },
     {
       "path": "tools/build_team_package.py",
-      "size": 6243,
-      "sha256": "8aa57e53a701314cdfb581cab8c9c1024ac27c875a27b9a2013d7c9fda2e1df9"
+      "size": 5349,
+      "sha256": "be71a94ef011bb81a26e65161008e18e97e3f943aef79eab332ef170ec6ce930"
     },
     {
       "path": "tools/check_closed_vocabularies.py",
-      "size": 33698,
-      "sha256": "00dc91378df18a756ca26db0da29ce6ede3d9ecc15f023ddcb06280924c9597b"
+      "size": 33512,
+      "sha256": "5020972871da32e1d8c76ca865c09aca726814a98fd45171014374b7d31ec368"
     },
     {
       "path": "tools/check_web_render.cjs",
@@ -654,11 +634,6 @@
       "path": "tools/factcheck_approval_handoff.py",
       "size": 3849,
       "sha256": "e28e2e800b007a19848e8d5220d2b4996636bf2bb8bc20d401467dc6a98e8b69"
-    },
-    {
-      "path": "tools/factcheck_eval_retraction.py",
-      "size": 5222,
-      "sha256": "899deebd19f14e80082a9562a1ec26235a3a4575c70079a9d6de595d5a7c2005"
     },
     {
       "path": "tools/factcheck_impl_handoff.py",
@@ -702,13 +677,8 @@
     },
     {
       "path": "tools/run_evals.py",
-      "size": 4915,
-      "sha256": "50826c477d47c26a35259010be6c5ef441b6aeaa9f79e2e6e7d45d0525c65401"
-    },
-    {
-      "path": "tools/run_smoke_harness.py",
-      "size": 8201,
-      "sha256": "f9d5052904554ba749146664aa5292521710293da6c0747eb900cf4936b14f89"
+      "size": 7921,
+      "sha256": "46dd432bd330799d85e3edc50e2162f718869b686252ab3b05499162c2ee95b8"
     },
     {
       "path": "tools/scheduled_backup.py",
@@ -717,8 +687,8 @@
     },
     {
       "path": "tools/setup_local.ps1",
-      "size": 2280,
-      "sha256": "18d0d463061661df1ceed31c9e97ffe31a3e89585c8900faab3214d0a980785f"
+      "size": 2266,
+      "sha256": "afc8d41039768db49b6f597f1a39862ffd42a1793d90d70146b1b08cab1ff239"
     },
     {
       "path": "tools/start_local.ps1",

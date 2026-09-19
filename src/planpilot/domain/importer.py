@@ -26,7 +26,19 @@ def read_factory(path):
     if path.suffix.lower() == ".json":
         return json.loads(path.read_text(encoding="utf-8-sig"))
     if path.suffix.lower() == ".xlsx":
-        return _excel_bundle(path)
+        from openpyxl import load_workbook
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        try:
+            is_v18 = "README" in workbook.sheetnames and "Routing" in workbook.sheetnames
+        finally:
+            workbook.close()
+        if not is_v18:
+            return _excel_bundle(path)
+        from planpilot.factory_state import normalize_workbook
+        migrated = normalize_workbook(path)
+        if migrated["validation"]["status"] == "INVALID":
+            raise ValueError("workbook factory state is structurally INVALID")
+        return migrated["state"]
     raise ValueError("supported factory formats are .json and .xlsx")
 
 
@@ -45,6 +57,11 @@ def factory_from_dict(raw):
     if origin.tzinfo is None:
         raise ValueError("planning_start must include a timezone")
     horizon = integer(raw.get("horizon", 7200), "horizon", 1)
+    setup_by_target = {}
+    for row in raw.get("changeovers", []):
+        if all(key in row for key in ("machine_id", "to_product_id", "minutes")) and _integer_or_false(row["minutes"]):
+            key = (row["machine_id"], row["to_product_id"])
+            setup_by_target[key] = max(setup_by_target.get(key, 0), row["minutes"])
     orders, ids = [], set()
     for row in raw["orders"]:
         oid = identifier(row["order_id"], "order_id")
@@ -60,9 +77,10 @@ def factory_from_dict(raw):
             quantity = integer(op.get("material_qty", 0), "material_qty")
             if bool(material) != bool(quantity):
                 raise ValueError("material_id and positive material_qty must occur together")
+            setup = op.get("changeover", setup_by_target.get((op["machine_id"], row["product_id"]), 0))
             operations.append(Operation(i + 1, identifier(op["machine_id"], "machine_id"), integer(op["duration"], "duration", 1),
                                         worker, material, quantity, integer(op.get("release", 0), "release"),
-                                        integer(op.get("changeover", 0), "changeover"), op.get("required_skill")))
+                                        integer(setup, "changeover"), op.get("required_skill")))
         due = row.get("due_at")
         if due is None:
             date = datetime.fromisoformat(str(row["due_date"]))
@@ -118,9 +136,38 @@ def factory_from_dict(raw):
             raise ValueError("resource window requires machine_id or worker_id")
         if row.get("machine_id") and row["machine_id"] not in machine_ids or row.get("worker_id") and row["worker_id"] not in worker_ids:
             raise ValueError("resource window references unknown resource")
-        if row in shifts and row.get("window_type", "REGULAR") != "REGULAR":
-            raise ValueError("compact adapter accepts regular shifts only; overtime requires the contract calendar adapter")
-    return FactoryData(tuple(orders), inventory, tuple(maintenance), tuple(workers), tuple(shifts), tuple(machines), horizon)
+        if row in shifts:
+            window_type = row.get("window_type", "REGULAR")
+            if window_type not in ("REGULAR", "OVERTIME"):
+                raise ValueError("shift window_type must be REGULAR or OVERTIME")
+            if window_type == "OVERTIME" and row.get("overtime_allowed") is not True:
+                raise ValueError("OVERTIME shift requires overtime_allowed=true")
+            if window_type == "REGULAR" and row.get("overtime_allowed", False) is not False:
+                raise ValueError("REGULAR shift cannot enable overtime_allowed")
+    assumptions = raw.get("assumptions", {})
+    changeovers = tuple(deepcopy(raw.get("changeovers", [])))
+    for row in changeovers:
+        if not all(key in row for key in ("machine_id", "from_product_id", "to_product_id", "minutes")):
+            raise ValueError("changeover requires machine, source product, target product and minutes")
+        integer(row["minutes"], "changeover minutes")
+    overtime_cap = assumptions.get("overtime_cap_hours")
+    daily_overtime = assumptions.get("max_overtime_min_per_worker_per_day")
+    changeover_reference = assumptions.get("changeover_reference_min", 15)
+    if overtime_cap is not None:
+        integer(overtime_cap, "overtime_cap_hours")
+    if daily_overtime is not None:
+        integer(daily_overtime, "max_overtime_min_per_worker_per_day")
+    integer(changeover_reference, "changeover_reference_min", 1)
+    return FactoryData(
+        tuple(orders), inventory, tuple(maintenance), tuple(workers), tuple(shifts),
+        tuple(machines), horizon, changeovers,
+        None if overtime_cap is None else overtime_cap * 60, daily_overtime,
+        changeover_reference,
+    )
+
+
+def _integer_or_false(value):
+    return type(value) is int and 0 <= value <= 10_000_000
 
 
 def _excel_bundle(path):

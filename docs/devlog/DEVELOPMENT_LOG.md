@@ -216,3 +216,97 @@
 - 数据集(dataset-migration,critical path)+ EVAL-001~030
   (官方评分的实际战场;9/28 截止前须留 ≥5 整天)
 - ~~git bundle 备份~~ ✅ 已完成(2026-09-14,D 盘);私有远程仓库仍为待办
+---
+
+# 里程碑速览
+
+| 基线 | commit | tag | 关键数字(独立复核 ✓) |
+|---|---|---|---|
+| plan-store-and-digest v1 | `c7c06ea` | ✓ 剥离后正确 | 418/421 ✓,negctl 56/0/0 ✓ |
+| approval-service v1 | `069f9f8` | ✓ | 39 unit,13/13 变异,461 full ✓ |
+| approval v1.0.1 硬化 | `0cf1060` | ✓ | 40 unit,14/14 变异,462 full ✓ |
+| 合同锚 | — | — | SHA `b92e53f4…` 全程未动 ✓ |
+
+# 尚未开始(诚实清单)
+
+- tool-error-middleware(**下一 part**;主办方 Ollama 网关 tool_calls 恒空、
+  已知伪造 tool result——工具结果溯源(provenance)必须是硬需求)
+- audit-hash-chain / decision-traces → publisher 事务(独立 spec、独立验收,
+  按此顺序,不与 middleware 合并)
+- 其余 15-spec 表模块:lot-and-material、calendar-and-shifts、cpsat-scheduler、
+  escalation-and-budget、independent-validator、inference-client、
+  ui-approval-queue、lightsail-deploy
+- 数据集(dataset-migration,critical path)+ EVAL-001~030
+  (官方评分的实际战场;9/28 截止前须留 ≥5 整天)
+- ~~git bundle 备份~~ ✅ 已完成(2026-09-14,D 盘);私有远程仓库仍为待办
+
+## 2026-09-18 02:21 — P0-5 八工具统一错误中间件完成
+
+- 类型:实现 / 修复 / 证据 / 更正
+- 证据:`src/planpilot/tools/`、`tests/unit/test_tool_error_middleware.py`、
+  `tests/negative_control/test_tool_error_middleware_negctl.py`、
+  `P0_5_TOOL_ERROR_MIDDLEWARE_REPORT_20260918.md`；专项 35 passed、单元
+  595 passed、全量 600 passed、负向变异 11 caught / 0 escaped / 0 broken、
+  封闭词表及其 self-test PASS、workspace 190 ok / 0 fail、合同 SHA
+  `b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639`。
+- 内容:按冠军审查 P0-5 建立合同派生的八工具/18 错误注册表、UUIDv4
+  correlation、逐码 details 校验、4096-byte 完整 wire 限制、可信异常白名单、
+  未知异常清洗、prepare/commit/rollback 原子边界、deadline、无隐藏 retry 和
+  单次 observer seam；旧 `engine.framework_error()` 同步收口。
+- 更正:上方“尚未开始”中的 `tool-error-middleware` 自本条起已完成实现证据。
+  当前恢复包无 `.git`，所以 branch/commit/annotated tag 两项保持未完成；八个
+  业务 handler、publisher、audit chain、decision trace persistence 与正式
+  EVAL-001～030 仍未完成。
+
+## 2026-09-18 03:08 — P0-5 后冠军标准复核，确认 P0-6 尚未整改
+
+- 类型:审查 / 决策
+- 证据:`P0_6_CHAMPION_READINESS_AUDIT_20260918.md`；正式 EVAL 实测
+  0 PASS / 0 FAIL / 30 BLOCKED、退出码 1；EVT-005 针对性探针实测
+  `state=BLOCKED`、`candidate_count=0`；安全/事件/导入专项 12 passed。
+- 内容:确认 P0-1～P0-4 已按当前声明边界整改，P0-5 模块及证据完成，但尚未
+  接入实际 API/Agent public-tool dispatcher。P0-6 的记录级隔离后继续排程、
+  合同 `log_security_event`、decision trace 与 audit hash chain 均未实现；现有
+  内存 security dict 和 `agent_step` 不满足合同。复核另列出 raw API error、
+  quarantine 丢失、注入检测旁路、UI、模型绑定、Git provenance 等后续风险。
+- 决策:下一轮按 audit-hash-chain → decision-traces → log_security_event →
+  EVT-005 continuation → 八工具运行接入的顺序整改；正式 EVAL 保持 BLOCKED。
+
+## 2026-09-18 — P0-6 注入隔离、安全事件、trace 与审计链完成
+
+- 类型:实现 / 修复 / 证据 / 更正
+- 证据:`src/planpilot/audit.py`、`tests/unit/test_security_audit.py`、
+  `tests/negative_control/test_security_audit_negctl.py`、
+  `P0_6_SECURITY_AUDIT_REMEDIATION_REPORT_20260918.md`；专项 13 passed、
+  单元 604 passed、全量 610 passed、P0-6 变异 9 caught / 0 escaped /
+  0 broken、P0-5 变异回归 11 caught / 0 escaped / 0 broken、workspace
+  190 ok / 0 fail、网页渲染与隔离影响 PASS、合同 SHA 未变化。
+- 内容:建立共享 append-only SHA-256 审计链和 typed security/trace index；
+  `log_security_event` 通过 P0-5 middleware 执行并写入合同有效
+  `decision_trace_record`。`EVT-005` 现在只隔离恶意记录、脱敏持久化安全事件，
+  合法订单继续生成 3 套计划；HTTP 对抗测试验证 200、3 plans、无恶意原文回显、
+  security/trace 各一条且链有效。UI 显示 `quarantine_impact`。
+- 更正:上一条 P0-6“尚未整改”是整改前审查快照，自本条起其所列核心缺口已关闭。
+  P0-5 证据按累计 604/610 回归刷新。其余七个业务 handler 的统一 dispatcher、
+  publisher 和正式逐案 EVAL 仍未完成；正式 EVAL 保持 0 PASS / 0 FAIL /
+  30 BLOCKED。恢复包无 `.git`，因此无法补做 commit/tag/祖先关系证明。
+
+## 2026-09-18 — 第七部分 P1-1 模型绑定完成
+
+- 类型:实现 / 修复 / 证据
+- 证据:`src/planpilot/inference/bedrock_client.py`、
+  `.kiro/specs/model-binding/{design,tasks}.md`、
+  `tests/negative_control/test_model_binding_negctl.py`、
+  `P1_1_MODEL_BINDING_REMEDIATION_REPORT_20260918.md`；专项 47 passed、
+  单元 609 passed、全量 616 passed、变异 6 caught / 0 escaped / 0 broken、
+  workspace 190 ok / 0 fail、合同 SHA 未变化。
+- 内容:按冠军审查 P1-1 将 Python runtime、PowerShell、`.env.example`、
+  Docker/Compose、交付 manifest 和操作文档统一绑定到 Bedrock Claude Sonnet 4.5
+  全局推理配置 `global.anthropic.claude-sonnet-4-5-20250929-v1:0`，源区域
+  `ap-southeast-1`。非合同模型在网络访问前失败关闭；旧 Agent 模块中的平行
+  boto3 provider I/O 已移除。修复损坏的 `PLANPILO…ODE` 环境键。
+- 交付修复:打包器不再把旧 `PACKAGE_MANIFEST.json` 当作源文件收入归档；
+  生成的 ZIP 只含一份新 manifest，并通过逐文件哈希验证。
+- 边界:本轮所有模型测试均使用注入 transport，没有调用 AWS 或消耗额度。
+  团队账号权限、Lightsail 实测、时延、费用和演示证据仍待部署环境验证；正式
+  EVAL 仍为 0 PASS / 0 FAIL / 30 BLOCKED。

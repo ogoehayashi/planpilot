@@ -3,18 +3,11 @@ from planpilot.persistence import Database
 from planpilot.domain.importer import load_factory
 from planpilot.domain.planning import build_candidates
 
-def test_approval_requires_every_action_before_publish(tmp_path):
+def test_compact_solver_has_no_parallel_authority_api(tmp_path):
     db=Database(tmp_path/'state.db')
-    from dataclasses import asdict
-    from planpilot.domain.importer import read_factory
-    raw=read_factory('examples/factory_demo.json')
-    db.save_plan('PLAN-1', {'candidates': [asdict(p) for p in build_candidates(load_factory('examples/factory_demo.json'))], 'factory_data': raw, 'change_promised_due_date': True}, 1)
-    requests=db.request_approval('PLAN-1','Balanced',['change_promised_due_date','publish_plan'])
-    with pytest.raises(PermissionError): db.publish_plan('PLAN-1','Balanced','p','planner')
-    db.decide_approval(requests[0]['request_id'],'m','manager','APPROVED')
-    with pytest.raises(PermissionError): db.publish_plan('PLAN-1','Balanced','p','planner')
-    db.decide_approval(requests[1]['request_id'],'p','planner','APPROVED')
-    assert db.publish_plan('PLAN-1','Balanced','p','planner')['status']=='PUBLISHED'
+    assert not hasattr(db, 'save_plan') and not hasattr(db, 'request_approval')
+    assert not hasattr(db, 'publish_plan')
+    db.close()
 
 def test_cp_sat_factory_data_is_deterministic():
     factory=load_factory('examples/factory_demo.json')

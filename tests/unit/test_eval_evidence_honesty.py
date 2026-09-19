@@ -1,89 +1,95 @@
-"""Regression tests that keep component smoke separate from formal acceptance."""
-from __future__ import annotations
-
+"""Formal evaluation must never be promoted by smoke or fabricated evidence."""
 import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import sys
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-CONTRACT = ROOT / "contract" / "planpilot_agent_contract_v1.8.json"
 
 
-def _load_tool(name: str):
-    path = ROOT / "tools" / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
+def load_tool(name):
+    spec = importlib.util.spec_from_file_location(name, ROOT / 'tools' / (name + '.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def test_formal_gate_preserves_exact_contract_cases_and_blocks_all(tmp_path):
-    tool = _load_tool("run_evals")
-    evidence = tool.write_evidence(tmp_path)
-    contract_cases = json.loads(CONTRACT.read_text(encoding="utf-8"))["acceptance_tests"]
-
-    assert evidence["case_count"] == 30
-    assert (evidence["passed"], evidence["failed"], evidence["blocked"]) == (0, 0, 30)
-    assert evidence["acceptance_ready"] is False
-    assert evidence["acceptance_claimed"] is False
-    assert evidence["runtime_evaluation"] == "PENDING_UNTIL_EVAL_001_TO_030_EXECUTE"
-    assert [result["case_id"] for result in evidence["results"]] == [case["case_id"] for case in contract_cases]
-    assert [result["pass_condition"] for result in evidence["results"]] == [case["pass_condition"] for case in contract_cases]
-    assert all(result["status"] == "BLOCKED" for result in evidence["results"])
-    assert all(result["unmet_pass_condition"] and result["evidence_refs"] == [] for result in evidence["results"])
+def test_every_contract_condition_is_preserved_and_blocked(tmp_path):
+    runner = load_tool('run_evals')
+    result = runner.run(tmp_path)
+    contract = json.loads(runner.CONTRACT.read_text())
+    assert (result['case_count'], result['passed'], result['failed'], result['blocked']) == (30, 0, 0, 30)
+    assert result['runtime_evaluation'] == contract['release_readiness']['runtime_evaluation']
+    assert [{k: row[k] for k in case} for row, case in zip(result['results'], contract['acceptance_tests'])] == contract['acceptance_tests']
+    for row in result['results']:
+        assert row['status'] == 'BLOCKED' and row['executed'] is False
+        for needed in ('inputs', 'outputs', 'trace', 'digest', 'timing', 'approval', 'audit', 'executor'):
+            assert needed in ' '.join(row['missing_evidence'])
+    assert json.loads((tmp_path / 'EVIDENCE.json').read_text()) == result
 
 
-def test_formal_gate_cli_is_fail_closed_but_still_writes_evidence(tmp_path):
-    completed = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "run_evals.py"), "--output", str(tmp_path)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode == 2
-    evidence = json.loads((tmp_path / "EVIDENCE.json").read_text(encoding="utf-8"))
-    assert evidence["blocked"] == 30
-    assert evidence["acceptance_ready"] is False
-    assert "NOT READY" in completed.stdout
+@pytest.mark.parametrize('fabricated_check', [True, 100 < 300, {'deterministic': True, 'violations': []}])
+def test_prior_green_or_placeholder_assertions_cannot_unlock_formal_cases(tmp_path, fabricated_check):
+    (tmp_path / 'EVIDENCE.json').write_text(json.dumps({
+        'passed': 30, 'blocked': 0, 'check': fabricated_check,
+        'results': [{'case_id': f'EVAL-{i:03d}', 'status': 'PASS'} for i in range(1, 31)]}))
+    completed = subprocess.run([sys.executable, str(ROOT / 'tools/run_evals.py'), '--output', str(tmp_path)],
+                               capture_output=True, text=True)
+    assert completed.returncode == 1, completed.stderr
+    assert 'cases=30 passed=0 failed=0 blocked=30' in completed.stdout
+    evidence = json.loads((tmp_path / 'EVIDENCE.json').read_text())
+    assert {row['status'] for row in evidence['results']} == {'BLOCKED'}
 
 
-def test_component_smoke_has_no_formal_case_results(tmp_path):
-    tool = _load_tool("run_smoke_harness")
-    evidence = tool.run(tmp_path)
-
-    assert evidence["evidence_kind"] == "component_smoke"
-    assert evidence["smoke_passed"] == evidence["check_count"]
-    assert evidence["smoke_failed"] == 0
-    assert evidence["acceptance_claimed"] is False
-    assert evidence["runtime_evaluation"] == "PENDING_UNTIL_EVAL_001_TO_030_EXECUTE"
-    assert all("check_id" in result and "case_id" not in result for result in evidence["results"])
-    assert all(result["status"] == "pass" for result in evidence["results"])
-
-
-def test_current_docs_do_not_claim_formal_acceptance():
-    current_docs = [
-        ROOT / "START_HERE.md",
-        ROOT / "PRODUCT_RUNBOOK.md",
-        ROOT / "PROJECT_OVERVIEW_BILINGUAL.md",
-        ROOT / "tests" / "evidence" / "runtime-eval" / "README.md",
-    ]
-    text = "\n".join(path.read_text(encoding="utf-8") for path in current_docs)
-    assert "30 PASS" not in text
-    assert "30/30 PASS" not in text
+@pytest.mark.parametrize('change', ['empty', 'duplicate', 'missing'])
+def test_broken_case_inventory_fails_instead_of_emitting_green(tmp_path, monkeypatch, change):
+    runner = load_tool('run_evals')
+    contract = json.loads(runner.CONTRACT.read_text())
+    cases = contract['acceptance_tests']
+    contract['acceptance_tests'] = [] if change == 'empty' else cases[:-1] + [cases[0]] if change == 'duplicate' else cases[:-1]
+    path = tmp_path / 'contract.json'
+    path.write_text(json.dumps(contract))
+    monkeypatch.setattr(runner, 'CONTRACT', path)
+    with pytest.raises(ValueError):
+        runner.run(tmp_path / 'out')
+    assert not (tmp_path / 'out/EVIDENCE.json').exists()
 
 
-def test_delivery_helpers_cover_extracted_package_hazards():
-    builder = _load_tool("build_team_package")
-    assert builder.included(Path("PACKAGE_MANIFEST.json")) is False
-    assert builder.included(Path("tests/evidence/example/run.log")) is True
-    assert "'-X', 'utf8'" in (ROOT / "tools" / "setup_local.ps1").read_text(encoding="utf-8")
-    for path in (
-        ROOT / "tests" / "negative_control" / "test_plan_store_negctl.py",
-        ROOT / "tests" / "negative_control" / "test_approval_service_negctl.py",
-    ):
-        assert 'startswith(".venv")' in path.read_text(encoding="utf-8")
+def test_smoke_failure_is_nonzero_and_never_writes_formal_results(tmp_path, monkeypatch):
+    smoke = load_tool('run_smoke_harness')
+    def fail():
+        raise AssertionError('injected failure')
+    monkeypatch.setattr(smoke, 'CHECKS', (('injected_smoke_failure', fail),))
+    assert smoke.main(['--output', str(tmp_path)]) == 1
+    text = (tmp_path / 'SMOKE_EVIDENCE.json').read_text()
+    result = json.loads(text)
+    assert result['formal_acceptance'] is False
+    assert result['failed'] == 1 and result['passed'] == 0
+    assert 'EVAL-' not in text and 'case_id' not in text
+    assert not (tmp_path / 'EVIDENCE.json').exists()
+
+
+def test_smoke_cannot_write_into_formal_directory():
+    smoke = load_tool('run_smoke_harness')
+    with pytest.raises(ValueError):
+        smoke.run(ROOT / 'tests/evidence/runtime-eval')
+
+
+def test_optimized_python_cannot_skip_smoke_assertions(tmp_path):
+    completed = subprocess.run([sys.executable, '-O', str(ROOT / 'tools/run_smoke_harness.py'), '--output', str(tmp_path)],
+                               capture_output=True, text=True)
+    assert completed.returncode != 0
+    assert 'without -O' in completed.stderr
+    assert not (tmp_path / 'SMOKE_EVIDENCE.json').exists()
+
+
+def test_checked_in_formal_evidence_and_overview_do_not_claim_success():
+    result = json.loads((ROOT / 'tests/evidence/runtime-eval/EVIDENCE.json').read_text())
+    assert (result['passed'], result['failed'], result['blocked']) == (0, 0, 30)
+    assert {r['status'] for r in result['results']} == {'BLOCKED'}
+    overview = (ROOT / 'PROJECT_OVERVIEW_BILINGUAL.md').read_text()
+    assert '30 PASS / 0 FAIL / 0 BLOCKED' not in overview
+    assert overview.count('0 PASS / 0 FAIL / 30 BLOCKED') == 2

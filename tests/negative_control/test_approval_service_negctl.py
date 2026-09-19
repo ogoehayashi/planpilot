@@ -106,7 +106,7 @@ def sandbox(tmp_path_factory) -> Path:
     target = tmp_path_factory.mktemp("approval-negctl") / "repo"
     target.mkdir()
     for source in ROOT.iterdir():
-        if source.name in {".git", ".pytest_cache"} or source.name.startswith(".venv"):
+        if source.name in {".git", ".pytest_cache", ".venv-review"}:
             continue
         destination = target / source.name
         if source.is_dir():

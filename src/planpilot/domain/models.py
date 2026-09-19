@@ -19,6 +19,10 @@ class FactoryData:
     maintenance: tuple[dict[str, int | str], ...] = (); workers: tuple[dict[str, Any], ...] = (); shifts: tuple[dict[str, int | str], ...] = ()
     machines: tuple[dict[str, Any], ...] = ()
     horizon: int = 7200
+    changeovers: tuple[dict[str, Any], ...] = ()
+    overtime_cap_min: int | None = None
+    max_overtime_min_per_worker_per_day: int | None = None
+    changeover_reference_min: int = 15
 
 @dataclass
 class SchedulePlan:
