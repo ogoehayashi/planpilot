@@ -521,3 +521,18 @@ none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.jso
   上一轮 pack 的同类错误,证明非装饰。
 - devlog/EVIDENCE 措辞与实现保持一致;数字以本轮日志为准(unit
   642 passed,全量 649 passed, EXITCODE=0,含新回归)。
+## 2026-09-20 — G1.0.2 审批通过；G2 基线 `5bf299a`
+
+二轮复验 **APPROVED**：P0/P1 全关，跨连接高水位、绑定原子性、证据哈希自检
+经独立复现验证（649 passed；bind 失败原子性 ✅）。
+
+- **Baseline tag**：`g2-baseline-5bf299a`（annotated，解引用 `5bf299a`）——G2
+  唯一开发起点。
+- **登记遗留（P2，发布前防御纵深，非 G2 阻塞）**：
+  `ScenarioClock._persist` 在 `clock_session` 行缺失时仍静默返回本地
+  stamp（评审复现：手工删行 → 当进程返回本地时间，重启重新锚定）。
+  正常应用无删行路径，需直接操作 SQLite 才触发。收口方案（评审原话）：
+  1. `row is None` 改抛 `ClockSessionInvariantError`（fail-closed）；
+  2. SQLite trigger 禁止删除 `clock_session` 行；
+  3. trigger 禁止修改 anchor/start、禁止降低 `last_issued`。
+  归入 G4 发布门禁前处理。
