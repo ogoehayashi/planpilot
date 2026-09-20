@@ -1,0 +1,40 @@
+{
+  "evidence_id": "g1-0-2c-cross-connection",
+  "gate": "G1.0.2 re-review 2 (verdict: P1 SMALL FIX REQUIRED, two blockers)",
+  "base_commit": "8360b57",
+  "blockers_addressed": [
+    "P1-1 dual-connection stale return: _persist is now a single atomic UPDATE ... CASE ... RETURNING statement; now() returns the row's high-water even when another connection/process advanced it and the caller's own UPDATE matched zero rows (reviewer repro: conn1 writes 09:00, conn2 now() must return 09:00, not 08:00)",
+    "P1-2 evidence hashes: both g1-0-2 packs recomputed against the committed LF blobs (two were CRLF representations, one matched neither); new test_evidence_integrity.py self-checks every EVIDENCE.json log against git cat-file HEAD bytes every suite run"
+  ],
+  "new_regressions": [
+    "test_two_open_connections_share_one_persisted_high_water (two Database/ScenarioClock on one file: conn2 now() sees conn1's 09:00; stale writer on conn1 clamped; row stays 09:00)",
+    "tests/unit/test_evidence_integrity.py (all evidence logs re-hashed from committed blobs)"
+  ],
+  "hash_method": "SHA-256 of the LF-normalised bytes exactly as shipped in the commit; verify with: git cat-file blob HEAD:tests/evidence/g1-0-2c-cross-connection/<log>",
+  "raw_stdout": {
+    "artifacts": {
+      "g102c_unit.log": {
+        "sha256": "9157f7cc82c47fee336b25668ab9f76e4d72cc5554fd03eabb16f0b201125d90",
+        "command": "pytest tests/unit -q --tb=line"
+      },
+      "g102c_full.log": {
+        "sha256": "d6defe021f59e77f7daa68e7decadc4d515ef5015f6661784889504d51bd70ec",
+        "command": "pytest tests/ -q --tb=line"
+      },
+      "g102c_clock.log": {
+        "sha256": "265ed0cf487be5d0b4b85361814cf13d6f45938fb13a0f2fbb4f59335b0e3702",
+        "command": "pytest tests/unit/test_server_clock_policy.py tests/unit/test_evidence_integrity.py tests/unit/test_bedrock_web.py -q"
+      },
+      "g102c_negctl.log": {
+        "sha256": "96dcfbe3b754b6ce2b3682d8d9987cf74eebf287b93a9aeed8b529687d898ade",
+        "command": "pytest tests/negative_control -q + byte-restore hash check"
+      }
+    }
+  },
+  "contract": {
+    "file": "contract/planpilot_agent_contract_v1.8.json",
+    "sha256_first12": "b92e53f4",
+    "full": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639"
+  },
+  "head_commit_for_logs": "8360b5765e8172a027c29cc2e9a509fac4ac49a4"
+}

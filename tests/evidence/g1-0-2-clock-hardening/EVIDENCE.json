@@ -16,17 +16,17 @@
     "note": "Files below are the untouched stdout of the exact commands listed; hashes are SHA-256 of the shipped bytes. Reproduce with env -u PYTHONUTF8 (default Windows GBK environment).",
     "artifacts": {
       "g102_unit.log": {
-        "sha256": "8cd3cf11809505c042b75f610c5caa66a89a5ffc4d7332330d134f9c8704c146",
+        "sha256": "c58791abdaa187e7b5f46cc766d2f3a3cb49b954de7aede55507839a90fa3402",
         "command": "pytest tests/unit -q --tb=line",
         "outcome": "636 passed (was 629 at G1.0.1; +7 new G1.0.2 regression tests)"
       },
       "g102_full.log": {
-        "sha256": "e2e2e97e6da817f7eec85aab26933517b96a9218c1a7733a0017970f0dc6de59",
+        "sha256": "b23cfb5f9b9bb2586fd6d1e3d0e83342af7ac5c9105249a25d20624039d7ab67",
         "command": "pytest tests/ -q --tb=line",
         "outcome": "643 passed (was 636 at G1.0.1; same +7)"
       },
       "g102_negctl.log": {
-        "sha256": "a1980b201d0ce467b8109eb5b9e706085737d392e0c9170591e720d2d04d4a73",
+        "sha256": "6748c8ee7ccd247a3cdb04b564ad7d8d5c3da4796a7f440370d71c3960197507",
         "command": "pytest tests/negative_control -q --tb=line + before/after sha256 of every mutation-target file",
         "outcome": "7 passed; RESTORE-MISMATCH: none (all mutated targets byte-identical afterwards)"
       }

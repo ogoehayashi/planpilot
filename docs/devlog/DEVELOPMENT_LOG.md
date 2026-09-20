@@ -500,3 +500,24 @@ none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.jso
 
 验收：tests/unit 640 passed；tests/ 全量 647 passed EXITCODE=0；negctl
 7 passed 恢复无差异；证据 `tests/evidence/g1-0-2b-bind-atomicity/`。
+
+## 2026-09-20 — G1.0.2 二轮复验收口（双连接高水位 + 证据哈希自检）
+
+二轮复验：`8360b57` 两项新阻塞。
+
+- **P1 双连接**:条件 UPDATE 命中 0 行时代码仍把本地旧 stamp 存进 `_saved`
+  并回吐——评审用两个同时打开的 Database 复现(conn1 持久 09:00,conn2
+  now() 返回 08:00)。`_persist` 改单条原子 SQL
+  (`UPDATE … SET last_issued = CASE WHEN last_issued < ? THEN ? ELSE
+  last_issued END … RETURNING last_issued`),返回值一律取行内高水位并
+  同步 `_saved`;新增 `test_two_open_connections_share_one_persisted_high_water`
+  (公开 now() 路径,双 Database 同文件)。
+- **P1 证据哈希**:两个 pack 的 6 条 SHA-256 按**提交内 LF blob** 重算
+  (unit/clock 两条记的是 CRLF 预处理哈希,仓库 `.gitattributes` 强制
+  eol=lf;full 一条两种表示都不匹配)。新增 `test_evidence_integrity.py`:
+  每次套跑都对 `tests/evidence/**/EVIDENCE.json` 引用的日志用
+  `git cat-file blob HEAD:…` 取提交字节重哈希比对;blob 未进 HEAD 时
+  (证据先于提交产生)校验工作字节必须已是 LF。本自检上线当晚即抓到
+  上一轮 pack 的同类错误,证明非装饰。
+- devlog/EVIDENCE 措辞与实现保持一致;数字以本轮日志为准(unit
+  642 passed,全量 649 passed, EXITCODE=0,含新回归)。

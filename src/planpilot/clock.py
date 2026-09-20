@@ -186,19 +186,25 @@ class ScenarioClock(Clock):
         return self._persist(stamp)
 
     def _persist(self, stamp: str) -> str:
-        # Seconds-resolution write-through. The RLock serialises writers but
-        # cannot order them, so last_issued is the high-water mark: the SQL
-        # only ever moves forward AND the function returns whatever the row
-        # now holds — the caller's stamp if it won, the newer value if not.
+        # High-water update in ONE statement (G1.0.2 re-review): the CASE
+        # keeps max(row, stamp) atomically and RETURNING hands back the
+        # row's value, so a caller whose UPDATE touched zero rows —
+        # because another connection or process already advanced it —
+        # still receives the database truth, never its own stale stamp.
         if self._db is None:
             return stamp
         with self._db.lock:
-            if stamp > self._saved:
-                self._db.conn.execute(
-                    "UPDATE clock_session SET last_issued_scenario_time=? "
-                    "WHERE singleton=1 AND last_issued_scenario_time < ?",
-                    (stamp, stamp))
-                self._saved = stamp
+            row = self._db.conn.execute(
+                "UPDATE clock_session"
+                " SET last_issued_scenario_time = ("
+                "   CASE WHEN last_issued_scenario_time < ?"
+                "        THEN ? ELSE last_issued_scenario_time END)"
+                " WHERE singleton = 1"
+                " RETURNING last_issued_scenario_time",
+                (stamp, stamp)).fetchone()
+            if row is None:
+                return stamp
+            self._saved = row[0]
             return self._saved
 
     def elapsed(self) -> float:

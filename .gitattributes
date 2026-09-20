@@ -46,3 +46,4 @@ AGENTS.md text eol=lf
 *.whl binary
 *.sqlite binary
 *.db binary
+*.log text eol=lf

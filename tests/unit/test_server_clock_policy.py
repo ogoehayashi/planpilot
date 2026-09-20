@@ -733,3 +733,39 @@ def test_threaded_now_stays_monotonic_per_caller(tmp_path):
     ).fetchone()[0]
     assert row == max(max(s) for s in sequences)
     db.close()
+def test_two_open_connections_share_one_persisted_high_water(tmp_path):
+    """Review P1 (dual connection): the cross-instance hole. Two Database
+    objects (two SQLite connections, two RLocks — e.g. two server processes
+    sharing one DB file) hold their own ScenarioClock. Connection 1
+    advances the persisted row to 09:00; connection 2, whose in-memory
+    _saved is still 08:00, MUST see 09:00 through its own now(). The old
+    code short-circuited on the stale cache and returned 08:00 while the
+    row held 09:00 — reproduced by the independent review. now() must read
+    the database truth via the atomic CASE/RETURNING update every call.
+    """
+    path = tmp_path / "shared.db"
+    anchor = "2026-09-14T08:00:00+08:00"
+    db1 = Database(path, clock=ScenarioClock(anchor))
+    db2 = Database(path, clock=ScenarioClock(anchor))
+    assert db1.clock is not db2.clock
+
+    # connection 1 issues 09:00 (durably committed: isolation_level=None)
+    first = db1.clock._persist("2026-09-14T09:00:00+08:00")
+    assert first == "2026-09-14T09:00:00+08:00"
+
+    # connection 2 must NOT return its stale 08:00 cache
+    second = db2.clock.now()
+    assert second == "2026-09-14T09:00:00+08:00", (
+        f"cross-connection high-water lost: now()={second}")
+    assert db2.clock._saved == "2026-09-14T09:00:00+08:00"
+
+    # and an even staler writer on connection 1 is clamped to the row too
+    clamped = db1.clock._persist("2026-09-14T08:30:00+08:00")
+    assert clamped == "2026-09-14T09:00:00+08:00"
+
+    row = db2.conn.execute(
+        "SELECT last_issued_scenario_time FROM clock_session WHERE singleton=1"
+    ).fetchone()[0]
+    assert row == "2026-09-14T09:00:00+08:00"
+    db1.close()
+    db2.close()
