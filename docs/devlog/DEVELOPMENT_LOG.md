@@ -393,7 +393,10 @@
 ## 2026-09-20 G1.0.1(评审回炉: 时钟边界 4+3 项收口, append-only 更正)
 
 独立评审确认 G0/G1 数字与备份属实,但指出 4 个实质问题 + 3 个卫生问题。
-本轮按「先小收口再开 G2」执行,历史条目一字不改,以下为追加更正:
+本轮按「先小收口再开 G2」执行。措辞更正(G1.0.2 评审点名):下文
+「更正」实际是**原位纠正**旧段落文字(3f8f793 的 diff 可证),并非一字不改
+的纯追加;旧版本的原始文字由 Git 历史逐字节保留(git show 9743a06 可取回)。
+append-only 仅对本节以下的新条目生效。追加/纠正内容如下:
 
 - 更正 5(虚构 HC 编号,评审点名):上文「更正 3」把 P1-2 修复面写成
   HC-014/016/017 —— 合同封闭词表仅 HC-001..013,该编号不存在,属文档缺陷
@@ -438,3 +441,33 @@
   629, 基线 624+净增 5), tests/ 全套 636 passed in 428.78s EXITCODE=0(基线
   631+5); 合同 SHA b92e53f4ff05 未动, EVAL 仍 0/0/30 BLOCKED。日期脆弱性
   已消除: 新基线不再依赖当前日期(场景钟钉死+未来钟回归双向锁定)。
+
+## 2026-09-20 — G1.0.2 clock-hardening（评审阻断项收口）
+
+独立复验判定 G1.0.1 **CHANGES REQUESTED**：P0 ScenarioClock 重启回拨可续命
+审批窗口；P1×4 证据强度/错误码/锚点/计费钟；P2 时钟可变性约定、devlog 措辞、
+证据未入仓。本轮按最小范围逐项修复，不扩 G2。
+
+- **P0**：`clock.py` 新增 `clock_session` 持久会话（scenario_anchor /
+  real_wall_started_at / last_issued_scenario_time），重启恢复取
+  `max(anchor+真实流逝, last_issued)`，场景时间跨重启严格单调不减；重复重启
+  无法再延长审批 TTL。停机（downtime）计入流逝时间。
+- **P2**：`Database.clock` 改为只读属性；组装根一次性 `bind_clock()` 替换
+  默认 WallClock，二次替换或替换成不同实例即 fail-closed。
+- **P1-1**：四层（lifecycle/audit/trace/security/factory-state）逐列断言同一
+  瞬间，scenario 与真实墙钟各一条，达到报告宣称强度。
+- **P1-2**：断言 `error_code == APPROVAL_WINDOW_CLOSED` + 完整 details 三字段，
+  不再依赖英文消息措辞。
+- **P1-3**：scenario 模式必须显式 `PLANPILOT_SCENARIO_ANCHOR`（严格 +08:00
+  带时区校验，缺失/无时区/偏移不符启动失败）；`start_local.ps1` 从所选数据集
+  `planning_start` 派生注入；`clock.py` 删除写死默认锚点。
+- **P1-4**：Bedrock 日预算 `day` 列改用真实 SGT 计费日历（`calendar_clock`
+  接缝），与业务场景钟分离；token 过期墙钟偏离获评审批准，维持。
+- **P2 卫生**：devlog「一字不改」失实处已原位更正并注明 Git 保留原文；
+  原始 stdout（unit/full/negctl）连同 SHA-256 入仓
+  `tests/evidence/g1-0-2-clock-hardening/`。
+
+验收数字（默认 Windows 环境，env -u PYTHONUTF8）：tests/unit **636 passed**
+（G1.0.1 基线 629 + 本轮新增 7）；全量 tests/ **643 passed**（636 + 7）；
+negative_control **7 passed**，变异目标文件前后哈希全部一致（RESTORE-MISMATCH:
+none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.json`。

@@ -14,12 +14,14 @@ wall-clock leak that made audit stamps disagree with scenario stamps):
 - ``WallClock``  — the fail-safe default. Real machine time in Asia/Singapore
   (+08:00), matching persistence.now(). Production deployment is wall mode.
 - ``FixedClock`` — frozen deterministic time for unit tests and replay only.
-- ``ScenarioClock`` — declared demo clock pinned at a scenario anchor but
-  ADVANCING with real elapsed time since boot: approvals still expire if a
-  demo runs long, while the calendar age of the fixed dataset stays inside
-  its horizon on any host date. Restart re-anchors (epoch = process boot).
-  Never the default; only via PLANPILOT_CLOCK_MODE=scenario, and it refuses
-  to bind a public address without an explicit override.
+- ``ScenarioClock`` — declared demo clock: anchored at a dataset-derived
+  scenario date but ADVANCING with real elapsed time (downtime included), so
+  approvals still expire if a demo runs long, while the calendar age of the
+  fixed dataset stays inside its horizon on any host date. G1.0.2: when bound
+  to a Database it persists a clock session — restart NEVER rewinds issued
+  scenario time. Never the default; only via PLANPILOT_CLOCK_MODE=scenario
+  plus an explicit PLANPILOT_SCENARIO_NOW anchor, and it refuses to bind a
+  public address without an explicit override.
 
 Switching the clock never rewrites stored plan data: digests are immutable
 and computed over content only, so demo/replay/fixed timestamps cannot change
@@ -98,29 +100,112 @@ class FixedClock(Clock):
 
 
 class ScenarioClock(Clock):
-    """Advancing demo clock: scenario anchor + real elapsed time since boot.
+    """Advancing demo clock: scenario anchor + real elapsed, restart-safe.
 
     Anchored inside the fixed dataset's horizon so a demo works on any host
     date, yet expiry still works: wait 24h of real time and pending approvals
     genuinely expire. The UI and /clock label this as scenario time; the
-    horizon itself is derived from the loaded dataset (Server derives it) —
-    never hand-copied into clock metadata.
+    horizon itself is derived from the loaded dataset — never hand-copied.
+
+    G1.0.2 (review P0): a restart must NOT rewind server time. The naive
+    "re-anchor on boot" design let repeated restarts extend every pending
+    approval window (audit stamps also went backwards). When attached to a
+    Database the clock persists a session row (clock_session) and on reopen
+    resumes from
+
+        max(scenario_anchor
+            + (real wall now - real_wall_started_at),   # downtime counts
+            last_issued_scenario_time)                  # crash/NTP safety
+
+    so issued scenario time is monotonic non-decreasing for the life of the
+    database file. last_issued is written at seconds granularity (the stamp
+    resolution), so a hard crash can lose at most 1 second of elapsed time —
+    never hours. An unattached clock keeps the old process-local behaviour
+    for unit tests. Re-running the same file against a DIFFERENT anchor
+    fails closed instead of quietly mixing two scenario timelines.
     """
 
     kind = "scenario"
 
     def __init__(self, iso: str, scenario: dict | None = None):
         self._anchor = parse_iso(iso)
+        self._base = self._anchor
         self.scenario = scenario
+        self.session = None
+        self._db = None
+        self._saved = None
         self._boot = time.monotonic()
 
+    def attach_database(self, db) -> None:
+        """Bind this clock to its durable session (composition root only)."""
+        if self._db is not None:
+            if self._db is db:
+                return
+            raise RuntimeError(
+                "scenario clock is already attached to another database")
+        anchor_iso = self._anchor.isoformat(timespec="seconds")
+        wall_now = datetime.now(SGT).isoformat(timespec="seconds")
+        with db.lock:
+            row = db.conn.execute(
+                "SELECT scenario_anchor, real_wall_started_at,"
+                " last_issued_scenario_time FROM clock_session WHERE singleton=1"
+            ).fetchone()
+            if row is None:
+                db.conn.execute(
+                    "INSERT INTO clock_session VALUES(1,?,?,?)",
+                    (anchor_iso, wall_now, anchor_iso))
+                self._saved = anchor_iso
+                self.session = {"anchor": anchor_iso,
+                                "real_wall_started_at": wall_now,
+                                "restored": False}
+            else:
+                if row["scenario_anchor"] != anchor_iso:
+                    raise ValueError(
+                        f"this database's clock session was created for anchor "
+                        f"{row['scenario_anchor']!r}; refusing to re-anchor it "
+                        f"to {anchor_iso!r} (use a fresh database file)")
+                downtime = parse_iso(wall_now) - parse_iso(row["real_wall_started_at"])
+                candidate = self._anchor + downtime
+                base = max(candidate, parse_iso(row["last_issued_scenario_time"]))
+                self._base = base
+                self._boot = time.monotonic()
+                self._saved = row["last_issued_scenario_time"]
+                self.session = {"anchor": anchor_iso,
+                                "real_wall_started_at": row["real_wall_started_at"],
+                                "restored": True}
+        self._db = db
+
     def now(self) -> str:
-        return (self._anchor
-                + timedelta(seconds=time.monotonic() - self._boot)
-                ).isoformat(timespec="seconds")
+        stamp = (self._base
+                 + timedelta(seconds=time.monotonic() - self._boot)
+                 ).isoformat(timespec="seconds")
+        self._persist(stamp)
+        return stamp
+
+    def _persist(self, stamp: str) -> None:
+        # Seconds-resolution write-through. The RLock serialises writers but
+        # cannot order them (a thread can compute an older stamp, block, then
+        # wake after a newer one persisted) — so _saved is the high-water mark
+        # and any stamp that is not strictly newer is dropped. In-process
+        # monotonicity holds because time.monotonic() never rewinds.
+        if self._db is None:
+            return
+        with self._db.lock:
+            if stamp <= self._saved:
+                return
+            self._db.conn.execute(
+                "UPDATE clock_session SET last_issued_scenario_time=? "
+                "WHERE singleton=1", (stamp,))
+            self._saved = stamp
 
     def elapsed(self) -> float:
         return time.monotonic() - self._boot
+
+    def status(self) -> dict:
+        out = super().status()
+        if self.session is not None:
+            out["session"] = dict(self.session)
+        return out
 
 
 def clock_from_env(environ, host: str) -> Clock:
@@ -144,8 +229,32 @@ def clock_from_env(environ, host: str) -> Clock:
                 f"refusing scenario clock on public bind {host!r}: run "
                 "PLANPILOT_CLOCK_MODE=wall, or set "
                 "PLANPILOT_ALLOW_PUBLIC_SCENARIO=1 to acknowledge the risk")
+        # G1.0.2 (review P1-3): NO silent hardcoded anchor. The scenario
+        # anchor must be derived from the dataset actually being served
+        # (start_local.ps1 reads planning_start) and passed explicitly;
+        # swapping datasets can no longer drift the clock behind the data.
+        raw_anchor = str(environ.get("PLANPILOT_SCENARIO_NOW") or "").strip()
+        if not raw_anchor:
+            raise ValueError(
+                "PLANPILOT_CLOCK_MODE=scenario requires an explicit "
+                "PLANPILOT_SCENARIO_NOW anchor derived from the dataset "
+                "(planning_start); refusing a silent hardcoded date")
+        try:
+            anchor = parse_iso(raw_anchor)
+        except ValueError as exc:
+            raise ValueError(
+                f"PLANPILOT_SCENARIO_NOW={raw_anchor!r} is not a valid "
+                "ISO-8601 timestamp") from exc
+        if anchor.utcoffset() is None:
+            raise ValueError(
+                f"PLANPILOT_SCENARIO_NOW={raw_anchor!r} has no timezone; "
+                "an explicit +08:00 Singapore offset is required")
+        if anchor.utcoffset() != timedelta(hours=8):
+            raise ValueError(
+                f"PLANPILOT_SCENARIO_NOW={raw_anchor!r} must be +08:00; "
+                "every stored stamp in this system is Asia/Singapore")
         return ScenarioClock(
-            environ.get("PLANPILOT_SCENARIO_NOW", "2026-09-14T08:00:00+08:00"),
+            anchor.isoformat(timespec="seconds"),
             scenario={
                 "dataset": environ.get("PLANPILOT_SCENARIO_DATASET",
                                        "factory_demo_v18.json"),

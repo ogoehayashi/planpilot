@@ -39,10 +39,22 @@ class Database:
     """
 
     def __init__(self, path="planpilot.db", clock=None):
+        clock_given = clock is not None
         if clock is None:
             from .clock import WallClock
             clock = WallClock()
-        self.clock = clock
+        # G1.0.2: the clock is bound ONCE here and is read-only afterwards
+        # (review P2: "Database holds the one clock" was only a convention
+        # while RuntimeAuthority/Server could reassign database.clock).
+        # The composition root (Server) may upgrade a plain wall clock to a
+        # scenario clock exactly once via bind_clock(); a second, DIFFERENT
+        # clock fails closed.
+        self._clock = clock
+        self._clock_kind_explicit = clock_given
+        # A scenario clock needs its durable session; attach AFTER the schema
+        # exists (executescript below creates clock_session). WallClock and
+        # FixedClock ignore this hook.
+        self._pending_clock_attach = getattr(clock, "attach_database", None)
         self.lock = threading.RLock()
         self.conn = sqlite3.connect(
             str(path), check_same_thread=False, timeout=10, isolation_level=None
@@ -70,6 +82,12 @@ class Database:
                 entry_count INTEGER NOT NULL,
                 event_hash TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS clock_session (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                scenario_anchor TEXT NOT NULL,
+                real_wall_started_at TEXT NOT NULL,
+                last_issued_scenario_time TEXT NOT NULL
+            );
             CREATE TRIGGER IF NOT EXISTS audit_chain_no_update
             BEFORE UPDATE ON audit_chain BEGIN
                 SELECT RAISE(ABORT, 'audit_chain is append-only');
@@ -95,6 +113,38 @@ class Database:
             "INSERT OR IGNORE INTO audit_chain_head VALUES(1,?,?)",
             (tail["n"], tail["head"]),
         )
+        if self._pending_clock_attach is not None:
+            self._pending_clock_attach(self)
+            self._pending_clock_attach = None
+
+    @property
+    def clock(self):
+        """The server-owned time source. Read-only by construction (G1.0.2)."""
+        return self._clock
+
+    def bind_clock(self, clock):
+        """Composition-root injection point, usable exactly once.
+
+        A Database built without an explicit clock boots on a default
+        WallClock; the Server (the only composition root) may bind its clock
+        there once. A Database that already carries an explicit clock is
+        authoritative as-is, and binding a DIFFERENT clock fails closed —
+        two time sources in one process was the dual-clock bug class.
+        """
+        with self.lock:
+            if clock is self._clock:
+                return self._clock
+            if self._clock_kind_explicit:
+                raise RuntimeError(
+                    f"database clock {self._clock.kind!r} is already bound; "
+                    f"refusing to swap in {clock.kind!r} (fail-closed: one "
+                    "process, one time source)")
+            self._clock = clock
+            self._clock_kind_explicit = True
+            attach = getattr(clock, "attach_database", None)
+            if attach is not None:
+                attach(self)
+            return self._clock
 
     @contextmanager
     def transaction(self):

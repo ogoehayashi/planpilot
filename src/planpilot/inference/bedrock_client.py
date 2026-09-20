@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 import re
 import socket
@@ -11,6 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from planpilot.clock import SGT
 
 DEFAULT_BEDROCK_REGION = 'ap-southeast-1'
 DEFAULT_BEDROCK_MODEL = 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'
@@ -67,8 +69,12 @@ def provider_error_detail(error, token):
 
 
 class BedrockClient:
-    def __init__(self, db, *, region=None, model=None, token=None, transport=None):
+    def __init__(self, db, *, region=None, model=None, token=None, transport=None,
+                 calendar_clock=None):
         self.db = db
+        # Billing-calendar hook for tests only (inject FixedClock); production
+        # leaves it None and the real SGT wall clock below is the only source.
+        self._calendar_clock = calendar_clock
         self.region = region or os.environ.get('PLANPILOT_BEDROCK_REGION', DEFAULT_BEDROCK_REGION)
         self.model = model or os.environ.get('PLANPILOT_BEDROCK_MODEL', DEFAULT_BEDROCK_MODEL)
         if not re.fullmatch(r'[a-z]{2}(?:-[a-z]+)+-\d', self.region):
@@ -130,7 +136,17 @@ class BedrockClient:
         if len(raw) > 24000:
             raise InferenceError('输入摘要超过本次模型调用上限，请缩小数据范围。')
         token = self._credential()
-        call_id, day = str(uuid.uuid4()), self.db.clock.now()[:10]
+        # BILLING time, not business time: the daily cap is a cost guard
+        # measured per real calendar day (contract cost controls). Sharing
+        # the ScenarioClock would stack every demo onto the fictional
+        # 2026-09-14 and reset the quota whenever scenario time crossed
+        # midnight mid-session (G1.0.2 P1). Like token expiry, this stays
+        # on the real wall clock — the audit/decision timestamp right
+        # below still uses the server clock.
+        call_id = str(uuid.uuid4())
+        calendar = (self._calendar_clock.now() if self._calendar_clock
+                    else datetime.now(SGT).isoformat())
+        day = calendar[:10]
         reserved = len(raw) + max_tokens
         with self.db.transaction():
             calls = self.db.conn.execute('SELECT count(*) FROM inference_calls WHERE run_id=?', (run_id,)).fetchone()[0]

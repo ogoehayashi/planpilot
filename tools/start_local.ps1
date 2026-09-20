@@ -49,7 +49,6 @@ if ($secret -notmatch '^[0-9]{32,}$') {
 
 $env:PYTHONPATH = Join-Path $projectRoot 'src'
 $env:PLANPILOT_AUTH_SECRET = $secret
-$env:PLANPILOT_CLOCK_MODE = $ClockMode
 $python = Join-Path $projectRoot '.venv-runtime\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python)) {
     throw "Project Python environment not found: $python"
@@ -69,5 +68,28 @@ $apiHost = if ($env:PLANPILOT_HOST) { $env:PLANPILOT_HOST } else { '127.0.0.1' }
 $apiPort = if ($env:PLANPILOT_PORT) { $env:PLANPILOT_PORT } else { '8080' }
 Write-Host "API: http://${apiHost}:${apiPort}/" -ForegroundColor Cyan
 Write-Host ''
+
+$env:PLANPILOT_CLOCK_MODE = $ClockMode
+if ($ClockMode -eq 'scenario') {
+    # G1.0.2 (review P1-3): the anchor is DERIVED from the dataset actually
+    # served (planning_start), never hardcoded. If the dataset changes, the
+    # clock follows it; a missing/zone-less planning_start fails startup here
+    # (the server re-validates via clock_from_env).
+    $datasetFile = if ($env:PLANPILOT_SCENARIO_DATASET) { $env:PLANPILOT_SCENARIO_DATASET } else { 'factory_demo_v18.json' }
+    $datasetPath = Join-Path $projectRoot "data\$datasetFile"
+    if (-not (Test-Path -LiteralPath $datasetPath)) {
+        throw "scenario dataset not found: $datasetPath"
+    }
+    $anchor = (Get-Content -LiteralPath $datasetPath -Raw | ConvertFrom-Json).planning_start
+    if ([string]::IsNullOrWhiteSpace($anchor)) {
+        throw "dataset $datasetFile has no planning_start; refusing to start a scenario clock"
+    }
+    if (-not ($anchor -match '\+08:00$')) {
+        throw "dataset planning_start '$anchor' must carry an explicit +08:00 offset"
+    }
+    $env:PLANPILOT_SCENARIO_NOW = $anchor
+    $env:PLANPILOT_SCENARIO_DATASET = $datasetFile
+    Write-Host "Scenario clock anchor from dataset: $anchor" -ForegroundColor DarkGray
+}
 
 & $python (Join-Path $projectRoot 'tools\api_server.py')

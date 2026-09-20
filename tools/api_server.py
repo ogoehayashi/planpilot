@@ -45,10 +45,11 @@ class Server(ThreadingHTTPServer):
         self.db, self.secret = db, secret
         # Server-owned clock — the ONE time source for lifecycle, approval,
         # audit chain, decision trace, security events and factory state.
-        # G1.0.1: the Database instance is re-pointed at this clock so audit
-        # stamps can never disagree with scenario stamps (dual-clock leak).
-        self.clock = clock or getattr(db, "clock", None) or WallClock()
-        db.clock = self.clock
+        # G1.0.2: injection goes through db.bind_clock(), which is read-only
+        # afterwards and fails closed on a conflicting second clock. A
+        # ScenarioClock binds its durable session here (restart-monotonic).
+        self.clock = clock or db.clock
+        db.bind_clock(self.clock)
         self.authority = RuntimeAuthority(db, self.clock)
         self.factory_states = FactoryStateRegistry(db)
         self.security_events = SecurityEventService(db)

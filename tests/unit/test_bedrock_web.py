@@ -361,3 +361,25 @@ def test_second_server_cannot_bind_same_address(db):
             module.Server(server.server_address, db, 'test-secret-' * 4, ROOT / 'examples')
     finally:
         server.server_close()
+
+
+def test_daily_budget_uses_billing_calendar_not_scenario_clock(db, monkeypatch):
+    """G1.0.2 review P1-4: the daily cost guard counts per REAL calendar day.
+    A ScenarioClock-stamped DB must not stack every demo onto the fictional
+    2026-09-14, and scenario midnight must not reset a quota that AWS bills
+    are still spending. Production leaves calendar_clock unset (real SGT);
+    the injected FixedClock here stands in for that wall clock."""
+    from planpilot.clock import FixedClock, ScenarioClock
+    scenario_db = Database(':memory:', clock=ScenarioClock("2026-09-14T08:00:00+08:00"))
+    try:
+        transport = Transport('hello')
+        client = BedrockClient(
+            scenario_db, token='test-only-credential', transport=transport,
+            calendar_clock=FixedClock('2026-09-20T10:00:00+08:00'))
+        client.converse('system', 'question', run_id='r1', actor='planner')
+        days = [r['day'] for r in
+                scenario_db.conn.execute('SELECT day FROM inference_calls').fetchall()]
+        assert days == ['2026-09-20']       # billing calendar, not scenario date
+        assert '2026-09-14' not in days
+    finally:
+        scenario_db.close()

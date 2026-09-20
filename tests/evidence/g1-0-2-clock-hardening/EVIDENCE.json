@@ -1,0 +1,41 @@
+{
+  "evidence_id": "g1-0-2-clock-hardening",
+  "gate": "G1.0.2 (independent-review CHANGES REQUESTED remediation; G1 final baseline gate)",
+  "date": "2026-09-20",
+  "branch": "p1-3-hardening",
+  "base_commit": "3f8f793",
+  "review_blockers_addressed": [
+    "P0 ScenarioClock restart rewind: persisted clock_session (anchor/real_wall_started_at/last_issued); recovery = max(anchor+real-elapsed, last_issued); repeated restarts can no longer extend approval windows",
+    "P1-1 four-layer field-level agreement: lifecycle/audit-chain/decision-trace/security-event/factory-state now asserted per-column in one instant, both scenario and real wall clock",
+    "P1-2 error.get('code') -> error_code + full details contract assertion",
+    "P1-3 no silent hardcoded scenario anchor: clock_from_env requires PLANPILOT_SCENARIO_NOW (strict +08:00 validation); start_local derives it from the selected dataset planning_start",
+    "P1-4 Bedrock daily budget counts on real SGT billing calendar (calendar_clock seam), never the scenario date",
+    "P2 Database.clock is a read-only property; composition-root rebind is one-shot bind_clock(), foreign clock fails closed"
+  ],
+  "raw_stdout": {
+    "note": "Files below are the untouched stdout of the exact commands listed; hashes are SHA-256 of the shipped bytes. Reproduce with env -u PYTHONUTF8 (default Windows GBK environment).",
+    "artifacts": {
+      "g102_unit.log": {
+        "sha256": "8cd3cf11809505c042b75f610c5caa66a89a5ffc4d7332330d134f9c8704c146",
+        "command": "pytest tests/unit -q --tb=line",
+        "outcome": "636 passed (was 629 at G1.0.1; +7 new G1.0.2 regression tests)"
+      },
+      "g102_full.log": {
+        "sha256": "e2e2e97e6da817f7eec85aab26933517b96a9218c1a7733a0017970f0dc6de59",
+        "command": "pytest tests/ -q --tb=line",
+        "outcome": "643 passed (was 636 at G1.0.1; same +7)"
+      },
+      "g102_negctl.log": {
+        "sha256": "a1980b201d0ce467b8109eb5b9e706085737d392e0c9170591e720d2d04d4a73",
+        "command": "pytest tests/negative_control -q --tb=line + before/after sha256 of every mutation-target file",
+        "outcome": "7 passed; RESTORE-MISMATCH: none (all mutated targets byte-identical afterwards)"
+      }
+    }
+  },
+  "contract": {
+    "file": "contract/planpilot_agent_contract_v1.8.json",
+    "sha256_first12": "b92e53f4",
+    "changed": false
+  },
+  "intentional_deviation_approved_by_reviewer": "token expiry stays on real wall clock (auth time, not business time)"
+}
