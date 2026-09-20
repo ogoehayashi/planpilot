@@ -628,3 +628,27 @@ none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.jso
 - 批准范围：Phase 0 + Phase 1 的 1.1–1.4（双表 DDL、canonical 指纹、
   Publisher skeleton、Case A/B、双连接测试）；不提前进入 Phase 2
   （lifecycle/audit/HTTP wiring）；不动 tag、不改合同。
+
+---
+
+## 2026-09-20 — 暂停点：Phase 0 开工前快照（明日续）
+
+- 类型：进度快照（应作者要求暂停，非里程碑）。
+- 仓状态：HEAD=`6cb13f9`（三勘误提交），工作区干净；tag
+  `g2-baseline-5bf299a`→`5bf299a` 未动；合同 SHA `b92e53f4…fe639` 未动。
+- Phase 0 未完成项：继承套件四连跑（`tests/unit` 642、`tests/` 649、
+  clock 三文件、negative_control 7，约 15 分钟）后台跑到一半被中止；
+  半成品证据目录 `tests/evidence/g2-phase0-baseline/` 已删除，未留残渣。
+- 明日续点（按批准范围，勿越界）：
+  1. 重跑上述四命令 → raw stdout 落 `tests/evidence/g2-phase0-baseline/`
+     （格式照 g1-0-2c 包：EXITCODE 行 + EVIDENCE.json + LF sha256；
+     脚本 `g2_phase0_run.sh` 逻辑照抄），另做 0.3 合同面钉死测试
+     （publish 五字段输入/四字段输出/错误枚举/重试性 registry）；
+  2. Phase 1 只做 tasks 1.1–1.4：`publication_receipt` +
+     `idempotency_registry` DDL（design §3 原文照搬进
+     `Database.__init__` executescript）、canonical 五字段指纹、
+     PublisherService skeleton（§4 步骤 3–4 探测路径）、Case A/B +
+     双连接 barrier 测试；
+  3. 不碰 lifecycle/audit/HTTP wiring（Phase 2），不改合同，不动 tag。
+- 环境备忘：跑测试 `.venv-review/Scripts/python.exe -m pytest`，脚本内
+  `env -u PYTHONUTF8`；E 盘为 U 盘，开工先探挂载。
