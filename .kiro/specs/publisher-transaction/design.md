@@ -240,8 +240,11 @@ is kept with that clarification:
    the existing class whose docstring is exactly "Caller or persisted-state
    defect with no truthful registered tool code"); `adapt_exception`'s
    fall-through (errors.py:70) transports it as `INTERNAL_ERROR` with
-   `diagnostic_class="ApprovalInvariantError"`, non-retryable, 503, zero
-   change. `VALIDATION_FAILED` is NOT usable here: its contract details
+   `diagnostic_class="ApprovalInvariantError"`, 503, zero change;
+   retryable only under the registered policy (contract
+   `retryability_registry`: `INTERNAL_ERROR` is `retryable:true` — at
+   most one retry after a successful dependency health check).
+   `VALIDATION_FAILED` is NOT usable here: its contract details
    require the factory-validation shape `{status:"INVALID",
    errors:[validation_issue…], quarantined_entity_count}` — returning it
    for *missing internal evidence* would force the publisher to fabricate
@@ -329,8 +332,9 @@ INIT
       require state == PREPARED (any other state = protocol defect →
         INTERNAL_ERROR; the database is untouched so this MAY raise)
       conn.commit()                         # the durable point
-      state: PREPARED → DURABLE_COMMITTED   # set the INSTANT commit
+      state = DURABLE_COMMITTED             # set the INSTANT commit
         returns, before anything else can fail
+      _txn_open = False                     # no dangling open-txn flag
       FROM DURABLE_COMMITTED ONWARD commit() NEVER RAISES at the
         middleware — the publication is persisted, so the only honest
         outcome is success. Any error in the memory-sync step below is

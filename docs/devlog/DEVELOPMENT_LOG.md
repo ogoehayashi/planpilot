@@ -608,3 +608,23 @@ none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.jso
   `b92e53f4…fe639` 不变；四文件 33 处行号引用逐一在范围内；
   `web/static/p1_3.js` 虚构引用已改为真实 `tools/web/p1_3.js:254`。
 - 状态：停在评审点，等待批准进入 Phase 1；未写任何 G2 实现代码。
+
+---
+
+## 2026-09-20 — G2 Design-First：第三轮后三处勘误（reviewer：核心通过，Phase 1 有条件批准）
+
+- 类型：文档勘误（reviewer 结论 *Conditionally Approved* 指定三处）
+- 内容：①design §4 步骤 5 `INTERNAL_ERROR` 重试性纠错——原误写
+  non-retryable，合同 `retryability_registry` 实测 `INTERNAL_ERROR` 为
+  retryable:true（仅允许依赖健康检查成功后至多重试一次），按注册策略
+  改写；②§4.5 commit() 伪码在 `conn.commit()` 返回后显式
+  `state = DURABLE_COMMITTED` + `_txn_open = False`，杜绝双标志矛盾；
+  ③tasks 4.5(e) trace 措辞与 design §6.4 best-effort 对齐（healthy
+  observer path 恰好一条；observer 异常或 `_finish` 前进程死亡可缺失，
+  不得影响业务结果）。
+- 验证：合同 SHA `b92e53f4…fe639` 不变；全库再无 INTERNAL_ERROR
+  non-retryable 残留；40 处 `file.py:line` 引用扫描全部界内；
+  `git diff --check` 干净。
+- 批准范围：Phase 0 + Phase 1 的 1.1–1.4（双表 DDL、canonical 指纹、
+  Publisher skeleton、Case A/B、双连接测试）；不提前进入 Phase 2
+  （lifecycle/audit/HTTP wiring）；不动 tag、不改合同。

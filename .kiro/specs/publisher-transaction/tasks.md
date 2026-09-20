@@ -147,7 +147,10 @@ this file and `design.md`. Phase 0 is verification-only (no code).
       `INTERNAL_ERROR`(`diagnostic_class="ApprovalInvariantError"`)
       zero-change — not `VALIDATION_FAILED` (reviewer round-3 P1) (17);
       (e) observer emits exactly one tool-invocation trace per outcome
-      across first publish / replay / conflict (18).
+      across first publish / replay / conflict **on a healthy observer
+      path**; an observer exception or a process dying before `_finish`
+      may leave the trace missing, and must never affect the business
+      outcome (design §6.4 best-effort) (18).
 
 ## Phase 4 — suite, evidence, review handoff
 
