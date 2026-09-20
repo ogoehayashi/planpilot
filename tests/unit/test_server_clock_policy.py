@@ -39,7 +39,9 @@ from planpilot.persistence import Database
 from planpilot.security import issue_token
 from planpilot.store import canonical_plan_digest
 
-from unit.test_runtime_authority import HORIZON_END, NOW, clock, install, signed_content
+from unit.test_runtime_authority import (HORIZON_END, NOW, clock, impacts,
+                                         install, signed_content,
+                                         validator_result)
 
 ROOT = Path(__file__).resolve().parents[2]
 # The P0-1 failure moment: horizon guard is 2026-09-18T17:00 + 24h.
@@ -276,7 +278,8 @@ def test_real_http_demo_flow_survives_server_restart(tmp_path):
         _stop(server, thread, db1)
 
     # Genuine restart: new Database over the same file, NEW ScenarioClock
-    # (re-anchored at boot — epoch policy is explicit: anchor + elapsed).
+    # resuming its persisted session (G1.0.2: never re-anchored at boot —
+    # anchor + elapsed real time including downtime, floored at last issued).
     db2 = Database(db_path)
     server2, thread2 = _start(api, db2, secret, ScenarioClock(anchor))
     try:
@@ -577,16 +580,21 @@ def test_database_clock_is_structurally_read_only(tmp_path):
     db.close()
 
 
-def test_four_authoritative_layers_stamp_the_same_instant(tmp_path, fixtures):
-    """P1-1 at the strength the report claimed: lifecycle (authority_state.
-    updated_at), audit (audit record created_at), decision trace
-    (decision_traces record recorded_at), security event (security_events
-    record logged_at) and factory state (factory_states.created_at) are each
-    read FROM THEIR OWN ROWS, must agree to the second, and all be scenario
-    time — not the host wall date."""
+@pytest.mark.parametrize("clock_kind", ["scenario", "wall"])
+def test_four_authoritative_layers_stamp_the_same_instant(
+        tmp_path, fixtures, clock_kind):
+    """P1-1 at the strength the report claimed: lifecycle (PlanStore
+    lifecycle.updated_at, read through authority.get_plan — NOT the
+    authority_state envelope), audit (audit record created_at), decision
+    trace (decision_traces record recorded_at), security event
+    (security_events record logged_at) and factory state
+    (factory_states.created_at) are each read FROM THEIR OWN ROWS, must
+    agree to the second, and all come from the single bound clock —
+    parametrised over ScenarioClock and the real host WallClock."""
     from datetime import datetime
-    db = Database(tmp_path / "layers.db", clock=ScenarioClock(
-        "2026-09-14T08:00:00+08:00"))
+    clock = (ScenarioClock("2026-09-14T08:00:00+08:00")
+             if clock_kind == "scenario" else WallClock())
+    db = Database(tmp_path / "layers.db", clock=clock)
     try:
         state = _demo_state()
         registry = FactoryStateRegistry(db)
@@ -612,18 +620,116 @@ def test_four_authoritative_layers_stamp_the_same_instant(tmp_path, fixtures):
             "SELECT record FROM audit_chain ORDER BY id").fetchall()]
         layers["audit"] = [r for r in audit_rows
                            if "created_at" in r][-1]["created_at"]
-        # Lifecycle stamp: the authority_state row is written by ANY
-        # state change — install one signed plan and read updated_at
-        # from the row itself.
+        # Lifecycle stamp: the REAL PlanStore lifecycle row, read through
+        # authority.get_plan (the authority_state envelope's updated_at is
+        # NOT the lifecycle layer — review P2). request_approval transitions
+        # the lifecycle with clock.now(), so it stamps from the bound clock.
         authority = RuntimeAuthority(db)
-        install(authority, signed_content(fixtures))
-        layers["lifecycle"] = db.conn.execute(
+        content = signed_content(fixtures)
+        # The test clock is NOW (scenario: anchor day; wall: real host time)
+        # — install helper hardcodes the scenario NOW, which is stale under a
+        # real WallClock, so drive install_validated_plan directly.
+        authority.install_validated_plan(
+            content, validator_result(content), impacts(),
+            HORIZON_END if clock_kind == "scenario" else "2099-12-31T17:00:00+08:00",
+            clock.now(), actor="planner")
+        authority.request_approval(
+            content["plan_id"], 1, content["plan_digest"],
+            "publish_plan", "planner")
+        layers["lifecycle"] = authority.get_plan(
+            content["plan_id"], 1,
+        )["lifecycle"]["updated_at"]
+        envelope = db.conn.execute(
             "SELECT updated_at FROM authority_state WHERE singleton=1"
         ).fetchone()[0]
     finally:
         db.close()
-    assert all(v.startswith("2026-09-14") for v in layers.values()), layers
+    # G1.0.2 follow-up: the envelope is written by the same clock in the same
+    # operation — assert it too, so a reviewer counter-example where the
+    # envelope drifts from the lifecycle layer fails. WallClock renders
+    # microseconds while lifecycle truncates to seconds; compare sub-second.
     instants = sorted(layers.values())
+    assert abs((datetime.fromisoformat(envelope)
+                - datetime.fromisoformat(layers["lifecycle"])
+                ).total_seconds()) < 1, (envelope, layers)
+    if clock_kind == "scenario":
+        assert all(v.startswith("2026-09-14") for v in layers.values()), layers
     span = (datetime.fromisoformat(instants[-1])
             - datetime.fromisoformat(instants[0])).total_seconds()
     assert span <= 5, f"layers disagree by {span}s: {layers}"
+
+
+def test_failed_clock_bind_leaves_no_foreign_state(tmp_path):
+    """Review P1 (bind pollution): a bind_clock whose attach fails (foreign
+    anchor on an existing session) must leave the Database EXACTLY as it
+    was — never a half-committed foreign clock that RuntimeAuthority(db)
+    would then happily accept. After the failed bind the legitimate clock
+    still binds."""
+    path = tmp_path / "atomic.db"
+    anchor = "2026-09-14T08:00:00+08:00"
+    db1 = Database(path, clock=ScenarioClock(anchor))
+    db1.clock.now()
+    db1.close()
+
+    db2 = Database(path)  # reopens on the default, non-explicit WallClock
+    old = db2.clock
+    foreign = ScenarioClock("2027-01-01T08:00:00+08:00")
+    with pytest.raises(ValueError):
+        db2.bind_clock(foreign)
+    assert db2.clock is old, "failed bind must not swap the clock"
+    assert foreign._db is None, "failed attach must not mark the foreign clock"
+    # Authority over the unpolluted db still refuses the foreign clock.
+    with pytest.raises(ValueError):
+        RuntimeAuthority(db2, clock=foreign)
+    # The legitimate clock still binds after the failure.
+    good = ScenarioClock(anchor)
+    assert db2.bind_clock(good) is good
+    assert db2.clock is good
+    assert db2.clock.now() >= anchor
+    db2.close()
+
+
+def test_concurrent_stale_writer_returns_high_water(tmp_path):
+    """Review P1 (concurrency): under ThreadingHTTPServer a thread can
+    compute an older stamp, block on the lock, and wake after a newer one
+    persisted. now()/_persist must then RETURN the high-water row value —
+    issued scenario time must be non-decreasing for every caller, not just
+    in the database."""
+    db = Database(tmp_path / "hw.db", clock=ScenarioClock(
+        "2026-09-14T08:00:00+08:00"))
+    clock = db.clock
+    high = clock._persist("2026-09-14T09:00:00+08:00")
+    assert high == "2026-09-14T09:00:00+08:00"
+    stale = clock._persist("2026-09-14T08:30:00+08:00")
+    assert stale == "2026-09-14T09:00:00+08:00", "loser must be clamped up"
+    issued = clock.now()  # local monotonic stamp is behind the row here
+    assert issued >= "2026-09-14T09:00:00+08:00", issued
+    row = db.conn.execute(
+        "SELECT last_issued_scenario_time FROM clock_session WHERE singleton=1"
+    ).fetchone()[0]
+    assert row == issued == "2026-09-14T09:00:00+08:00"
+    db.close()
+
+
+def test_threaded_now_stays_monotonic_per_caller(tmp_path):
+    """Barrier-synchronised smoke for the same guarantee: 8 threads hammer
+    now(); every caller's own sequence is non-decreasing and the persisted
+    row equals the global maximum — no caller ever handed back the past."""
+    db = Database(tmp_path / "race.db", clock=ScenarioClock(
+        "2026-09-14T08:00:00+08:00"))
+    clock = db.clock
+    barrier = threading.Barrier(8)
+    sequences = []
+    def worker():
+        barrier.wait()
+        sequences.append([clock.now() for _ in range(40)])
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    for seq in sequences:
+        assert seq == sorted(seq), "caller saw time go backwards"
+    row = db.conn.execute(
+        "SELECT last_issued_scenario_time FROM clock_session WHERE singleton=1"
+    ).fetchone()[0]
+    assert row == max(max(s) for s in sequences)
+    db.close()

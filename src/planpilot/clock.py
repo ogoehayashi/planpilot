@@ -179,24 +179,27 @@ class ScenarioClock(Clock):
         stamp = (self._base
                  + timedelta(seconds=time.monotonic() - self._boot)
                  ).isoformat(timespec="seconds")
-        self._persist(stamp)
-        return stamp
+        # Return the database high-water, not the local candidate: under the
+        # ThreadingHTTPServer a thread can compute an older stamp, block on
+        # the lock, and wake after a newer one persisted. Callers must never
+        # observe issued time going backwards (G1.0.2 follow-up).
+        return self._persist(stamp)
 
-    def _persist(self, stamp: str) -> None:
+    def _persist(self, stamp: str) -> str:
         # Seconds-resolution write-through. The RLock serialises writers but
-        # cannot order them (a thread can compute an older stamp, block, then
-        # wake after a newer one persisted) — so _saved is the high-water mark
-        # and any stamp that is not strictly newer is dropped. In-process
-        # monotonicity holds because time.monotonic() never rewinds.
+        # cannot order them, so last_issued is the high-water mark: the SQL
+        # only ever moves forward AND the function returns whatever the row
+        # now holds — the caller's stamp if it won, the newer value if not.
         if self._db is None:
-            return
+            return stamp
         with self._db.lock:
-            if stamp <= self._saved:
-                return
-            self._db.conn.execute(
-                "UPDATE clock_session SET last_issued_scenario_time=? "
-                "WHERE singleton=1", (stamp,))
-            self._saved = stamp
+            if stamp > self._saved:
+                self._db.conn.execute(
+                    "UPDATE clock_session SET last_issued_scenario_time=? "
+                    "WHERE singleton=1 AND last_issued_scenario_time < ?",
+                    (stamp, stamp))
+                self._saved = stamp
+            return self._saved
 
     def elapsed(self) -> float:
         return time.monotonic() - self._boot

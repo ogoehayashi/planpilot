@@ -130,6 +130,11 @@ class Database:
         there once. A Database that already carries an explicit clock is
         authoritative as-is, and binding a DIFFERENT clock fails closed —
         two time sources in one process was the dual-clock bug class.
+
+        The attach is validated BEFORE any state commits (G1.0.2 follow-up):
+        a clock whose session conflicts (foreign anchor) raises and leaves
+        this Database exactly as it was — never a half-bound foreign clock
+        that RuntimeAuthority would then accept.
         """
         with self.lock:
             if clock is self._clock:
@@ -139,11 +144,11 @@ class Database:
                     f"database clock {self._clock.kind!r} is already bound; "
                     f"refusing to swap in {clock.kind!r} (fail-closed: one "
                     "process, one time source)")
-            self._clock = clock
-            self._clock_kind_explicit = True
             attach = getattr(clock, "attach_database", None)
             if attach is not None:
                 attach(self)
+            self._clock = clock
+            self._clock_kind_explicit = True
             return self._clock
 
     @contextmanager

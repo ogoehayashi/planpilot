@@ -1,0 +1,35 @@
+{
+  "evidence_id": "g1-0-2b-bind-atomicity",
+  "gate": "G1.0.2 follow-up (review verdict: P0 VERIFIED CLOSED, P1 SMALL FIX REQUIRED)",
+  "commit_subject": "clock: atomic bind + high-water now() (G1.0.2 review P1a/P1b/P2)",
+  "contract": "contract/planpilot_agent_contract_v1.8.json",
+  "contract_sha256_prefix": "b92e53f4",
+  "runs": [
+    {
+      "command": "pytest tests/unit -q",
+      "log": "g102b_unit.log",
+      "result": "640 passed",
+      "sha256": "43b225bc3a10a05a36355de1fefe9a10dc0c4066b2e260e89e8f1680a88220c4"
+    },
+    {
+      "command": "pytest tests/ -q (full suite)",
+      "log": "g102b_full.log",
+      "result": "647 passed, EXITCODE=0",
+      "sha256": "45f3cdcc2f38f150b5b02479ecaee425f41a557863fbb988a9ed118beb9d0cd6"
+    },
+    {
+      "command": "pytest tests/unit/test_server_clock_policy.py tests/unit/test_bedrock_web.py -q",
+      "log": "g102b_clock.log",
+      "result": "55 passed",
+      "sha256": "826c966e019f79d0b14659d9bbb189f2adf2a4303e7275ff01697f8a33245908"
+    }
+  ],
+  "new_regressions": [
+    "test_failed_clock_bind_leaves_no_foreign_state (P1a: bind failure leaves Database unchanged)",
+    "test_concurrent_stale_writer_returns_high_water (P1b: late stale writer clamped to row high-water)",
+    "test_threaded_now_stays_monotonic_per_caller (P1b: 8-thread barrier, per-caller monotonic)",
+    "test_four_authoritative_layers_stamp_the_same_instant[wall] (P2: parametrised, real lifecycle via get_plan)"
+  ],
+  "negctl_byte_restore_mismatch": "none",
+  "notes": "lifecycle layer now read through authority.get_plan()[lifecycle][updated_at]; authority_state envelope asserted separately; devlog PLANPILOT_SCENARIO_NOW and re-anchor comment corrections included."
+}

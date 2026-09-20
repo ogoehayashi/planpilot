@@ -458,7 +458,7 @@ append-only 仅对本节以下的新条目生效。追加/纠正内容如下:
   瞬间，scenario 与真实墙钟各一条，达到报告宣称强度。
 - **P1-2**：断言 `error_code == APPROVAL_WINDOW_CLOSED` + 完整 details 三字段，
   不再依赖英文消息措辞。
-- **P1-3**：scenario 模式必须显式 `PLANPILOT_SCENARIO_ANCHOR`（严格 +08:00
+- **P1-3**：scenario 模式必须显式 `PLANPILOT_SCENARIO_NOW`（严格 +08:00
   带时区校验，缺失/无时区/偏移不符启动失败）；`start_local.ps1` 从所选数据集
   `planning_start` 派生注入；`clock.py` 删除写死默认锚点。
 - **P1-4**：Bedrock 日预算 `day` 列改用真实 SGT 计费日历（`calendar_clock`
@@ -471,3 +471,32 @@ append-only 仅对本节以下的新条目生效。追加/纠正内容如下:
 （G1.0.1 基线 629 + 本轮新增 7）；全量 tests/ **643 passed**（636 + 7）；
 negative_control **7 passed**，变异目标文件前后哈希全部一致（RESTORE-MISMATCH:
 none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.json`。
+
+## 2026-09-20 — G1.0.2 追加（复验 P1 收口：绑定原子性 + 并发高水位）
+
+独立复验判定 P0 VERIFIED CLOSED，但 `bind_clock()` 失败后会残留未附着的
+外来时钟（评审给出真实 DB 复现：异常被调用方吞掉后 RuntimeAuthority 仍
+接受污染实例），且 `now()` 在 ThreadingHTTPServer 下可能把旧 stamp 交给
+调用者。本补丁按评审修法收口，不扩范围：
+
+- **P1a**：`bind_clock()` 改为先 `attach_database()` 验证、后提交
+  `_clock`/`_clock_kind_explicit` 两字段——anchor 冲突抛错时 Database
+  保持原状。回归 `test_failed_clock_bind_leaves_no_foreign_state`：失败
+  绑定后旧时钟仍在、外来钟未附着、合法钟仍可绑定。
+- **P1b**：`_persist()` 返回数据库高水位，`now()` 原样返回；SQL 加
+  `AND last_issued_scenario_time < ?` 只前进。回归
+  `test_concurrent_stale_writer_returns_high_water`（迟到旧值被抬回）与
+  `test_threaded_now_stays_monotonic_per_caller`（8 线程 barrier，每个
+  调用者自己的时间序列非降，行值=全局最大）。
+- **P2 证据修正**：四层测试 lifecycle 层不再读 authority_state 信封，
+  改读 `authority.get_plan(...)["lifecycle"]["updated_at"]`（信封另行
+  单独断言与 lifecycle 亚秒一致）；测试参数化 scenario/wall 两种时钟，
+  兑现报告「各一条」的说法。
+- **文档**：旧重启测试注释「re-anchored at boot」改为持久会话恢复语义；
+  devlog 变量名 `PLANPILOT_SCENARIO_ANCHOR` 更正为实际的
+  `PLANPILOT_SCENARIO_NOW`。上一轮聊天报告把错误 details 写成
+  horizon_end/min_server_now/max_server_now——代码与合同正确
+  （server_now/horizon_guard/minimum_ttl_seconds），此处以本条为准。
+
+验收：tests/unit 640 passed；tests/ 全量 647 passed EXITCODE=0；negctl
+7 passed 恢复无差异；证据 `tests/evidence/g1-0-2b-bind-atomicity/`。
