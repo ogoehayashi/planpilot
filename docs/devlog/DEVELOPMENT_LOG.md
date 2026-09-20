@@ -539,6 +539,47 @@ none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.jso
 
 ---
 
+## 2026-09-20 — G2 Design-First：第三轮评审修订（纯文档）
+
+- 类型：设计 / 评审
+- 证据：`.kiro/specs/publisher-transaction/` 四文件；合同 SHA 不变
+  `b92e53f4…fe639`；本轮修订后全库 40 处 `file.py:line` 引用程序化扫描
+  逐一在界内通过。
+- 评审结论链：三轮 **CHANGES REQUESTED** → 本轮第三轮纯文档修订。
+  原六项 5/6 关闭，新增 1 个 P0 + 若干 P1/P2 矛盾，逐条落档：
+  1. **P0 post-COMMIT 假阴性**：design §4.5 状态机新增
+     `DURABLE_COMMITTED`——`conn.commit()` 返回即进入该态；自此
+     `commit()` 绝不向 middleware 抛异常（抛出会走 ToolCommitFailure
+     路径返回 "no business state was committed" 的 INTERNAL_ERROR，
+     而 DB 实际已持久化——正是幂等发布最危险的"成功却报失败"窗口）；
+     内存同步失败改为设 `_poisoned`、释放锁、照常返回已验证成功
+     receipt；`rollback()` 在该态只放资源、绝不标 ROLLED_BACK；
+     §8 case 13 改写为断言集：HTTP 200 + 字节一致 receipt + DB 已发布
+     + poison 只拦后续调用 + reload 恢复 + 重试零新审计。
+  2. **P1 validator evidence 映射**：证据缺失/被删 ≠ `VALIDATION_FAILED`
+     （合同该码 details 强制 `status/errors/quarantined_entity_count`
+     校验报告结构，塞内部证据丢失会逼实现者伪造 validation_issue）。
+     改为 `ApprovalInvariantError`（approval/errors.py:145 已存在）→
+     middleware → `INTERNAL_ERROR` + `diagnostic_class=
+     "ApprovalInvariantError"`；`VALIDATION_FAILED` 仅留给真实 INVALID
+     校验结果（design §4 步骤 5 / §8 case 17 / tasks 4.5）。
+  3. 次级四项：删臆造码 `INVALID_STATE_TRANSITION`（非法 lifecycle
+     转换=内部 invariant→`INTERNAL_ERROR/503`）；Case D HTTP 修正
+     400→**403**（与 §6.3 表一致，撤销 409）；Case D 不再造
+     "StoreError sibling"（`StoreError.RETRYABILITY` 无 POLICY_VIOLATION
+     键，`.retryable` 会 KeyError——实测），直接用
+     `FrameworkDomainError("POLICY_VIOLATION", …)`（errors.py:30，实测
+     `resolve_error('POLICY_VIOLATION')` 存在非重试，middleware 直接
+     消费零改动）；trace 保证收紧为 best-effort observability
+     （observer 异常被 middleware 吞、进程可在 `_finish` 前死，
+     "必产生一条"仅在健康路径成立）。
+- 验证：`git diff --check` 干净；`ApprovalSetReplaySafe`/`VALIDATOR_`/
+  `INVALID_STATE_TRANSITION`/`400 → 409` 残留 grep 清零；合同零改动；
+  四份 spec + devlog 共 5 文件，无任何实现代码、无测试改动。
+- 状态：G2 第三轮修订完成，Phase 1 待批准后开始。
+
+---
+
 ## 2026-09-20 — G2 Design-First：spec 初稿 + 两轮评审修订（纯文档，无实现代码）
 
 - 类型：设计 / 评审

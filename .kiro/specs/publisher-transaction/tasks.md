@@ -80,7 +80,12 @@ this file and `design.md`. Phase 0 is verification-only (no code).
       `BEGIN IMMEDIATE` and runs steps 3–11 (§4.5), commit = step 12 COMMIT
       then the in-memory swap, rollback = discard + release exactly once,
       idempotent; BEGIN-failure never releases what was never acquired;
-      commit-then-sync gap poisons the authority (§4.5 rule 3, `reload_from_db`
+      post-COMMIT durability per §4.5 rule 3: once `conn.commit()` returns,
+      state = DURABLE_COMMITTED, `commit()` never raises at the middleware,
+      a memory-sync failure poisons the authority (staged refs discarded,
+      lock released) AND the call still returns 200 with the stored receipt;
+      `rollback()` at/after DURABLE_COMMITTED releases resources without
+      ever marking ROLLED_BACK (`reload_from_db`
       clears). Transition core runs INSIDE the open txn (never re-opens BEGIN
       IMMEDIATE; shared staging primitives per §4.5 rule 4, no second state
       machine). An already-PUBLISHED binding resolves through §5 case C/D
@@ -128,15 +133,19 @@ this file and `design.md`. Phase 0 is verification-only (no code).
 - [ ] **3.6 Poisoned authority + real hard-kills + immutability +
       evidence negative + traces (cases 13–18, reviewer P1)**
       (a) exception injected between `conn.commit()` and the in-memory swap →
-      authority poisoned, every entry point `INTERNAL_ERROR` until
-      `reload_from_db()`, memory then equals DB (case 13);
+      THE CALL STILL RETURNS 200 + byte-identical verified receipt, DB
+      fully committed; authority poisoned for SUBSEQUENT calls
+      (`INTERNAL_ERROR` until `reload_from_db()`), memory then equals DB;
+      replay after recovery adds no second `plan_published` (case 13,
+      reviewer round-3 P0);
       (b) TWO genuine subprocess hard-kills via `os._exit()` — audit written
       / receipt not (case 14) and commit done / HTTP response not sent
       (case 15) — verified from a FRESH process reopening the same DB file:
       audit chain, receipt, registry, lifecycle, revision, `verify_audit()`;
       (c) alias immutability snapshots byte-identical (16);
-      (d) keep APPROVED set, delete validation evidence → `VALIDATION_FAILED`
-      zero-change (17);
+      (d) keep APPROVED set, delete validation evidence →
+      `INTERNAL_ERROR`(`diagnostic_class="ApprovalInvariantError"`)
+      zero-change — not `VALIDATION_FAILED` (reviewer round-3 P1) (17);
       (e) observer emits exactly one tool-invocation trace per outcome
       across first publish / replay / conflict (18).
 

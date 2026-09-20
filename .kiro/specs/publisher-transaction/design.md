@@ -227,9 +227,7 @@ is kept with that clarification:
    `ApprovalService._validated[(plan_id, version, digest)]`
    (approval/service.py:96). The publisher calls a new read-only method
    `approvals.require_validated_binding(plan_id, version, digest)` which
-   fails closed (zero change; `VALIDATION_FAILED` when the record is
-   missing/fails its checks, non-retryable — registered in
-   `retryability_registry`, no new code invented) unless ALL of:
+   fails closed (zero change) unless ALL of:
    - a validation record exists for exactly that binding;
    - `digest_verified is True`;
    - `is_feasible is True`;
@@ -238,8 +236,23 @@ is kept with that clarification:
    - the approval set presented in step 6 was derived from the COMPLETE
      required-action set of THAT validation record (binding equality of
      plan_id/version/digest already enforced by `require_approved`).
+   Any violation raises `ApprovalInvariantError` (approval/errors.py:145 —
+   the existing class whose docstring is exactly "Caller or persisted-state
+   defect with no truthful registered tool code"); `adapt_exception`'s
+   fall-through (errors.py:70) transports it as `INTERNAL_ERROR` with
+   `diagnostic_class="ApprovalInvariantError"`, non-retryable, 503, zero
+   change. `VALIDATION_FAILED` is NOT usable here: its contract details
+   require the factory-validation shape `{status:"INVALID",
+   errors:[validation_issue…], quarantined_entity_count}` — returning it
+   for *missing internal evidence* would force the publisher to fabricate
+   a `validation_issue` to satisfy the schema, which the reviewer rules
+   out (store/errors.py:300 `StoreInvariantError` docs state the same
+   rationale). `VALIDATION_FAILED` remains reserved for a genuine
+   validation run that legitimately returns `INVALID`.
    Negative test (reviewer-named): keep the APPROVED approval set, delete
-   the validation record → publish must fail with zero change.
+   the validation record → publish must fail `INTERNAL_ERROR`
+   (`diagnostic_class="ApprovalInvariantError"`) with zero change (§8
+   case 17).
 6. **Load full approval set**: `approvals.require_approved(
    approval_set_id, plan_id, version, digest, timestamp)` — expired/
    rejected/incomplete/invalidated already raise their contract errors.
@@ -314,24 +327,42 @@ INIT
   middleware output-schema validation (defense-in-depth over step 10)
   commit():
       require state == PREPARED (any other state = protocol defect →
-        INTERNAL_ERROR)
-      conn.commit()                         # the durable point; _txn_open=False
-      state: PREPARED → COMMITTED
+        INTERNAL_ERROR; the database is untouched so this MAY raise)
+      conn.commit()                         # the durable point
+      state: PREPARED → DURABLE_COMMITTED   # set the INSTANT commit
+        returns, before anything else can fail
+      FROM DURABLE_COMMITTED ONWARD commit() NEVER RAISES at the
+        middleware — the publication is persisted, so the only honest
+        outcome is success. Any error in the memory-sync step below is
+        caught INSIDE commit(), handled (poison + discard staged +
+        release lock), and commit() still returns NORMALLY: the
+        middleware builds the 200 outcome only when prepared.commit()
+        does not raise (middleware.py:216–219); raising after a real
+        COMMIT would make it report INTERNAL_ERROR whose contract
+        message is "The tool failed safely; no business state was
+        committed" (errors.py:55) — a lie about committed state
+        (reviewer round-3 P0: success-returned-as-failure is the worst
+        idempotency window).
       synchronise RuntimeAuthority in-memory store/approvals/revision
         from the staged copies (exactly the field swap _mutate performs
-        today at authority.py:123, just relocated after conn.commit()
-        while the lock is still held)
+        today at authority.py:123, relocated after conn.commit() while
+        the lock is still held). If ANYTHING raises here (including the
+        swap itself): set authority._poisoned = True (rule 3), discard
+        the staged references, release the lock — then RETURN NORMALLY.
       release lock exactly once (finally); state → FINISHED
   rollback():
       IDEMPOTENT by contract: legal from every state; state set with
         compare-and-set so a second call is a silent no-op (the
         middleware's _RollbackGuard may already have called it).
+      if state >= DURABLE_COMMITTED: release resources only — NEVER
+        mark ROLLED_BACK (the transaction already committed; a stale
+        guard call must not misreport an outcome that is durable).
       if _txn_open: conn.rollback() while the lock is still held
       discard staged copies
       release lock exactly once; state → ROLLED_BACK
 ```
 
-Pinned rules (each reviewer round-2, all blocking):
+Pinned rules (reviewer rounds 2–3, all blocking):
 
 1. **rollback() idempotent** — one CAS-protected transition out of
    PREPARED; `_RollbackGuard` (middleware.py:73–89) calling `rollback()`
@@ -343,17 +374,22 @@ Pinned rules (each reviewer round-2, all blocking):
    acquire precedes BEGIN, so the BEGIN-failure path releases the lock and
    nothing else; no `conn.rollback()` against a connection without an
    open transaction.
-3. **Commit-then-memory-sync gap is fail-closed**: if anything raises
-   between `conn.commit()` and the in-memory swap (including the swap
-   itself), the database is durable while `RuntimeAuthority`'s snapshot is
-   stale — serving further writes from it is exactly the "SQLite
-   committed / memory not committed" split the reviewer named. The call
-   marks the authority **poisoned**: a `_poisoned` flag set on
-   `RuntimeAuthority`, checked at the top of every read/write entry
-   point, raising `INTERNAL_ERROR` ("authority snapshot diverged; reload
-   required") until `authority.reload_from_db()` re-reads
-   `authority_state` under `db.lock` and clears it. The poisoned-authority
-   path gets its own test (§8 case 13).
+3. **After COMMIT there are no losers — and no false negatives**: the
+   moment `conn.commit()` returns, state is `DURABLE_COMMITTED` and the
+   CURRENT call must resolve to the verified success receipt (HTTP 200);
+   `commit()` swallows memory-sync failures rather than raise them,
+   because raising sends the middleware down its `ToolCommitFailure`
+   path (middleware.py:220–221) whose `INTERNAL_ERROR` message asserts
+   "no business state was committed" — after a real COMMIT that is the
+   success-returned-as-failure window the reviewer named. The stale
+   in-memory snapshot IS still a real hazard for SUBSEQUENT calls: the
+   sync failure marks the authority **poisoned** — a `_poisoned` flag
+   set on `RuntimeAuthority`, checked at the top of every read/write
+   entry point, raising `INTERNAL_ERROR` ("authority snapshot diverged;
+   reload required") until `authority.reload_from_db()` re-reads
+   `authority_state` under `db.lock` and clears it. §8 case 13
+   (round-3 reworded) pins both halves: current call 200 + real
+   receipt, later calls fail closed until reload.
 4. **One staging core** — the publish flow extracts and reuses the
    existing transaction-less primitives: `RuntimeAuthority._clone()`,
    `_serialize()` and the guarded snapshot UPDATE
@@ -421,10 +457,14 @@ elapsed_seconds, payload_bytes, committed, entity_references,
 trace_metadata) and calls `self._observer(event)` with exceptions swallowed
 (observability must never change outcomes). `DecisionTraceWriter.__call__`
 (audit.py:145) is exactly that observer: it sequences per correlation_id and
-appends a `decision_trace` record via `AuditTrail.append_trace`. Wiring it
-gives every publish invocation (first, replay, conflict, failure) one trace
-row — §8 case 18 asserts the accounting (traces may grow on replay;
-`plan_published` audit events must not).
+appends a `decision_trace` record via `AuditTrail.append_trace`. On a
+healthy path every publish invocation (first, replay, conflict, failure)
+produces one trace row; the guarantee is **best-effort observability, not
+part of the publication atom** — observer exceptions are swallowed by
+`_finish` (middleware never fails because of tracing), and a process that
+dies before `_finish` simply loses that trace row. §8 case 18 asserts the
+healthy-path accounting (traces may grow on replay; `plan_published` audit
+events must not).
 
 ### 6.2 Route order and the single schema-validation entry
 
@@ -470,8 +510,13 @@ keyed off `outcome.payload["error_code"]` when `is_error`:
 | `INVALID_INPUT` (input-schema failure inside `execute`) | 400 |
 | `VALIDATION_FAILED` | 400 |
 | `POLICY_VIOLATION` | 403 |
-| `IDEMPOTENCY_CONFLICT`, `PLAN_VERSION_CONFLICT`, `PLAN_DIGEST_MISMATCH`, `INVALID_STATE_TRANSITION`, approval-domain codes | 409 |
+| `IDEMPOTENCY_CONFLICT`, `PLAN_VERSION_CONFLICT`, `PLAN_DIGEST_MISMATCH`, approval-domain codes | 409 |
 | `INTERNAL_ERROR`, `DEADLINE_EXCEEDED`, any unmapped code | 503 |
+
+(Illegal lifecycle transitions are an internal invariant violation with no
+registered contract code — the 18-code enum has no `INVALID_STATE_TRANSITION`
+— so they surface through the `INTERNAL_ERROR`/503 row, never as a coined
+code.)
 
 `Content-Type: application/json; charset=utf-8`, `Content-Length =
 len(wire_bytes)`, bytes written unmodified (no re-serialisation — that is
@@ -484,12 +529,16 @@ transport appendix of a later contract version.
 - `IDEMPOTENCY_CONFLICT` reuses the real existing class
   `IdempotencyConflictError` (store/errors.py:270, `code =
   "IDEMPOTENCY_CONFLICT"`, non-retryable) — no new error class for case B.
-  Case D uses a contract-shaped `POLICY_VIOLATION` error with
-  `violated_policy: "approval_scope_exceeded"`; no such class exists in the
-  store/approval error modules today, so the publisher module defines it
-  once — a `StoreError` sibling carrying `code = "POLICY_VIOLATION"` (same
-  pattern as `store/errors.py:278`), passed through the same
-  `validated_failure` envelope mechanism (errors.py:83) so transport
+  Case D raises the **existing** `FrameworkDomainError` directly (errors.py:30)
+  with `code="POLICY_VIOLATION"` and the exact contract details
+  `{violated_policy:"approval_scope_exceeded", blocked_action:"publish_plan",
+  approval_action:"publish_plan", security_event_id:null}` — verified
+  constructible (its `resolve_error` lookup covers all 18 registered codes,
+  and `retryable` resolves False). It does NOT subclass `StoreError`:
+  `StoreError.retryable` reads `RETRYABILITY[self.code]` (store/errors.py:80)
+  and that map has no `POLICY_VIOLATION` entry — a sibling class would
+  `KeyError` on first access (reviewer round-3). `adapt_exception` passes a
+  `FrameworkDomainError` through untouched (errors.py:62–63), so transport
   behaviour stays one path.
 - Tests: `tests/unit/test_publisher_transaction.py` (+ crash-matrix helpers,
   incl. subprocess hard-kill helpers for §8 cases 14–15).
@@ -500,7 +549,7 @@ transport appendix of a later contract version.
 - Existing `publish_plan` behavior preserved: non-planner role, digest
   mismatch, version conflict, approval-window errors keep their exact codes.
   The bare `ValueError("publication retry uses a different approval set")`
-  disappears — case D replaces it with the contract error (400 → 409 is the
+  disappears — case D replaces it with the contract error (400 → 403 is the
   only externally visible correction; it was already an uncontracted hole).
 - `_Unchanged` short-circuit in `_mutate` remains for other writers; the
   publish flow no longer depends on it for idempotency.
@@ -551,14 +600,19 @@ a fresh process over the same DB file (reviewer P1):
     rejected, invalidated set, stale expected_plan_version, digest
     mismatch, approval-window-closed clock → existing contract errors,
     registry/receipt/audit/lifecycle untouched.
-13. **poisoned-authority fail-closed** (§4.5 rule 3): fault-inject an
-    exception between `conn.commit()` and the in-memory swap → the
-    authority is poisoned; every read/write entry point raises
-    `INTERNAL_ERROR` until `authority.reload_from_db()` (new method:
-    re-reads the `authority_state` singleton under `Database.lock`,
-    rebuilds store/approvals/revision, clears the flag). After reload the
-    memory snapshot equals the DB (revision bumped, lifecycle PUBLISHED) —
-    the split state is never served.
+13. **post-COMMIT memory-sync failure (§4.5 rule 3, reviewer round-3
+    P0)**: fault-inject an exception between `conn.commit()` and the
+    in-memory swap → THE CALL STILL SUCCEEDS: HTTP 200, byte-identical
+    verified receipt (real `audit_log_id`), DB shows lifecycle PUBLISHED +
+    audit + receipt + registry committed; `RuntimeAuthority` is poisoned
+    (subsequent read/write entry points raise `INTERNAL_ERROR` until
+    `authority.reload_from_db()` — new method: re-reads the
+    `authority_state` singleton under `Database.lock`, rebuilds
+    store/approvals/revision, clears the flag); after reload memory equals
+    DB (revision bumped, lifecycle PUBLISHED); replaying the same key
+    after recovery returns the stored receipt and adds NO second
+    `plan_published`. The response must never claim
+    "no business state was committed" when it was.
 14. **hard-kill subprocess: audit written, receipt not** (WAL proof):
     real subprocess (`sys.executable` script driving one first publication)
     `os._exit()`s from the fault hook between step 8 and step 11; parent
@@ -577,8 +631,10 @@ a fresh process over the same DB file (reviewer P1):
     mutate receipt/audit id/original row).
 17. **validator-evidence negative** (§4 step 5, reviewer-named): keep the
     APPROVED approval set, delete the validation record from the approval
-    snapshot → publish fails `VALIDATION_FAILED` with zero change in
-    registry/receipt/audit/lifecycle.
+    snapshot → publish fails `INTERNAL_ERROR`
+    (`diagnostic_class="ApprovalInvariantError"`, 503 — NOT
+    `VALIDATION_FAILED`, whose details schema would demand fabricated
+    evidence) with zero change in registry/receipt/audit/lifecycle.
 18. **trace observer accounting**: first publication, case-A replay and
     case-B conflict each produce exactly one `DecisionTraceWriter`
     tool-invocation trace (middleware `_finish` fires for every outcome);

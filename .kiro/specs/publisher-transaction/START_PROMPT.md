@@ -112,7 +112,8 @@ design.md §4.5；输入校验唯一入口在 middleware，见 design.md §6.2�
 
 - `tasks.md` Phase 0–4 全绿，勾选 = 代码 + 测试真实存在且跑过。
 - 崩溃矩阵 design §8 全部 18 案（5 个注入点 + 并发 2 + restart 重放 +
-  输出校验回滚 + 审计身份 2 + 负向零变更 + poisoned-authority +
+  输出校验回滚 + 审计身份 2 + 负向零变更 + post-COMMIT 内存同步失败
+  （当前调用仍 200 + 真 receipt，poison 只拦后续调用，case 13）+
   **两个真·硬杀子进程**（`os._exit`，case 14/15，禁止只拿异常回滚冒充）+
   alias 不可变 + validator evidence 负测 + observer trace 记账），
   并发矩阵、restart 重放、负向零变更矩阵，全部以原始
