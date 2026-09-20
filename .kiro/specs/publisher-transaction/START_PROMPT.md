@@ -23,9 +23,10 @@ G3 或任何后续 Part。
    - 审计通过的功能基线是 annotated tag `g2-baseline-5bf299a` →
      `5bf299adb1e06c2f061db4086cc3bf183944ff56`。tag 不许移动、重写、
      也不许 checkout 后直接开工。
-   - G2 实际开发父提交是 `c1e9274`（`5bf299a` 的 append-only devlog 后继，
-     登记了 G1.0.2 批准结论与 P2 `clock_session` 防御纵深遗留项）。从当前
-     干净的 `p1-3-hardening` tip 开工。
+   - Phase 0 是**条件式**门禁（reviewer round-2 修正）：HEAD 必须是评审员
+     批准的 publisher-spec 提交（即包含本目录四份文件的提交），且
+     `c1e9274` 必须是它的祖先；G2 开发血统父提交 = `c1e9274`。禁止
+     checkout `c1e9274` 开工——那会把本 spec 从工作树里丢掉。
    - 合同 `contract/planpilot_agent_contract_v1.8.json` SHA-256 前缀
      `b92e53f4…fe639`。任何 Phase 结束后它必须原样。禁止改合同。
    - 继承基线数字（重跑记录实测，禁止抄写）：unit 642、full 649、
@@ -44,8 +45,9 @@ G3 或任何后续 Part。
   `_audit` 返回真实 `AUD-…` 的事实）
 - `src/planpilot/tools/middleware.py`（`ToolErrorMiddleware` +
   `PreparedToolCall` 分阶段协议）
-- `tools/api_server.py`（`/publish` 现状：`validate_tool_payload` 输入校验，
-  `_auth("approve_publish")`）
+- `tools/api_server.py`（`/publish` 现状：路由级 `validate_tool_payload` 输入
+  校验 + `_auth("approve_publish")`；本 Part 将把输入校验唯一入口移进
+  middleware，auth 留在路由——见 design.md §4/§6.2）
 
 开始后按顺序完整阅读：
 
@@ -58,6 +60,8 @@ G3 或任何后续 Part。
 7. `contract/planpilot_agent_contract_v1.8.json` 中的：
    `tools[publish_plan]` 的 `input_schema`/`output_schema`/`failure_schema`、
    `$defs.error_details_idempotency_conflict`、
+   `$defs.error_details_policy_violation`（violated_policy 枚举含
+   `approval_scope_exceeded`）、`$defs.error_details_validation_failed`、
    `tool_execution_contract.retryability_registry`（IDEMPOTENCY_CONFLICT
    非重试）、`$defs.tool_error`
 8. `.kiro/specs/publisher-transaction/README.md` → `design.md` → `tasks.md`
@@ -68,12 +72,17 @@ G3 或任何后续 Part。
 
 ## 二、必须钉死的顺序（design.md §4 原文，不得调换）
 
-首次发布在一个 SQLite `BEGIN IMMEDIATE` 事务里完成：
+首次发布在一个 SQLite `BEGIN IMMEDIATE` 事务里完成（跨阶段状态机见
+design.md §4.5；输入校验唯一入口在 middleware，见 design.md §6.2）：
 
-1. 校验认证角色（事务外）。
-2. 校验 publish 输入 schema（事务外）。
+1. 校验认证角色（路由层，事务外）。
+2. middleware 校验 publish 输入 schema（唯一入口；路由不得先行
+   `validate_tool_payload`，否则绕过合同 `tool_error` 形状）。
 3. 事务内查询 idempotency key。
-4. 相同 key、不同请求指纹 → `IDEMPOTENCY_CONFLICT`，零业务变更。
+4. 相同 key、不同请求指纹 → `IDEMPOTENCY_CONFLICT`（Case B），零业务变更。
+4a. 新 key 但已发布计划绑定了**不同** approval set → `POLICY_VIOLATION` /
+   `violated_policy: "approval_scope_exceeded"`（Case D，fail-closed；
+   不是幂等冲突，禁止用 `IDEMPOTENCY_CONFLICT` 冒充）。
 5. 重验当前版本、digest、validator evidence。
 6. 加载完整审批集并检查通过状态。
 7. 转移 lifecycle 到 `PUBLISHED`。
@@ -102,7 +111,11 @@ G3 或任何后续 Part。
 ## 四、完成定义
 
 - `tasks.md` Phase 0–4 全绿，勾选 = 代码 + 测试真实存在且跑过。
-- 崩溃矩阵 5 个点、并发矩阵、restart 重放、负向零变更矩阵，全部以原始
+- 崩溃矩阵 design §8 全部 18 案（5 个注入点 + 并发 2 + restart 重放 +
+  输出校验回滚 + 审计身份 2 + 负向零变更 + poisoned-authority +
+  **两个真·硬杀子进程**（`os._exit`，case 14/15，禁止只拿异常回滚冒充）+
+  alias 不可变 + validator evidence 负测 + observer trace 记账），
+  并发矩阵、restart 重放、负向零变更矩阵，全部以原始
   stdout + `EVIDENCE.json`（hashes 按最终 HEAD blob）落盘，
   `test_evidence_integrity.py` 在主仓与 harness 双路径通过。
 - 全套回归：targeted → clock/evidence → unit → full → negctl + 恢复哈希。

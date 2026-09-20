@@ -536,3 +536,34 @@ none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.jso
   2. SQLite trigger 禁止删除 `clock_session` 行；
   3. trigger 禁止修改 anchor/start、禁止降低 `last_issued`。
   归入 G4 发布门禁前处理。
+
+---
+
+## 2026-09-20 — G2 Design-First：spec 初稿 + 两轮评审修订（纯文档，无实现代码）
+
+- 类型：设计 / 评审
+- 证据：`.kiro/specs/publisher-transaction/`（design 607 / tasks 160 /
+  START_PROMPT 125 / README 36 行）；初稿 commit `d1dea54`（父 `c1e9274`）；
+  本条随二轮修订一并提交。
+- 内容：publisher-transaction spec 初稿提交后，评审两轮均
+  **CHANGES REQUESTED**（未批准进入 Phase 1）。二轮关闭清单已全部落入文档：
+  1. §4.5 `PublisherPreparedCall` 跨阶段状态机（BEGIN IMMEDIATE 持锁跨
+     prepare/commit、staged clone、commit 后内存同步、rollback 幂等、
+     commit-sync 间隙异常 → reload/poison）；
+  2. §4 步骤 5 显式 validator evidence 复核（`require_validated_binding`
+     只读方法 + 五条件 + 负测），缺证据映射合同码 `VALIDATION_FAILED`
+     （非 `VALIDATOR_*`，合同 18 码无此后缀）；
+  3. §5 Case D 改 `POLICY_VIOLATION`/`approval_scope_exceeded`（新 key +
+     不同 approval set 不是幂等冲突）；Case C alias 登记且不可变断言；
+     `publication_receipt.audit_log_id` 加 UNIQUE；
+  4. §6.2–6.4 middleware 唯一输入校验入口、`wire_bytes`→HTTP 传输表、
+     DecisionTraceWriter observer 记账（重放可加 trace 不得加第二条
+     `plan_published`）；现状说明改为"api_server 今日未构造
+     ToolErrorMiddleware，wiring 属实现任务"；
+  5. §8/tasks Phase 0 改条件式 HEAD 门禁（reviewer-approved spec commit，
+     `c1e9274` 为其祖先）；删除虚构异常 `ApprovalSetReplaySafe`；新增两个
+     真·硬杀 crash 测试（`os._exit` 子进程，case 14/15）。
+- 终检（本轮实测）：`git diff --check` 干净；合同
+  `b92e53f4…fe639` 不变；四文件 33 处行号引用逐一在范围内；
+  `web/static/p1_3.js` 虚构引用已改为真实 `tools/web/p1_3.js:254`。
+- 状态：停在评审点，等待批准进入 Phase 1；未写任何 G2 实现代码。

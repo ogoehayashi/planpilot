@@ -22,8 +22,10 @@ Starting repository state (verified 2026-09-20):
   to start work.
 - **Actual branch parent for G2 development:** `c1e9274` (append-only devlog
   successor of `5bf299a`; it registers the G1.0.2 approval and the deferred
-  P2 `clock_session` defence-in-depth item). Work starts from the current
-  clean `p1-3-hardening` tip.
+  P2 `clock_session` defence-in-depth item). **Phase 0 gate (reviewer
+  round-2):** HEAD must be the reviewer-approved publisher-spec commit (the
+  one containing these four files) with `c1e9274` as an ancestor — start from
+  that tip, never by checking out `c1e9274` (that would drop this spec).
 - Inherited counts to re-record, not copy: unit `642 passed`, full `649
   passed`, negctl `7 passed` with `RESTORE-MISMATCH: none`, contract SHA-256
   prefix `b92e53f4…fe639`.
