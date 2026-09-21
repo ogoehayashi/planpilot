@@ -688,3 +688,36 @@ none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.jso
 - **复跑**：全量 `tests/` = **689 passed, 0 failed**（405s）。
 - **边界**：本轮未触碰 lifecycle/audit/HTTP wiring/中间件状态机
   （Phase 2 范围）；合同与 tag 未动。
+
+## 2026-09-21 — Phase 1.0.1 hardening（评审第4轮探针修复）
+
+复审批复：Phase 0 Approved、Phase 1 数字 Verified、**进入 Phase 2
+Changes Requested**。三个探针全部复现成立，本轮按最小范围修地基，
+不动 Phase 2 范围。上一条目「文件字节零变化」措辞失实，以本条为准：
+字节级断言既不成立（SQLite 页布局/freelist 不属于逻辑状态）也不可移植，
+正确断言是**规范化逻辑状态未变**（全表 canonical dump 哈希）。
+
+- **探针2（事务所有权）**：`PublisherService` 拆为公开 `probe()`（Phase 1
+  独立入口，恰好开一个 `transaction()`）+ `_probe_in_open_transaction()`
+  （§4 步骤 3–4 本体，**零事务管理**；无开钟即 `StoreInvariantError`
+  fail-closed）。Phase 2 单 BEGIN 流程调本体。pin：外层事务内跑通
+  （写→probe→rollback 全 erased）、无事务调用报错、公开 probe 嵌套调用
+  复现 `sqlite3.OperationalError` 后回滚干净。
+- **探针3（安全重放）**：新增 `replay_binding_violation()`——replay 前
+  request↔receipt↔response 三方绑定：response 键集/类型/`status` 合同
+  const、response.receipt 三对齐（plan_id / audit_log_id /
+  published_version==plan_version）、request.receipt 对齐（digest/
+  approval_set，抓 commit 后篡改）。矛盾 → `PublicationInvariantError`
+  （非 StoreError，按 ApprovalInvariantError 先例走 middleware
+  fall-through → 合同形 INTERNAL_ERROR/retryable=true，绝不 200 verbatim
+  重放假响应）。负测 6+2 参数化：版本矛盾/audit 伪造/plan 伪造/status
+  非 const/多余键/非对象/receipt 篡改×2；端到端 `validated_failure`
+  证明 wire=INTERNAL_ERROR 且内部细节不外泄；外层事务回滚干净。
+- **探针1（fixture 合法性）**：测试 digest 改合同合法 `^[a-f0-9]{64}$`
+  （旧 `"sha256:"+64hex` 会被真合同 validator 拒收）；STORED_RESPONSE
+  published_version 与 receipt plan_version 统一为 3（矛盾对转成负测素材）。
+- 测试：`test_publisher_idempotency.py` 21→**36 passed**（净增 15：三方
+  绑定/矛盾拒绝系 12——helper 2 + 矛盾响应 6 参数化 + receipt 篡改 2
+  参数化 + wire 端到端 1 + 外层回滚 1；事务所有权/fail-closed 系 3）。
+  加 `test_publisher_schema.py` 5 条（fixture 同步改合同合法形状），
+  publisher 两文件共 **41 passed**。

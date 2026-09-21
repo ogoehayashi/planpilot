@@ -15,17 +15,21 @@ from planpilot.persistence import Database
 RECEIPT_ROW = {
     "plan_id": "plan_x1",
     "plan_version": 1,
-    "plan_digest": "sha256:" + "a" * 64,
+    # Contract-legal shapes throughout (reviewer round-4 probe 1):
+    # plan_digest matches ^[a-f0-9]{64}$, fingerprints are the bare
+    # sha256 hexdigests request_fingerprint() actually stores.
+    "plan_digest": "a" * 64,
     "approval_set_id": "as_1",
     "audit_log_id": "log_1",
-    "response_json": '{"ok":true}',
+    "response_json": '{"status":"PUBLISHED","plan_id":"plan_x1",'
+                     '"published_version":1,"audit_log_id":"log_1"}',
     "created_at": "2026-09-14T09:00:00+08:00",
 }
 
 REGISTRY_ROW = {
     "tool_name": "publish_plan",
     "idempotency_key": "key-1",
-    "request_fingerprint": "sha256:" + "b" * 64,
+    "request_fingerprint": "b" * 64,
     "receipt_id": 1,
     "created_at": "2026-09-14T09:00:00+08:00",
 }
@@ -95,7 +99,7 @@ def test_registry_unique_key_per_tool(tmp_path):
     # fingerprint (Case B is a constraint, not application logic)
     with pytest.raises(sqlite3.IntegrityError), db.transaction():
         _insert(db.conn, "idempotency_registry",
-                {**REGISTRY_ROW, "request_fingerprint": "sha256:" + "c" * 64})
+                {**REGISTRY_ROW, "request_fingerprint": "c" * 64})
     # same key under a different tool IS allowed (scope is per tool)
     with db.transaction():
         _insert(db.conn, "idempotency_registry",
@@ -125,5 +129,5 @@ def test_tables_survive_reopen(tmp_path):
     assert rows == [("plan_x1", 1, "log_1")]
     assert db2.conn.execute(
         "SELECT request_fingerprint FROM idempotency_registry").fetchone()[0] \
-        == "sha256:" + "b" * 64
+        == "b" * 64
     db2.close()

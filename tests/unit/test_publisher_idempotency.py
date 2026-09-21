@@ -1,46 +1,70 @@
-"""G2 tasks 1.2–1.4 — canonical fingerprint and the idempotency probe.
+"""G2 tasks 1.2–1.4 (hardened per reviewer round-4) — fingerprint + probe.
 
 1.2: ``request_fingerprint`` = sha256 over ``canonical()`` of the exact
 five contract fields (same canonical the audit chain uses). Key-order
 independence and any-field sensitivity are pinned here, plus the
-fail-closed guard against malformed requests.
-1.3: ``PublisherService.probe`` = design §4 steps 3–4 only.
+fail-closed guard against malformed requests. Fixtures use contract-
+legal digests: publish_plan input_schema pins plan_digest to
+``^[a-f0-9]{64}$`` — the old ``"sha256:"+64hex`` form is what the real
+contract validator would reject (reviewer probe 1).
+1.3: ``PublisherService._probe_in_open_transaction`` = design §4 steps
+3–4 body with NO transaction management of its own; the public
+``probe()`` wraps it in exactly one transaction. Calling the public
+probe inside an open transaction must fail fast (reviewer probe 2).
 1.4: §5 cases A/B (§8 case 6/7 pre-wired on the probe-only path):
 two barrier-synced connections racing the same key — same payload →
 both replay identically, exactly one registry row; different payload →
-one wins, the other conflicts, and NOTHING on the losing side changed
-(registry, receipt, audit_chain, lifecycle — zero-touch asserted via
-whole-DB byte hash).
+one wins, the other conflicts, and nothing on the losing side changed.
+"Unchanged" is asserted as an identical NORMALISED LOGICAL STATE — a
+canonical dump of every table — not as byte-identical files: SQLite
+may lay pages out differently for logically identical databases.
+Replays additionally require the request↔receipt↔response three-way
+binding to hold (reviewer probe 3): a self-contradicting stored
+publication raises PublicationInvariantError, never a verbatim 200.
 """
 import hashlib
 import json
 import sqlite3
 import threading
 import time
+import uuid
 
 import pytest
 
 from planpilot.persistence import Database, canonical
 from planpilot.publisher import (
     REQUEST_FIELDS,
+    PublicationInvariantError,
     PublishIdempotencyConflictError,
     PublisherService,
+    replay_binding_violation,
     request_fingerprint,
 )
 from planpilot.store.errors import IdempotencyConflictError, StoreInvariantError
 
 KEY = "idem-4471e5c29f084cd3b7fe682a7a142df4"
+# Contract-legal 64-char lowercase hex (publish_plan input_schema
+# plan_digest pattern ^[a-f0-9]{64}$).
+DIGEST_A = "a" * 64
+DIGEST_B = "b" * 64
+DIGEST_C = "c" * 64
+DIGEST_D = "d" * 64
+DIGEST_E = "e" * 64
 REQUEST = {
     "plan_id": "plan_7f3a91",
     "expected_plan_version": 3,
-    "plan_digest": "sha256:" + "a" * 64,
+    "plan_digest": DIGEST_A,
     "approval_set_id": "apr_12",
     "idempotency_key": KEY,
 }
+# A truthful stored publication: receipt binding plan_version=3 is the
+# SAME version the response reports as published (design §4 step 11:
+# both rows share one transaction — plan_version, digest, approval set,
+# audit id and the canonical response must tell one story).
 STORED_RESPONSE = {
     "status": "PUBLISHED",
     "plan_id": "plan_7f3a91",
-    "published_version": 7,
+    "published_version": 3,
     "audit_log_id": "log_1",
 }
 
@@ -51,7 +75,8 @@ RECEIPT_COLS = ("plan_id", "plan_version", "plan_digest", "approval_set_id",
 
 
 def seed(db, response=STORED_RESPONSE, fingerprint=None, key=KEY,
-         audit_log_id="log_1", plan_id="plan_7f3a91", plan_version=3):
+         audit_log_id="log_1", plan_id="plan_7f3a91", plan_version=3,
+         plan_digest=DIGEST_A, approval_set_id="apr_12"):
     """Write one receipt + one registry row through the production
     constraint surface (plain INSERTs under transaction())."""
     with db.transaction():
@@ -59,8 +84,8 @@ def seed(db, response=STORED_RESPONSE, fingerprint=None, key=KEY,
         c.execute(
             f"INSERT INTO publication_receipt ({', '.join(RECEIPT_COLS)}) "
             f"VALUES ({', '.join('?' * len(RECEIPT_COLS))})",
-            (plan_id, plan_version, REQUEST["plan_digest"],
-             REQUEST["approval_set_id"], audit_log_id,
+            (plan_id, plan_version, plan_digest,
+             approval_set_id, audit_log_id,
              json.dumps(response, sort_keys=True),
              "2026-09-14T09:00:00+08:00"))
         c.execute(
@@ -72,7 +97,16 @@ def seed(db, response=STORED_RESPONSE, fingerprint=None, key=KEY,
 
 
 def db_digest(path):
-    """Byte-exact identity of the whole database file (canonical dump)."""
+    """Normalised logical-state identity of the database.
+
+    Canonical-dumps every user table (rows stringified and sorted) and
+    hashes the result. This is deliberately NOT the file's bytes: two
+    logically identical SQLite files can differ byte-wise (page layout,
+    freelist, WAL leftovers), so a byte claim would be both false and
+    unportable. What IS claimed and needed: every row of every table
+    unchanged, which is exactly the "zero business change" invariant
+    (design §5 case B).
+    """
     conn = sqlite3.connect(path)
     try:
         frames = []
@@ -107,7 +141,7 @@ def test_fingerprint_changes_with_any_single_field(field):
     def bump(value):
         if isinstance(value, int):
             return value + 1
-        return value + "x"
+        return value + "f"  # still 64-char-hex-shaped or plain string change
     changed = {**REQUEST, field: bump(REQUEST[field])}
     assert request_fingerprint(changed) != request_fingerprint(REQUEST)
 
@@ -141,7 +175,7 @@ def test_probe_miss_returns_first_and_writes_nothing(tmp_path):
     before = db_digest(path)
     result = PublisherService(db, None).probe(REQUEST)
     assert result.kind == "first" and result.response is None
-    assert db_digest(path) == before          # zero business change
+    assert db_digest(path) == before          # logical state unchanged
     assert db.conn.execute(
         "SELECT COUNT(*) FROM idempotency_registry").fetchone()[0] == 0
     db.close()
@@ -164,7 +198,7 @@ def test_conflict_details_match_contract_shape_and_retryability(tmp_path):
     seed(db)
     ps = PublisherService(db, None)
     with pytest.raises(PublishIdempotencyConflictError) as exc:
-        ps.probe({**REQUEST, "plan_digest": "sha256:" + "b" * 64})
+        ps.probe({**REQUEST, "plan_digest": DIGEST_B})
     err = exc.value
     # $defs.error_details_idempotency_conflict: exactly these three keys,
     # additionalProperties:false.
@@ -189,6 +223,168 @@ def test_probe_never_touches_authority(tmp_path):
     with pytest.raises(PublishIdempotencyConflictError):
         ps.probe({**REQUEST, "approval_set_id": "apr_99"})
     db.close()
+
+
+# ------------------------------------------------- 1.3 hardening (round-4)
+
+
+def test_probe_body_runs_inside_outer_transaction(tmp_path):
+    """Reviewer probe 2: Phase 2 calls the body INSIDE its own BEGIN
+    IMMEDIATE. It must neither open a second transaction nor touch the
+    commit — here: an outer transaction with a write, the probe body,
+    then ROLLBACK must erase the write and the probe still decides."""
+    path = str(tmp_path / "t.db")
+    db = Database(path)
+    seed(db)
+    db.close()
+    db = Database(path)
+    with db.lock:
+        db.conn.execute("BEGIN IMMEDIATE")
+        assert db.conn.in_transaction
+        db.conn.execute(  # hypothetical Phase 2 write, same transaction
+            "INSERT INTO idempotency_registry "
+            f"({', '.join(REGISTRY_COLS)}) "
+            f"VALUES ({', '.join('?' * len(REGISTRY_COLS))})",
+            ("publish_plan", "idem-ghostkey-000000000000000000ff",
+             "f" * 64, 1, "2026-09-14T09:00:00+08:00"))
+        result = PublisherService(db, None)._probe_in_open_transaction(REQUEST)
+        assert result.kind == "replay"
+        db.conn.rollback()
+    assert not db.conn.in_transaction
+    assert db.conn.execute(
+        "SELECT COUNT(*) FROM idempotency_registry").fetchone()[0] == 1
+    db.close()
+
+
+def test_probe_body_refuses_closed_transaction(tmp_path):
+    """Caller-usage defect (no open BEGIN) crashes as StoreInvariantError
+    instead of silently reading outside a transaction."""
+    db = Database(str(tmp_path / "t.db"))
+    seed(db)
+    with pytest.raises(StoreInvariantError):
+        PublisherService(db, None)._probe_in_open_transaction(REQUEST)
+    db.close()
+
+
+def test_public_probe_inside_open_transaction_fails_fast(tmp_path):
+    """The public wrapper opens its own BEGIN — calling it from inside a
+    transaction raises sqlite3.OperationalError (never a silent nested
+    BEGIN). This is the exact failure reviewer probe 2 reproduced; the
+    Phase 2 flow must use the body instead."""
+    db = Database(str(tmp_path / "t.db"))
+    seed(db)
+    svc = PublisherService(db, None)
+    with db.transaction():
+        with pytest.raises(sqlite3.OperationalError):
+            svc.probe(REQUEST)
+    # transaction rolled back cleanly; the replay still works standalone
+    assert svc.probe(REQUEST).kind == "replay"
+    db.close()
+
+
+# ------------------------------- 1.3 hardening: three-way replay binding
+
+
+def test_binding_helper_accepts_consistent_triple():
+    receipt = {"plan_id": "plan_7f3a91", "plan_version": 3,
+               "plan_digest": DIGEST_A, "approval_set_id": "apr_12",
+               "audit_log_id": "log_1"}
+    assert replay_binding_violation(REQUEST, receipt,
+                                    dict(STORED_RESPONSE)) is None
+
+
+def test_binding_helper_flags_version_contradiction():
+    receipt = {"plan_id": "plan_7f3a91", "plan_version": 3,
+               "plan_digest": DIGEST_A, "approval_set_id": "apr_12",
+               "audit_log_id": "log_1"}
+    bad = {**STORED_RESPONSE, "published_version": 7}
+    why = replay_binding_violation(REQUEST, receipt, bad)
+    assert why is not None and "published_version" in why
+
+
+@pytest.mark.parametrize("broken", [
+    # response_json contradicts the receipt in each registered way
+    {**STORED_RESPONSE, "published_version": 7},          # reviewer probe 3
+    {**STORED_RESPONSE, "audit_log_id": "log_forged"},
+    {**STORED_RESPONSE, "plan_id": "plan_forged"},
+    {**STORED_RESPONSE, "status": "DRAFT"},               # output const lost
+    {**STORED_RESPONSE, "operator_note": "extra"},        # additionalProperties
+    "not-an-object",
+])
+def test_contradictory_stored_publication_refuses_replay(tmp_path, broken):
+    """A fingerprint hit is NOT sufficient for a verbatim 200: the
+    stored receipt and response must tell one story. Contradiction →
+    PublicationInvariantError (never replayed, never a silent success)."""
+    db = Database(str(tmp_path / "t.db"))
+    seed(db, response=broken)
+    svc = PublisherService(db, None)
+    with pytest.raises(PublicationInvariantError):
+        svc.probe(REQUEST)
+    # and the standalone conflict path (different fingerprint) still works:
+    db.close()
+
+
+@pytest.mark.parametrize("column,value", [
+    ("plan_digest", DIGEST_E),        # tampered AFTER commit under a real
+    ("approval_set_id", "apr_evil"),  # (still matching) fingerprint
+])
+def test_receipt_tampering_refuses_replay(tmp_path, column, value):
+    """Registry fingerprint matches the request byte-for-byte, but the
+    receipt row was rewritten behind it — request↔receipt check catches
+    what the fingerprint alone cannot."""
+    db = Database(str(tmp_path / "t.db"))
+    seed(db)
+    with db.transaction():
+        db.conn.execute(
+            f"UPDATE publication_receipt SET {column} = ? WHERE id = 1",
+            (value,))
+    with pytest.raises(PublicationInvariantError):
+        PublisherService(db, None).probe(REQUEST)
+    db.close()
+
+
+def test_binding_violation_surfaces_as_internal_error_via_middleware(tmp_path):
+    """Reviewer probe 3, end of wire: PublicationInvariantError is NOT a
+    StoreError, so tools.errors fall-through (adapt_exception,
+    errors.py:70) transports it as the contract-shaped INTERNAL_ERROR —
+    retryable per the registry — and never as a success replay."""
+    from planpilot.tools.errors import validated_failure
+
+    exc = PublicationInvariantError("response published_version 7 contradicts "
+                                    "receipt plan_version 3")
+    payload, wire = validated_failure("publish_plan", exc, str(uuid.uuid4()))
+    assert payload["error_code"] == "INTERNAL_ERROR"
+    assert payload["retryable"] is True  # registry says INTERNAL_ERROR=True
+    assert set(payload["details"]) == {"diagnostic_class", "safe_detail"}
+    assert payload["details"]["diagnostic_class"] == "PublicationInvariantError"
+    assert b"published_version 7" not in wire  # no internal detail leaks out
+
+
+def test_contradictory_replay_rolls_back_outer_transaction(tmp_path):
+    """The raise happens inside the outer BEGIN, so a Phase 2-style
+    transaction around the probe discards everything it had staged."""
+    path = str(tmp_path / "t.db")
+    db = Database(path)
+    seed(db, response={**STORED_RESPONSE, "published_version": 7})
+    db.close()
+    before = db_digest(path)
+    db2 = Database(path)
+    with pytest.raises(PublicationInvariantError):
+        with db2.transaction():               # one BEGIN IMMEDIATE, as §4.5
+            db2.conn.execute(                 # hypothetical staged write…
+                "INSERT INTO publication_receipt "
+                f"({', '.join(RECEIPT_COLS)}) "
+                f"VALUES ({', '.join('?' * len(RECEIPT_COLS))})",
+                ("plan_ghost", 42, DIGEST_A, "apr_12", "log_ghost",
+                 "{}", "2026-09-14T09:00:00+08:00"))
+            # …then the probe body refuses the contradictory replay.
+            PublisherService(db2, None)._probe_in_open_transaction(REQUEST)
+    db2.close()
+    assert db_digest(path) == before          # logical state unchanged
+    fresh = Database(path)
+    assert fresh.conn.execute(
+        "SELECT COUNT(*) FROM publication_receipt").fetchone()[0] == 1
+    fresh.close()
 
 
 # ---------------------------------------------------------------- 1.4
@@ -253,15 +449,17 @@ def test_case_a_two_connections_same_key_same_payload_both_replay(tmp_path):
 
 def test_case_b_two_connections_same_key_different_payload(tmp_path):
     """§8 case 7 on the probe-only path: the seeded request replays;
-    the challenger conflicts; the loser changed NOTHING — asserted as a
-    whole-file digest, covering registry, receipt, audit_chain AND the
-    authority/lifecycle tables in one shot."""
+    the challenger conflicts; the loser changed NOTHING — asserted as an
+    identical normalised logical state (canonical dump of every table:
+    registry, receipt, audit_chain, authority/lifecycle included).
+    Deliberately not claimed as byte-identical files: SQLite page layout
+    is not part of the logical state."""
     path = str(tmp_path / "t.db")
     db = Database(path)
     seed(db)
     db.close()
     before = db_digest(path)
-    challenger = {**REQUEST, "plan_digest": "sha256:" + "c" * 64}
+    challenger = {**REQUEST, "plan_digest": DIGEST_C}
     conns, barrier = _barrier_connections(path)
     services = [PublisherService(c, None) for c in conns]
 
@@ -281,22 +479,22 @@ def test_case_b_two_connections_same_key_different_payload(tmp_path):
     assert kinds == ["conflict", "replay"]
     conflict = (r1 if r1[0] == "conflict" else r2)[1]
     assert conflict.to_error_details()["original_plan_id"] == "plan_7f3a91"
-    assert db_digest(path) == before          # byte-identical after race
+    assert db_digest(path) == before          # logical state unchanged
     for c in conns:
         c.close()
 
 
 def test_case_b_conflict_rolls_back_writes_in_same_txn(tmp_path):
-    """Zero-change is structural: a conflict raised inside transaction()
-    rolls the BEGIN back, so even a mid-transaction write cannot leak.
-    This mirrors what the Phase 2 full transaction does around the probe:
-    the write and the raising probe share ONE Database.transaction()."""
+    """Zero-change is structural: a conflict raised inside a BEGIN
+    rolls it back, so even a mid-transaction write cannot leak. This
+    mirrors what the Phase 2 full transaction does around the probe
+    body: the write and the raising probe share ONE BEGIN IMMEDIATE."""
     path = str(tmp_path / "t.db")
     db = Database(path)
     seed(db)
     before = db_digest(path)
-    challenger = {**REQUEST, "plan_digest": "sha256:" + "d" * 64}
-    ps_probe = PublisherService(db, None)
+    challenger = {**REQUEST, "plan_digest": DIGEST_D}
+    ps = PublisherService(db, None)
     fingerprint = request_fingerprint(challenger)
     with pytest.raises(PublishIdempotencyConflictError):
         with db.transaction():
@@ -308,20 +506,11 @@ def test_case_b_conflict_rolls_back_writes_in_same_txn(tmp_path):
                 f"VALUES ({', '.join('?' * len(RECEIPT_COLS))})",
                 ("plan_ghost", 99, REQUEST["plan_digest"],
                  "apr_12", "log_ghost", "{}", "2026-09-14T09:00:00+08:00"))
-            # …then the registry probe hits a different fingerprint.
-            row = db.conn.execute(
-                "SELECT ir.request_fingerprint, pr.plan_id, pr.plan_version"
-                "  FROM idempotency_registry ir"
-                "  JOIN publication_receipt pr ON pr.id = ir.receipt_id"
-                " WHERE ir.tool_name = 'publish_plan'"
-                "   AND ir.idempotency_key = ?",
-                (challenger["idempotency_key"],)).fetchone()
-            assert row[0] != fingerprint
-            raise PublishIdempotencyConflictError(
-                challenger["idempotency_key"], row[1], "PUBLISHED",
-                original_plan_version=row[2])
+            # …then the probe body hits a different fingerprint and raises.
+            result = ps._probe_in_open_transaction(challenger, fingerprint)
+            raise AssertionError(f"unreachable: {result}")
     assert db_digest(path) == before          # ghost write rolled back
-    # the probe module agrees the same input conflicts (same decision)
+    # the standalone public probe agrees the same input conflicts.
     with pytest.raises(PublishIdempotencyConflictError):
-        ps_probe.probe(challenger)
+        ps.probe(challenger)
     db.close()

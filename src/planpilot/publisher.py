@@ -15,13 +15,23 @@ what lives here is deliberately small and honest:
   new code). It stays a ``StoreError``, so ``adapt_exception`` transports
   it unchanged: non-retryable ``IDEMPOTENCY_CONFLICT`` whose details are
   exactly ``$defs.error_details_idempotency_conflict``.
-- :class:`PublisherService` — :meth:`PublisherService.probe` performs
-  steps 3–4 ONLY: open the transaction, SELECT the registry row for
-  (tool_name, idempotency_key); hit + fingerprint match → replay the
-  stored receipt response verbatim; hit + different fingerprint → raise
-  (the transaction context manager rolls back → zero business change).
-  A miss returns ``kind="first"`` for Phase 2 to continue with steps
-  5–12; in Phase 1 a miss writes nothing.
+- :class:`PublisherService` — steps 3–4 live in
+  :meth:`PublisherService._probe_in_open_transaction`, which performs NO
+  transaction management of its own (reviewer round-4 probe 2: the
+  Phase 2 single-BEGIN flow calls it inside its already-open
+  ``BEGIN IMMEDIATE``; opening a second transaction inside one is an
+  ``sqlite3.OperationalError``). The public :meth:`PublisherService.probe`
+  is the Phase 1 standalone entry: it opens exactly one transaction and
+  delegates.
+- Before a ``"replay"`` is returned, the request ↔ receipt ↔ stored
+  response are checked as a three-way binding
+  (:func:`replay_binding_violation`). A stored publication that
+  contradicts itself or the replayed request raises
+  :class:`PublicationInvariantError` — persisted-state corruption, the
+  ``ApprovalInvariantError`` precedent: middleware fall-through
+  (tools/errors.py:70) transports it as contract-shaped
+  ``INTERNAL_ERROR`` (retryability per the registry), never as a
+  verbatim replay of a contradictory response (reviewer round-4 probe 3).
 
 Both tables are touched ONLY under ``Database.lock`` / ``transaction()``
 — the same discipline as ``clock_session`` (design §3, G1.0.2 lesson).
@@ -47,6 +57,12 @@ REQUEST_FIELDS = (
     "plan_digest",
     "approval_set_id",
     "idempotency_key",
+)
+
+#: publish_plan.output_schema properties (contract, additionalProperties
+#: false) — the stored response_json must satisfy exactly this key set.
+RESPONSE_FIELDS = frozenset(
+    {"plan_id", "published_version", "status", "audit_log_id"}
 )
 
 
@@ -110,6 +126,89 @@ class PublishIdempotencyConflictError(IdempotencyConflictError):
         self.idempotency_key = idempotency_key
 
 
+class PublicationInvariantError(Exception):
+    """Persisted publication state contradicts itself or the request.
+
+    Same species as ``ApprovalInvariantError`` ("caller or
+    persisted-state defect with no truthful registered tool code"): the
+    receipt table is asserting something the response disagrees with,
+    and no registered code honestly describes a lying database. It
+    deliberately does NOT subclass StoreError — middleware fall-through
+    (tools/errors.py:70) transports it as contract-shaped
+    INTERNAL_ERROR (retryable per the registry), and the in-flight
+    transaction rolls back, so a contradictory replay never escapes as
+    a 200. Reviewer round-4 probe 3.
+    """
+
+
+def replay_binding_violation(
+    request: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    response: Any,
+) -> str | None:
+    """Three-way binding check for case A replays. None = consistent.
+
+    ``receipt`` is the joined registry+receipt row (plan_id,
+    plan_version, plan_digest, approval_set_id, audit_log_id);
+    ``response`` is the parsed ``response_json``. Checks, in order:
+
+    1. response satisfies publish_plan.output_schema's key set, types
+       and the ``status: "PUBLISHED"`` const;
+    2. response ↔ receipt: plan_id, audit_log_id and
+       published_version==plan_version agree;
+    3. request ↔ receipt: the fingerprint already proved byte equality
+       of the 5 fields, so plan_id/digest/approval_set must match the
+       receipt — a mismatch means the stored rows were tampered with
+       after commit.
+    """
+    if not isinstance(response, dict):
+        return "stored response_json is not an object"
+    if frozenset(response) != RESPONSE_FIELDS:
+        return (
+            "stored response keys do not match publish_plan.output_schema "
+            f"(have {sorted(response)}, want {sorted(RESPONSE_FIELDS)})"
+        )
+    if response["status"] != "PUBLISHED":
+        return f'stored response status {response["status"]!r} is not "PUBLISHED"'
+    if not isinstance(response["plan_id"], str):
+        return "stored response plan_id is not a string"
+    if isinstance(response["published_version"], bool) or not isinstance(
+        response["published_version"], int
+    ):
+        return "stored response published_version is not an integer"
+    if not isinstance(response["audit_log_id"], str):
+        return "stored response audit_log_id is not a string"
+    if response["plan_id"] != receipt["plan_id"]:
+        return (
+            f'response plan_id {response["plan_id"]!r} contradicts receipt '
+            f'plan_id {receipt["plan_id"]!r}'
+        )
+    if response["audit_log_id"] != receipt["audit_log_id"]:
+        return (
+            f'response audit_log_id {response["audit_log_id"]!r} contradicts '
+            f'receipt audit_log_id {receipt["audit_log_id"]!r}'
+        )
+    if response["published_version"] != receipt["plan_version"]:
+        return (
+            f'response published_version {response["published_version"]!r} '
+            f'contradicts receipt plan_version {receipt["plan_version"]!r}'
+        )
+    if request["plan_id"] != receipt["plan_id"]:
+        return "request plan_id contradicts receipt plan_id"
+    if request["plan_digest"] != receipt["plan_digest"]:
+        return (
+            f"request plan_digest {request['plan_digest'][:12]}… contradicts "
+            f"receipt plan_digest {receipt['plan_digest'][:12]}…"
+        )
+    if request["approval_set_id"] != receipt["approval_set_id"]:
+        return (
+            f"request approval_set_id {request['approval_set_id']!r} "
+            f"contradicts receipt approval_set_id "
+            f'{receipt["approval_set_id"]!r}'
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class ProbeResult:
     """Outcome of the steps 3–4 probe.
@@ -117,7 +216,7 @@ class ProbeResult:
     ``kind``:
       - ``"replay"`` — case A: ``response`` is the stored receipt
         response, returned verbatim (same audit_log_id, same
-        published_version).
+        published_version), after the three-way binding check passed.
       - ``"first"`` — key not registered; only Phase 2 may continue to
         steps 5–12. In Phase 1 nothing else happens for this result.
     """
@@ -138,47 +237,97 @@ class PublisherService:
         self._authority = authority
 
     def probe(self, request: Mapping[str, Any]) -> ProbeResult:
-        """Design §4 steps 3–4. Read-only inside ONE transaction.
+        """Phase 1 standalone entry: open exactly ONE transaction,
+        delegate to the body, let the context manager commit/roll back.
 
         A conflict raises inside the ``transaction()`` context manager,
         which rolls the BEGIN back — structurally guaranteeing "zero
         business change" (§5 case B) even though this probe writes
-        nothing.
+        nothing. Phase 2 must NOT call this inside an open transaction
+        (a second BEGIN raises ``sqlite3.OperationalError``); it calls
+        :meth:`_probe_in_open_transaction` instead.
         """
         fingerprint = request_fingerprint(request)
         db = self._database
         with db.transaction():
-            row = db.conn.execute(
-                "SELECT ir.request_fingerprint AS fingerprint,"
-                "       pr.plan_id AS original_plan_id,"
-                "       pr.plan_version AS original_plan_version,"
-                "       pr.response_json AS response_json"
-                "  FROM idempotency_registry ir"
-                "  JOIN publication_receipt pr ON pr.id = ir.receipt_id"
-                " WHERE ir.tool_name = ? AND ir.idempotency_key = ?",
-                (TOOL_NAME, request["idempotency_key"]),
-            ).fetchone()
-            if row is None:
-                return ProbeResult("first", None)
-            if row["fingerprint"] != fingerprint:
-                stored = json.loads(row["response_json"])
-                raise PublishIdempotencyConflictError(
-                    request["idempotency_key"],
-                    row["original_plan_id"],
-                    stored.get("status"),
-                    original_plan_version=row["original_plan_version"],
-                )
-            # Case A: replay the stored response verbatim. Re-canonicalised
-            # bytes equal response_json exactly — receipt is the single
-            # success payload (design §3 design fact 2).
-            return ProbeResult("replay", json.loads(row["response_json"]))
+            return self._probe_in_open_transaction(request, fingerprint)
+
+    def _probe_in_open_transaction(
+        self,
+        request: Mapping[str, Any],
+        fingerprint: str | None = None,
+    ) -> ProbeResult:
+        """Design §4 steps 3–4 body — performs NO transaction management
+        of its own (reviewer round-4 probe 2).
+
+        Requires the caller's ``BEGIN IMMEDIATE`` to already be open on
+        the Database connection; anything else crashes as a caller
+        programming error (``StoreInvariantError``) instead of silently
+        half-reading. Reads only: replay/conflict decisions raise or
+        return without writing, so the outer transaction's commit point
+        stays entirely with Phase 2.
+        """
+        if fingerprint is None:
+            fingerprint = request_fingerprint(request)
+        db = self._database
+        if not db.conn.in_transaction:
+            raise StoreInvariantError(
+                "_probe_in_open_transaction requires the caller's open "
+                "BEGIN IMMEDIATE (design §4.5); standalone callers use "
+                "PublisherService.probe()"
+            )
+        row = db.conn.execute(
+            "SELECT ir.request_fingerprint AS fingerprint,"
+            "       pr.plan_id AS plan_id,"
+            "       pr.plan_version AS plan_version,"
+            "       pr.plan_digest AS plan_digest,"
+            "       pr.approval_set_id AS approval_set_id,"
+            "       pr.audit_log_id AS audit_log_id,"
+            "       pr.response_json AS response_json"
+            "  FROM idempotency_registry ir"
+            "  JOIN publication_receipt pr ON pr.id = ir.receipt_id"
+            " WHERE ir.tool_name = ? AND ir.idempotency_key = ?",
+            (TOOL_NAME, request["idempotency_key"]),
+        ).fetchone()
+        if row is None:
+            return ProbeResult("first", None)
+        if row["fingerprint"] != fingerprint:
+            stored = json.loads(row["response_json"])
+            raise PublishIdempotencyConflictError(
+                request["idempotency_key"],
+                row["plan_id"],
+                stored.get("status") if isinstance(stored, dict) else None,
+                original_plan_version=row["plan_version"],
+            )
+        # Case A: replay ONLY if request ↔ receipt ↔ stored response are
+        # one consistent story (reviewer round-4 probe 3). Re-canonicalised
+        # bytes equal response_json exactly — receipt is the single success
+        # payload (design §3 design fact 2).
+        receipt = {
+            "plan_id": row["plan_id"],
+            "plan_version": row["plan_version"],
+            "plan_digest": row["plan_digest"],
+            "approval_set_id": row["approval_set_id"],
+            "audit_log_id": row["audit_log_id"],
+        }
+        violation = replay_binding_violation(
+            request, receipt, json.loads(row["response_json"])
+        )
+        if violation is not None:
+            raise PublicationInvariantError(
+                f"idempotency replay refused — {violation}"
+            )
+        return ProbeResult("replay", json.loads(row["response_json"]))
 
 
 __all__ = [
     "TOOL_NAME",
     "REQUEST_FIELDS",
+    "RESPONSE_FIELDS",
     "ProbeResult",
+    "PublicationInvariantError",
     "PublisherService",
     "PublishIdempotencyConflictError",
     "request_fingerprint",
+    "replay_binding_violation",
 ]
