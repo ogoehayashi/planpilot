@@ -1,0 +1,45 @@
+{
+  "evidence_id": "g2-phase0-baseline",
+  "gate": "G2 Phase 0.2 — inherited-baseline re-record before tasks 1.1–1.4 (reviewer-approved spec line c1e9274→…→6cb13f9; verdict: Conditionally Approved, three errata landed in 6cb13f9)",
+  "base_commit": "6cb13f9",
+  "head_commit_for_logs": "28c00a5f75bd4c70004a1301172b4e324aabee32",
+  "tree_state": "unit+full captured on a clean 28c00a5 working tree before any Phase 1 edit. The first clock+negctl pass ran while the publisher DDL patch was already in the working tree, so it was DISCARDED and both suites were re-run on the clean tree (persistence.py reverted via git checkout, re-applied only afterwards) — these logs are the clean-tree reruns.",
+  "counts": {
+    "g2p0_unit.log": "642 passed",
+    "g2p0_full.log": "649 passed",
+    "g2p0_clock.log": "57 passed",
+    "g2p0_negctl.log": "7 passed"
+  },
+  "lineage": "c1e9274 → d1dea54 → 4b1cdf0 → 942e13d → 6cb13f9 → 28c00a5",
+  "hash_method": "SHA-256 of the LF-normalised bytes exactly as committed; verify with: git cat-file blob HEAD:tests/evidence/g2-phase0-baseline/<log> | sha256sum",
+  "contract": {
+    "file": "contract/planpilot_agent_contract_v1.8.json",
+    "sha256_first12": "b92e53f4ff05",
+    "full": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639"
+  },
+  "raw_stdout": {
+    "artifacts": {
+      "g2p0_unit.log": {
+        "sha256": "724e2921cd46ed0a71570ab2a94970fd7e46393e19dba7b2c248316bb10f5d67",
+        "command": "pytest tests/unit -q --tb=line",
+        "bytes": 752
+      },
+      "g2p0_full.log": {
+        "sha256": "77edee4f5d7b55af22197b99c99cec1e96989cc9ab76c5a8621458893492a582",
+        "command": "pytest tests/ -q --tb=line",
+        "bytes": 843
+      },
+      "g2p0_clock.log": {
+        "sha256": "e003112ca6a757a9c3bb2d2f96b67ae1b7ee1752a85be30ab51ba5f696014c82",
+        "command": "pytest tests/unit/test_server_clock_policy.py tests/unit/test_evidence_integrity.py tests/unit/test_bedrock_web.py -q --tb=line",
+        "bytes": 111
+      },
+      "g2p0_negctl.log": {
+        "sha256": "05b21f9f81bdb36f15af3ce69a90c76265f33a14b7b1dc79456998dead6756bb",
+        "command": "pytest tests/negative_control -q + byte-restore hash check",
+        "bytes": 121
+      }
+    }
+  },
+  "HEAD": "28c00a5f75bd4c70004a1301172b4e324aabee32"
+}
