@@ -13,7 +13,7 @@ this file and `design.md`. Phase 0 is verification-only (no code).
 
 ## Phase 0 — baseline and contract pinning (no implementation)
 
-- [ ] **0.1 Verify the starting repository**
+- [x] **0.1 Verify the starting repository**
       Clean worktree on `p1-3-hardening`. HEAD must be the reviewer-approved
       publisher-spec commit — the commit containing these four files — and
       `c1e9274` must be an ancestor of HEAD. Do NOT start by checking out
@@ -22,11 +22,11 @@ this file and `design.md`. Phase 0 is verification-only (no code).
       baseline = annotated tag `g2-baseline-5bf299a` →
       `5bf299adb1e06c2f061db4086cc3bf183944ff56`; the tag is NOT moved or
       rewritten. Record all of the above in the first commit message.
-- [ ] **0.2 Re-record the inherited suite (no copying)**
+- [x] **0.2 Re-record the inherited suite (no copying)**
       Full unit run (inherited: 642 passed), full suite (inherited: 649
       passed), negctl (inherited: 7 passed, `RESTORE-MISMATCH: none`). Raw
       stdout stored, hashes taken from committed blobs.
-- [ ] **0.3 Pin the publish contract surface in tests**
+- [x] **0.3 Pin the publish contract surface in tests**
       New test: contract `tools[publish_plan]` input/output/failure schemas,
       `idempotency_key` bounds (16–128), `IDEMPOTENCY_CONFLICT`
       non-retryable, details `$defs.error_details_idempotency_conflict`
@@ -37,23 +37,23 @@ this file and `design.md`. Phase 0 is verification-only (no code).
 
 ## Phase 1 — tables + idempotency probe (FIRST CODE SLICE, reviewer-named)
 
-- [ ] **1.1 `publication_receipt` + `idempotency_registry`**
+- [x] **1.1 `publication_receipt` + `idempotency_registry`**
       Exact DDL from design §3 appended to the `Database.__init__`
       executescript block; both tables only
       reachable under `Database.lock`/`transaction()`. Unit tests: schema
       shape, UNIQUE constraints (`tool_name+key`, `plan_id+version`,
       `audit_log_id`), FK enforcement ON.
-- [ ] **1.2 Canonical request fingerprint**
+- [x] **1.2 Canonical request fingerprint**
       `sha256(canonical(request))` over the exact 5 contract fields using
       `persistence.canonical` (same function as audit chain). Test:
       key-order-independence + any-field-change sensitivity.
-- [ ] **1.3 `PublisherService` skeleton + idempotency probe**
+- [x] **1.3 `PublisherService` skeleton + idempotency probe**
       Steps 3–4 of design §4 only: open txn, SELECT registry, hit+fingerprint
       match → replay stored response (from receipt, verbatim);
       hit+different fingerprint → `IdempotencyConflictError` (publish
       variant, contract details shape, non-retryable) → rollback.
       No lifecycle/audit writes yet.
-- [ ] **1.4 Replay/conflict tests (cases A/B)**
+- [x] **1.4 Replay/conflict tests (cases A/B)**
       Include two-connection same-key concurrent barrier test (case 6/7 of
       §8 pre-wired on probe-only path) and zero-change assertions:
       registry/receipt/audit/lifecycle untouched on conflict.

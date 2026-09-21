@@ -88,6 +88,28 @@ class Database:
                 real_wall_started_at TEXT NOT NULL,
                 last_issued_scenario_time TEXT NOT NULL
             );
+            -- G2 publisher (design §3). Written/read ONLY inside
+            -- Database.lock/transaction() — same discipline as clock_session.
+            CREATE TABLE IF NOT EXISTS publication_receipt (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id             TEXT    NOT NULL,
+                plan_version        INTEGER NOT NULL,
+                plan_digest         TEXT    NOT NULL,
+                approval_set_id     TEXT    NOT NULL,
+                audit_log_id        TEXT    NOT NULL UNIQUE,
+                response_json       TEXT    NOT NULL,
+                created_at          TEXT    NOT NULL,
+                UNIQUE (plan_id, plan_version)
+            );
+            CREATE TABLE IF NOT EXISTS idempotency_registry (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                tool_name           TEXT    NOT NULL,
+                idempotency_key     TEXT    NOT NULL,
+                request_fingerprint TEXT    NOT NULL,
+                receipt_id          INTEGER NOT NULL REFERENCES publication_receipt(id),
+                created_at          TEXT    NOT NULL,
+                UNIQUE (tool_name, idempotency_key)
+            );
             CREATE TRIGGER IF NOT EXISTS audit_chain_no_update
             BEFORE UPDATE ON audit_chain BEGIN
                 SELECT RAISE(ABORT, 'audit_chain is append-only');

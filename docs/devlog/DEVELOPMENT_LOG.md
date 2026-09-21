@@ -652,3 +652,39 @@ none）；合同 SHA 前缀 `b92e53f4` 未变。证据：同目录 `EVIDENCE.jso
   3. 不碰 lifecycle/audit/HTTP wiring（Phase 2），不改合同，不动 tag。
 - 环境备忘：跑测试 `.venv-review/Scripts/python.exe -m pytest`，脚本内
   `env -u PYTHONUTF8`；E 盘为 U 盘，开工先探挂载。
+
+## 2026-09-21 — Phase 0 闭环 + Phase 1（tasks 1.1–1.4）完成
+
+- **0.1 lineage**：HEAD 链 `c1e9274 → d1dea54 → 4b1cdf0 → 942e13d →
+  6cb13f9 → 28c00a5`，spec 四文件在 HEAD、c1e9274 为祖先；tag
+  `g2-baseline-5bf299a` → `5bf299adb1e06c2f061db4086cc3bf183944ff56`
+  未移动；合同 SHA `b92e53f4…fe639` 不变。
+- **0.2 四连（干净树重跑）**：unit 642 / full 649 / clock 57 / negctl 7
+  （byte-restore 通过）。raw stdout + EXITCODE 行 + LF-sha256 落
+  `tests/evidence/g2-phase0-baseline/`（EVIDENCE.json 过 integrity 扫描）。
+  诚实性注记：第一轮 clock/negctl 跑在已含新 DDL 的树上发现串污，
+  已回退 persistence 后在干净树重跑为准；unit/full 本就干净树。
+- **0.3** 新 `tests/unit/test_publish_contract_surface.py`（10 passed）：
+  publish 输入五 required + additionalProperties:false、key 16–128、
+  输出四 required + plan_version const、details 三字段 +
+  original_status 枚举 + version ≥1、IDEMPOTENCY_CONFLICT registry=False、
+  two-safeguards 两 bool、POLICY_VIOLATION details required/枚举。
+- **1.1** design §3 DDL 原文照搬进 `persistence.py` executescript；
+  `tests/unit/test_publisher_schema.py`（5 passed）：列布局、UNIQUE×4、
+  FK from/to/table（PRAGMA 列序 from=子列 to=父列）、reopen 约束存活、
+  transaction() 内写与回滚。
+- **1.2–1.4** 新 `src/planpilot/publisher.py`：`request_fingerprint`
+  （`persistence.canonical` 同一函数 + sha256，恰好五字段）、
+  `PublishIdempotencyConflictError`（继承 store.IdempotencyConflictError，
+  code/details/registry 完全不变）、`PublisherService.probe`（§4 步骤
+  3–4：replay / conflict+rollback / first 骨架零写入，事务由
+  `Database.transaction()` 拥有，不自嵌套）。
+  `tests/unit/test_publisher_idempotency.py`（21 passed）：键序无关、
+  逐字段敏感、Case A verbatim 重放（响应非列派生）、Case B 冲突、
+  双连接 barrier（case6 replay-replay；case7 conflict/replay + 文件
+  字节零变化）、conflict 后字节不变（结构零变更）、first 三表零行。
+- `tests/unit/test_errors_schema.py`：CONCRETE_ERRORS 注册新错误
+  （hierarchy walk 守卫如期报警，按其要求登记，+4 参数化）。
+- **复跑**：全量 `tests/` = **689 passed, 0 failed**（405s）。
+- **边界**：本轮未触碰 lifecycle/audit/HTTP wiring/中间件状态机
+  （Phase 2 范围）；合同与 tag 未动。

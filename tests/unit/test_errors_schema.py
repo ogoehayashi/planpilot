@@ -24,6 +24,7 @@ import re
 import pytest
 
 import _fixtures as fixtures
+from planpilot import publisher as P
 from planpilot.store import errors as E
 
 CONTRACT = fixtures.contract()
@@ -71,6 +72,11 @@ CONCRETE_ERRORS = [
     (E.VersionConflictError, ("PLAN-1", 3, 5), {}),
     (E.IdempotencyConflictError, ("PLAN-1", 2), {"original_status": "DRAFT"}),
     (E.PlanNotFoundError, ("PLAN-1", 1), {}),
+    # G2 publisher: publish variant keeps the same code + details shape.
+    # Imported here so the hierarchy walk sees it; see
+    # tests/unit/test_publisher_idempotency.py for the live-path tests.
+    (P.PublishIdempotencyConflictError,
+     ("idem-0123456789abcdef0123456789abcdef", "PLAN-1", "DRAFT"), {}),
 ]
 
 
