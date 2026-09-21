@@ -721,3 +721,35 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   参数化 + wire 端到端 1 + 外层回滚 1；事务所有权/fail-closed 系 3）。
   加 `test_publisher_schema.py` 5 条（fixture 同步改合同合法形状），
   publisher 两文件共 **41 passed**。
+
+## 2026-09-21 — Phase 1.0.2（评审第5轮：版本绑定缺口 + helper 措辞）
+
+复审批复：704/0、negctl 7/0、Publisher targeted 99 均独立复现；前三项
+探针修复 VERIFIED，但剩 1 个必须修复项。本轮按清单补两笔小修。
+
+- **P1（绑定漏 expected_plan_version）**：`replay_binding_violation`
+  此前比较 request 的 plan_id/plan_digest/approval_set_id 与
+  response↔receipt 三对，唯独漏了乐观并发对的 request 侧——
+  registry+receipt+response 可整体合谋"请求版本4、实际发布3"的故事仍被
+  replay。补 `request["expected_plan_version"] == receipt["plan_version"]`
+  （违反→同一 `PublicationInvariantError`→INTERNAL_ERROR）。
+  新增 3 测试：helper 级版本对（含一致三元组仍 None）、reviewer 复现
+  trio 端到端（seed 用 v4 指纹 + receipt/response 说 3 → probe(v4) 拒绝
+  且 `db_digest` 逻辑状态未变）、wire 级（INTERNAL_ERROR +
+  retryable=True（registry 实证）+ details 键集固定 + `expected_plan_version 4`
+  与 `plan_version 3` 字样均不在 wire 上）。
+- **P2（helper 保证比实现强）**：`_probe_in_open_transaction` 的断言
+  收窄为字面事实——只验证"连接上存在开放事务"（`in_transaction`），
+  **不**验证 `BEGIN IMMEDIATE`、**不**验证 `Database.lock` 归属（deferred
+  BEGIN/不持锁的调用方目前会通过守卫，这是诚实承认的现状而非特性）。
+  模块头、方法 docstring、raise 消息三处措辞同步更正；结构性三保证
+  （锁归属、事务模式、释放时机）明确为 Phase 2 `PublisherPreparedCall`
+  的职责，且 Phase 2 测试必须三项都证明。未加"deferred 也算过"的特征
+  测试——避免把缺口固化为规格。
+- 定向复跑：publisher 两文件 **44 passed**（41+3）。
+- 收尾三件套（reviewer 指定，无需再设计审查）：publisher 两文件
+  **44 passed**（41+3）；全套 `tests/` = **707 passed in 392.70s**
+  （704+3 对账吻合，EXITCODE=0）；`tests/negative_control` =
+  **7 passed in 347.92s**（EXITCODE=0）。
+- **边界**：仍未触碰 lifecycle/audit/HTTP wiring/Phase 2；合同与 tag
+  未动。

@@ -18,8 +18,11 @@ what lives here is deliberately small and honest:
 - :class:`PublisherService` — steps 3–4 live in
   :meth:`PublisherService._probe_in_open_transaction`, which performs NO
   transaction management of its own (reviewer round-4 probe 2: the
-  Phase 2 single-BEGIN flow calls it inside its already-open
-  ``BEGIN IMMEDIATE``; opening a second transaction inside one is an
+  Phase 2 single-BEGIN flow calls it inside the transaction the §4.5
+  state machine has already opened — the body only checks that *a*
+  transaction is open, NOT its mode or lock ownership; that guarantee is
+  the PreparedCall's job, reviewer round-5 P2). Opening a second
+  transaction inside one is an
   ``sqlite3.OperationalError``). The public :meth:`PublisherService.probe`
   is the Phase 1 standalone entry: it opens exactly one transaction and
   delegates.
@@ -157,9 +160,10 @@ def replay_binding_violation(
     2. response ↔ receipt: plan_id, audit_log_id and
        published_version==plan_version agree;
     3. request ↔ receipt: the fingerprint already proved byte equality
-       of the 5 fields, so plan_id/digest/approval_set must match the
-       receipt — a mismatch means the stored rows were tampered with
-       after commit.
+       of the 5 fields, so plan_id/digest/approval_set and the
+       expected_plan_version ↔ plan_version optimistic-concurrency pair
+       must match the receipt — a mismatch means the stored rows were
+       tampered with after commit (or never told one story).
     """
     if not isinstance(response, dict):
         return "stored response_json is not an object"
@@ -205,6 +209,17 @@ def replay_binding_violation(
             f"request approval_set_id {request['approval_set_id']!r} "
             f"contradicts receipt approval_set_id "
             f'{receipt["approval_set_id"]!r}'
+        )
+    if request["expected_plan_version"] != receipt["plan_version"]:
+        # Optimistic-concurrency boundary (reviewer round-5 P1): a
+        # registry+receipt+response trio may not jointly tell a
+        # "requested version 4, actually published version 3" story —
+        # the fingerprint hit proves byte equality of the request, so a
+        # mismatch here means the stored rows contradict the very
+        # precondition the caller committed to.
+        return (
+            f"request expected_plan_version {request['expected_plan_version']!r} "
+            f"contradicts receipt plan_version {receipt['plan_version']!r}"
         )
     return None
 
@@ -260,8 +275,17 @@ class PublisherService:
         """Design §4 steps 3–4 body — performs NO transaction management
         of its own (reviewer round-4 probe 2).
 
-        Requires the caller's ``BEGIN IMMEDIATE`` to already be open on
-        the Database connection; anything else crashes as a caller
+        Its guarantee is exactly one check deep: it asserts that *an*
+        open transaction exists on the Database connection (``in_
+        transaction``), and nothing more. It CANNOT and DOES NOT verify
+        that the transaction is ``BEGIN IMMEDIATE`` or that this thread
+        holds ``Database.lock`` — a caller in a plain deferred BEGIN
+        outside the lock passes the guard. Those two structural
+        guarantees (IMMEDIATE + lock held across the §4.5 stages, and
+        released only at the commit point) are the Phase 2
+        ``PublisherPreparedCall``'s job, and its tests must prove all
+        three: lock ownership, transaction mode, release timing.
+        Anything short of an open transaction crashes as a caller
         programming error (``StoreInvariantError``) instead of silently
         half-reading. Reads only: replay/conflict decisions raise or
         return without writing, so the outer transaction's commit point
@@ -273,7 +297,8 @@ class PublisherService:
         if not db.conn.in_transaction:
             raise StoreInvariantError(
                 "_probe_in_open_transaction requires the caller's open "
-                "BEGIN IMMEDIATE (design §4.5); standalone callers use "
+                "transaction (design §4.5; BEGIN IMMEDIATE + Database.lock "
+                "are the PreparedCall's guarantee); standalone callers use "
                 "PublisherService.probe()"
             )
         row = db.conn.execute(

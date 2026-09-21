@@ -343,6 +343,54 @@ def test_receipt_tampering_refuses_replay(tmp_path, column, value):
     db.close()
 
 
+def test_binding_helper_flags_expected_version_contradiction():
+    """Reviewer round-5 P1: the optimistic-concurrency PAIR
+    request.expected_plan_version ↔ receipt.plan_version is part of the
+    three-way binding, not an optional extra."""
+    receipt = {"plan_id": "plan_7f3a91", "plan_version": 3,
+               "plan_digest": DIGEST_A, "approval_set_id": "apr_12",
+               "audit_log_id": "log_1"}
+    why = replay_binding_violation(
+        {**REQUEST, "expected_plan_version": 4}, receipt,
+        dict(STORED_RESPONSE))
+    assert why is not None and "expected_plan_version" in why
+    assert replay_binding_violation(REQUEST, receipt,
+                                    dict(STORED_RESPONSE)) is None
+
+
+def test_expected_version_trio_refuses_replay_end_to_end(tmp_path):
+    """Reviewer round-5 P1 reproduction, through the production probe:
+    registry fingerprint of a version-4 request + receipt that published
+    version 3 + a response truthful for that receipt. Every PAIR agrees;
+    only the three-way binding can see the whole story is impossible —
+    before this fix it returned ``replay`` and a 200."""
+    v4 = {**REQUEST, "expected_plan_version": 4}
+    db = Database(str(tmp_path / "t.db"))
+    seed(db, fingerprint=request_fingerprint(v4))  # receipt/response say 3
+    before = db_digest(str(tmp_path / "t.db"))
+    with pytest.raises(PublicationInvariantError):
+        PublisherService(db, None).probe(v4)
+    db.close()
+    assert db_digest(str(tmp_path / "t.db")) == before  # refused, changed nothing
+
+
+def test_expected_version_contradiction_wire_does_not_leak(tmp_path):
+    """Reviewer round-5 P2 of the fix list: via the middleware surface
+    the contradiction is an INTERNAL_ERROR, retryable per the registry,
+    and the internal version values never reach the wire."""
+    from planpilot.tools.errors import validated_failure
+
+    exc = PublicationInvariantError(
+        "idempotency replay refused — request expected_plan_version 4 "
+        "contradicts receipt plan_version 3")
+    payload, wire = validated_failure("publish_plan", exc, str(uuid.uuid4()))
+    assert payload["error_code"] == "INTERNAL_ERROR"
+    assert payload["retryable"] is True   # registry: INTERNAL_ERROR = True
+    assert set(payload["details"]) == {"diagnostic_class", "safe_detail"}
+    assert b"expected_plan_version 4" not in wire
+    assert b"plan_version 3" not in wire
+
+
 def test_binding_violation_surfaces_as_internal_error_via_middleware(tmp_path):
     """Reviewer probe 3, end of wire: PublicationInvariantError is NOT a
     StoreError, so tools.errors fall-through (adapt_exception,
