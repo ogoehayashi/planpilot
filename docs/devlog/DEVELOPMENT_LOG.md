@@ -820,6 +820,7 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   reviewer「先做一个 Phase 2.0.1 hardening commit」建议，p2-1…
   p2-4、p2-6 主体与本节硬化同仓提交（评审时它们尚未提交，
   HEAD 仍是 `2103b47`）。
-- 提交：`36961d2 fix(g2-phase2.0.1): hold Database.lock until
+- 提交：`29e1a5a fix(g2-phase2.0.1): hold Database.lock until
   rollback completes; fix digest-mismatch details`——13 文件
-  +2158/-15。
+  （amend 前初始 SHA 为 `36961d2`，因 devlog 证据段补正被改写，
+  如实记录；本行补正随下一 devlog-only 提交入仓）。
