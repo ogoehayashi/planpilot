@@ -126,6 +126,13 @@ VOCABULARIES: dict[str, set[str]] = {
         "URGENT_ORDER", "MACHINE_BREAKDOWN", "MATERIAL_DELAY", "WORKER_ABSENCE",
         "PROMPT_INJECTION", "QUANTITY_REVISION", "DUE_DATE_PULL_IN",
     },
+    # §4.5 PublisherPreparedCall transaction state machine, pinned verbatim by
+    # .kiro/specs/publisher-transaction/design.md §4.5. A local closed enum
+    # like workbook_event_type — NOT contract vocabulary, and near-miss
+    # detection still applies to everything around it.
+    "prepared_call_state": {
+        "INIT", "PREPARED", "DURABLE_COMMITTED", "FINISHED", "ROLLED_BACK",
+    },
 }
 
 ALL_KNOWN: set[str] = set().union(*VOCABULARIES.values())

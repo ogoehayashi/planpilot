@@ -753,3 +753,73 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   **7 passed in 347.92s**（EXITCODE=0）。
 - **边界**：仍未触碰 lifecycle/audit/HTTP wiring/Phase 2；合同与 tag
   未动。
+
+## 2026-09-22 — Phase 2.0.1（评审第7轮：PREPARED 失败释放时机 P0 + digest details P1）
+
+复审批复：主体设计正确、19 项矩阵通过，但独立复现两个真实缺陷；
+建议先做很小的 Phase 2.0.1 hardening 再继续 p2-5。本轮全部按探针
+复现→修复→回归测试→复验，未进入 p2-5。
+
+- **P0-a（commit():601 finally 无条件释锁）**：alias INSERT 或
+  `conn.commit()` 在 durable point 前抛错时，`finally` 先释放
+  `Database.lock`，middleware 稍后才 rollback——实测探针
+  `AT_ROLLBACK_ENTRY {state: PREPARED, lock_held: False, in_txn: True}`，
+  即事务仍开着而数据库锁已放，其他线程可拿同一连接进事务。
+  修复按设计 §4.5 规则 1 的字面语义：`finally` 仅在状态已到
+  DURABLE_COMMITTED（或 FINISHED）时释放；PREPARED 内失败保持
+  PREPARED+持锁原样抛出，锁的释放责任移交 `rollback()`（先
+  `conn.rollback()` 后释锁、恰好一次）。
+- **P0-b（publish():751 异常保护只覆盖 prepare）**：commit 抛错不在
+  guard 内，实测返回异常后 `CONNECTION_IN_TRANSACTION True`。修复：
+  统一 rollback guard 覆盖 prepare → 输出校验 → commit 全周期
+  （异常→`rollback()`→re-raise）；非 HTTP 驱动同样在 commit 前做
+  输出 schema 校验（与 middleware.py:210 的镜像，双驱动同一保证）。
+- **P1（PLAN_DIGEST_MISMATCH details 自相矛盾）**：请求 digest 错时
+  details 传的是 `stored_digest` 与 `recomputed`——实测
+  expected==recomputed 却声称 mismatch。修复：`expected_plan_digest`
+  报告调用方声明的 `request["plan_digest"]`。存储内容篡改那一条腿
+  本就由 `verify_digest()` 在 plan_store.py:434 用正确的
+  stored/recomputed 对抛出，不需要（也不应该）在这里替调用方输入
+  代言。
+- **覆盖收紧（case 12 缺口）**：补三条回归进 §8 矩阵
+  （test_publisher_transaction.py，19→22）：
+  1. `test_p0_alias_insert_failure_keeps_lock_until_rollback`——
+     patch `_insert_alias_row` 抛错，断言 rollback 入口
+     `PREPARED+lock_held=True+in_txn=True` 且他线程拿不到锁，
+     rollback 后事务关闭、锁释放一次、原收据零扰动；
+  2. `test_p0_conn_commit_failure_then_publish_guard`——
+     `conn.commit` 属性只读，用 `_CommitFailConn` 代理强制真实
+     pre-durable 提交失败；(a) 直接 PreparedCall 协议保持持锁，
+     (b) `publish()` guard 后 `in_transaction is False`，连接留在
+     可用态（诚实重试发布成功）；
+  3. `test_case12_invalidated_set_publish_zero_change`——
+     APPROVED→invalidate 落 durable row（§4.5 staged reload 读
+     authority_state 行），发布拒绝
+     `APPROVAL_SET_INVALIDATED`+cause 上 wire+零变化。
+     `plan_digest` 错误的 details 断言挂进 case F 既有测试。
+- **actor 铺垫（p2-5 前置，不改变现行为）**：`plan_published` 审计
+  actor 不再写死——`PublisherPreparedCall(actor=...)` 贯穿到
+  `_audit`，默认 `"system"`；p2-5 middleware 接入后传
+  `principal["sub"]`，不丢 `authority.publish_plan()` 路径的真实
+  发布人。
+- 证据：矩阵 **22 passed in 6.69s**；全量 `tests/unit` =
+  **731 passed**（728+3 对账吻合，EXIT=0）；全套 `tests/` =
+  **738 passed in 435.09s**（731 unit + 7 negctl，EXIT=0；首轮
+  曾 1 failed——test_requirement_delivery 本地 HTTP 集成测试在
+  negctl 子进程负载下读超时、单独复跑 13 passed，与本轮改动
+  无关，如实记录；次轮 1 failed + 1 error 为证据包仍在收集路径
+  内被完整性守卫哈希到半成品，属自撞，非产品缺陷；证据包迁出
+  后第三次运行即本条 738 绿）；
+  `tests/negative_control` = **7 passed in 377.06s**（EXIT=0；
+  首轮一次 error 为 requirement_delivery 本地 HTTP 集成测试在
+  negctl 子进程负载下的读超时，单独复跑 13 passed 与全套 731 均
+  绿，与本轮改动无关，如实记录）；词表守卫 PASS；合同
+  SHA-256 `b92e53f4…` 未动。原始 stdout+SHA-256 入仓
+  `tests/evidence/g2-phase2-0-1-hardening/`。
+- **边界**：未触碰 p2-5（HTTP 路由重接）与 p2-7 收口；按
+  reviewer「先做一个 Phase 2.0.1 hardening commit」建议，p2-1…
+  p2-4、p2-6 主体与本节硬化同仓提交（评审时它们尚未提交，
+  HEAD 仍是 `2103b47`）。
+- 提交：`36961d2 fix(g2-phase2.0.1): hold Database.lock until
+  rollback completes; fix digest-mismatch details`——13 文件
+  +2158/-15。

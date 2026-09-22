@@ -370,6 +370,62 @@ class ApprovalService:
             raise ApprovalRequiredError([a["action"] for a in pending], roles)
         return snapshot
 
+    # ------------------------------------------- publish-time revalidation
+
+    def require_validated_binding(
+        self, plan_id: str, plan_version: int, plan_digest: str
+    ) -> dict:
+        """Fail-closed re-check of the validator evidence behind one binding.
+
+        Design §4 step 5 (reviewer P0): lifecycle holds only state +
+        approval binding — validator evidence lives HERE, in
+        ``_validated[(plan_id, version, digest)]``, and the publisher must
+        re-check it explicitly, never infer it from lifecycle. Read-only:
+        touches no state, persists nothing; every violation raises
+        ``ApprovalInvariantError`` (the class whose contract transport is
+        ``INTERNAL_ERROR``/503 via ``adapt_exception`` fall-through), so a
+        failure leaves zero change. Checks, ALL required:
+
+        1. a validation record exists for exactly this binding;
+        2. ``digest_verified is True``;
+        3. ``is_feasible is True``;
+        4. ``hard_violations == []``;
+        5. ``recomputed_plan_digest == plan_digest``;
+        6. if an approval set exists for the binding, it was derived from
+           the COMPLETE required-action set of THIS validation record
+           (``_assert_matches_validation`` — the same relationship
+           ``load_state`` enforces at restart).
+
+        Returns a copy of the stored record for the publisher's step 6.
+        """
+        key = (plan_id, plan_version, plan_digest)
+        record = self._validated.get(key)
+        if record is None:
+            raise ApprovalInvariantError(
+                "no validated-plan record exists for the publish binding"
+            )
+        result = record.get("validation_result") or {}
+        if result.get("digest_verified") is not True:
+            raise ApprovalInvariantError(
+                "validated evidence does not carry digest_verified=True"
+            )
+        if result.get("is_feasible") is not True:
+            raise ApprovalInvariantError(
+                "validated evidence does not carry is_feasible=True"
+            )
+        if result.get("hard_violations") != []:
+            raise ApprovalInvariantError(
+                "validated evidence carries hard-constraint violations"
+            )
+        if result.get("recomputed_plan_digest") != plan_digest:
+            raise ApprovalInvariantError(
+                "validated recomputed digest contradicts the publish binding"
+            )
+        set_id = self._set_by_binding.get(key)
+        if set_id is not None:
+            self._assert_matches_validation(self._sets[set_id], record)
+        return copy.deepcopy(record)
+
     # --------------------------------------------------------- invalidation
 
     def invalidate_set(

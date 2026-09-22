@@ -14,6 +14,7 @@ from .approval import ApprovalService
 from .clock import Clock, WallClock
 from .persistence import Database
 from .store import PlanNotFoundError, PlanStore
+from .tools.errors import internal_error
 
 
 ROLE_LABELS = {
@@ -66,6 +67,53 @@ class RuntimeAuthority:
         self._store, self._approvals = self._load_pair(
             row["plan_store_json"], row["approval_service_json"]
         )
+        self._poisoned = False
+
+    # ---------------------------------------------------------------- poison
+    #
+    # G2 §4.5 rule 3: set after a durable COMMIT whose in-memory swap
+    # failed (the database has the new state, this process does not).
+    # While poisoned, every authoritative read/write entry point below
+    # fails closed with a contract INTERNAL_ERROR (retryable per the
+    # registry) until reload_from_db() re-reads the durable snapshot.
+
+    def _require_healthy(self) -> None:
+        if getattr(self, "_poisoned", False):
+            raise self._poison_error()
+
+    @staticmethod
+    def _poison_error():
+        return internal_error("AuthoritySnapshotDiverged")
+
+    def _swap_staged(self, store, approvals, revision) -> None:
+        """The single in-memory swap point (authority.py:123 relocated).
+
+        Shared by _mutate, the §4.5 publisher commit, and reload_from_db so
+        there is exactly one code path that advances the live snapshot.
+        """
+        self._store, self._approvals, self._revision = store, approvals, revision
+        self._poisoned = False
+
+    def reload_from_db(self) -> None:
+        """Clear a poison by re-reading the durable snapshot under db.lock."""
+        db = self.database
+        with db.lock:
+            if db.conn.in_transaction:
+                raise AuthorityConflictError(
+                    "reload_from_db must run outside an open transaction"
+                )
+            row = db.conn.execute(
+                "SELECT revision,plan_store_json,approval_service_json "
+                "FROM authority_state WHERE singleton=1"
+            ).fetchone()
+            if row is None:
+                raise AuthorityConflictError(
+                    "no durable authority snapshot to reload from"
+                )
+            store, approvals = self._load_pair(
+                row["plan_store_json"], row["approval_service_json"]
+            )
+            self._swap_staged(store, approvals, row["revision"])
 
     @staticmethod
     @contextmanager
@@ -98,6 +146,7 @@ class RuntimeAuthority:
         return self._load_pair(store_text, approval_text)
 
     def _mutate(self, operation, *, plan_id=None, actor="system", event="authority_update"):
+        self._require_healthy()
         store, approvals = self._clone()
         result = operation(store, approvals)
         if isinstance(result, _Unchanged):
@@ -120,7 +169,7 @@ class RuntimeAuthority:
             if cursor.rowcount != 1:
                 raise AuthorityConflictError("authority snapshot changed; reload required")
             self.database._audit(plan_id, actor, event, {"revision": next_revision})
-        self._store, self._approvals, self._revision = store, approvals, next_revision
+        self._swap_staged(store, approvals, next_revision)
         return result
 
     def install_validated_plan(
@@ -254,6 +303,7 @@ class RuntimeAuthority:
         )
 
     def get_plan(self, plan_id: str, version: int | None = None) -> dict | None:
+        self._require_healthy()
         try:
             content = self._store.get_content(plan_id, version)
             lifecycle = self._store.get_lifecycle(plan_id, content["plan_version"])
@@ -291,6 +341,7 @@ class RuntimeAuthority:
         )
 
     def required_permission(self, approval_request_id: str) -> str:
+        self._require_healthy()
         requirement = self._approvals.requirement_for_request(approval_request_id)
         return {
             "publish_plan": "approve_publish",

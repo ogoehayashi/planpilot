@@ -1,0 +1,47 @@
+{
+  "evidence_id": "g2-phase2-0-1-hardening",
+  "gate": "G2 Phase 2.0.1 (reviewer round-7: PREPARED-failure release-timing P0 + digest details P1 + case-12 coverage)",
+  "date": "2026-09-22",
+  "branch": "p1-3-hardening",
+  "base_commit": "2103b47",
+  "review_blockers_addressed": [
+    "P0 commit():601 finally released Database.lock unconditionally \u2014 an alias-INSERT or conn.commit() failure before the durable point left the middleware observing state=PREPARED, lock_held=False, in_txn=True (transaction open, lock gone). Fixed per design \u00a74.5 rule 1: finally releases ONLY at/after DURABLE_COMMITTED; a PREPARED failure keeps the call lock-holding and rollback() (connection rolled back first, lock released exactly once) owns the release",
+    "P0 publish():751 exception guard covered prepare only \u2014 a commit failure escaped and left conn.in_transaction=True. Fixed with one rollback guard over prepare -> output validation -> commit (mirrors middleware.py:210 so both drivers validate output before the durable point), any failure reaches rollback() and the connection is left usable",
+    "P1 PLAN_DIGEST_MISMATCH details contradicted themselves (expected_plan_digest == recomputed_plan_digest while claiming mismatch because stored_digest stood in for the caller's input). Fixed: expected_plan_digest now reports request['plan_digest']; the stored-vs-recomputed leg already raises inside verify_digest (plan_store.py:434) with the correct pair",
+    "Case-12 coverage gaps closed in the \u00a78 matrix: invalidated approval set refused with APPROVAL_SET_INVALIDATED + zero change (durable row-level invalidation, \u00a74.5 staged reload reads authority_state); pre-COMMIT failure regressions x2 (forced alias INSERT raise; conn.commit is a read-only attribute so real pre-durable commit failure is forced via a connection proxy) asserting rollback-entry PREPARED+locked+in-txn, other threads locked out, single release after rollback, and the honest retry publishing"
+  ],
+  "actor_seam": "plan_published audit actor no longer hardcoded 'system': PublisherPreparedCall(actor=...) threads through to _audit, default 'system'; p2-5 passes the authenticated principal['sub']",
+  "raw_stdout": {
+    "note": "Files below are the untouched stdout of the exact commands listed; hashes are SHA-256 of the shipped bytes. Reproduce with env -u PYTHONUTF8 (default Windows GBK environment).",
+    "artifacts": {
+      "publisher_matrix.log": {
+        "sha256": "4cfb01377e88ba0be4061841233d2bf5b6ce325a90957df7c510b2c9f156d1bd",
+        "command": "pytest tests/unit/test_publisher_transaction.py -q --tb=short",
+        "outcome": "22 passed (19 prior matrix + 3 round-7 regressions)"
+      },
+      "unit.log": {
+        "sha256": "c8beff694af58f34b422d385338b1879124b54f88a5f40abf48735b411e6a327",
+        "command": "pytest tests/unit -q --tb=short",
+        "outcome": "731 passed, EXIT=0 (728 prior + 3 new, arithmetic pinned)"
+      },
+      "full.log": {
+        "sha256": "d3ab968e4d1b1e7cd1a111493f09b86234ebeebd4f14770f92248c95b284ffda",
+        "command": "pytest tests/ -q --tb=short",
+        "outcome": "738 passed in 435.09s (0:07:15), EXIT=0 (731 unit + 7 negative_control, arithmetic pinned). Shipped run: rerun after the evidence pack moved out of tests/evidence during collection, so the integrity guard no longer hashes a half-written self-package; an earlier attempt also showed one flaky port-reset error in the local-HTTP integration test under load, absent from this clean run."
+      },
+      "negative_control.log": {
+        "sha256": "97431c2641e566d3fe6072f65d7b7467bf0396b6f8ceb78df4de5bdbf378ac04",
+        "command": "pytest tests/negative_control -q --tb=short",
+        "outcome": "7 passed in 377.06s, EXIT=0. Honest note: the first attempt of this run reported 6 passed + 1 ERROR at setup of test_mutations_are_detected \u2014 the baseline subprocess died on a socket read timeout inside test_requirement_delivery's local-HTTP integration test under negctl's heavy subprocess load. That file passes standalone (13 passed) and inside the 731-test unit run; the clean rerun shipped here is green. Unrelated to round-7 changes."
+      },
+      "vocabulary_guard.log": {
+        "sha256": "d17eeb81300b758fdd014ff13048ca3b20ec274194e5acf0f9ebb668c9f241ec",
+        "command": "python tools/check_closed_vocabularies.py",
+        "outcome": "CLOSED VOCABULARY CHECK | PASS"
+      }
+    }
+  },
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "contract_changed": false,
+  "scope_note": "p2-5 (HTTP route rewiring) NOT touched: reviewer held it pending this hardening. Audit-actor default remains 'system' until p2-5 supplies principal['sub']"
+}
