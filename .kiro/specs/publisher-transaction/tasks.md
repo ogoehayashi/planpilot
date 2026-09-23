@@ -157,7 +157,7 @@ this file and `design.md`. Phase 0 is verification-only (no code).
 - [x] **4.1 Full regression**
       Targeted → clock/evidence regressions → full unit → full suite →
       negctl + restore hashes. No inherited count may drop.
-- [ ] **4.2 Evidence pack**
+- [x] **4.2 Evidence pack**
       `tests/evidence/g2-publisher-transaction/` + `EVIDENCE.json` with
       hashes from final committed LF blobs; `test_evidence_integrity.py`
       green in main repo AND harness copy (no-.git path).
@@ -165,7 +165,7 @@ this file and `design.md`. Phase 0 is verification-only (no code).
       Record actual counts (never copied), the case-C alias decision +
       rationale, case-D `POLICY_VIOLATION` decision, and this spec's gate
       state.
-- [ ] **4.4 Review handoff**
+- [x] **4.4 Review handoff**
       Clean `git diff --check`, contract SHA unchanged, tag
       `g2-baseline-5bf299a` unmoved, commit list since the approved spec
       commit, bundle + `bundle verify` from a temp clone, one-page report.

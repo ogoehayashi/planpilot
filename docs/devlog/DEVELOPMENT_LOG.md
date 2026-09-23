@@ -1024,3 +1024,23 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   自检；无 `# MUTATION:` 残留。
 - **待办**：reviewer 授权后提交 `test(g2-p3): …` 之后的收口 commit
   （tasks.md + 证据包 + 本 devlog 条目），提交后照例三连复验。
+
+## 2026-09-23 — G3 attestation：4.2 / 4.4 验收补账（reviewer 第 9 轮方案步骤 5–7）
+
+- **被验证对象**：证据主体 commit `4c26366`（含 5 日志证据包、
+  tasks 3.1–3.6/4.1/4.3、第 9 轮四笔修正：unit 阶段补跑
+  **742 passed / EXIT=0** 入包、devlog 耗时改回原始
+  **352.48s / 276.10s**、4.2/4.4 曾恢复未勾、EVIDENCE.json 措辞与
+  `case_map`/`known_gaps` 实际键对齐）。
+- **4.2 committed-blob integrity**：主仓 HEAD=`4c26366` 时
+  `test_evidence_integrity` **1 passed**（`git cat-file blob HEAD:…`
+  路径），`git ls-files --eol` 确认 6 文件 i/lf w/lf；无 .git 的
+  Temp harness 拷贝（fallback 工作字节路径）**1 passed**，用后即删。
+- **4.4 bundle 恢复**：`git bundle create --all` → `bundle verify`
+  （complete history）→ temp clone：HEAD=`4c26366`、
+  `g2-baseline-5bf299a^{}`=`5bf299a`、包内 6 个证据文件齐全、
+  合同 SHA `b92e53f4…fe639` 不变、**clone 内** integrity
+  **1 passed**（恢复出的树自证）。bundle/clone 均已清理。
+- **勾账**：4.2、4.4 现按上述实证勾选，Phase 0–4 合计 **23/23**。
+  本 attestation commit 自身完成后另出一支交付 bundle 做
+  `bundle verify`（覆盖含本条目的最终历史），结果记入收口报告。
