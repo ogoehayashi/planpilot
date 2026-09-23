@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+import hashlib
+import json
 import tempfile
 
 from .approval import ApprovalService
@@ -15,6 +17,30 @@ from .clock import Clock, WallClock
 from .persistence import Database
 from .store import PlanNotFoundError, PlanStore
 from .tools.errors import internal_error
+
+
+LEGACY_PUBLISH_KEY_PREFIX = "legacy-publish-"
+
+
+def _legacy_publish_key(plan_id: str, version: int) -> str:
+    """Deterministic idempotency key for the positional legacy entry.
+
+    The legacy ``publish_plan(plan_id, version, digest, set, ...)``
+    signature carries no idempotency key, but the contract requires
+    ``idempotency_key`` to be a 16–128 character string and
+    ``PublisherService.publish`` (the non-HTTP convenience path) does
+    not re-run the input schema — so a key derived straight from the
+    inputs (e.g. ``f"{plan_id}:{version}"``) could be written to the
+    registry while violating that length rule. Hashing the canonical
+    JSON of the binding fixes the length: prefix + 64 hex characters =
+    79, always inside 16–128 regardless of plan_id length, while
+    staying deterministic (same binding → same key → §5 case A replay)
+    and injection-safe (canonical JSON escapes the separator).
+    """
+    canonical = json.dumps([str(plan_id), int(version)],
+                           separators=(",", ":"), ensure_ascii=False)
+    return LEGACY_PUBLISH_KEY_PREFIX + hashlib.sha256(
+        canonical.encode("utf-8")).hexdigest()
 
 
 ROLE_LABELS = {
@@ -68,6 +94,9 @@ class RuntimeAuthority:
             row["plan_store_json"], row["approval_service_json"]
         )
         self._poisoned = False
+        # p2-5: lazy PublisherService for the publish_plan delegation
+        # (see _publisher_service; avoids an import cycle at module level).
+        self._publisher = None
 
     # ---------------------------------------------------------------- poison
     #
@@ -395,39 +424,59 @@ class RuntimeAuthority:
         self, plan_id: str, version: int, digest: str,
         approval_set_id: str, actor: str, application_role: str,
     ) -> dict:
+        """p2-5: DELEGATES to the §4.5 publisher — this is no longer an
+        independent write path (design §7, tasks 2.4).
+
+        The old body ran digest/approval/transition through ``_mutate``
+        and DISCARDED the ``_audit`` return value (the G1 gap this whole
+        phase exists to close). One truth remains: ``PublisherService.
+        publish`` (the same PreparedCall the HTTP route drives via
+        ``ToolErrorMiddleware.execute``), now the sole code that can flip
+        a plan to PUBLISHED. ``_mutate`` stays untouched for the other
+        writers (install/approve/decide).
+
+        Behaviour deltas the delegation imposes, all reviewer-blessed:
+        - returns the contract response (plan_id, published_version,
+          status, audit_log_id), not the raw lifecycle dict;
+        - replay of the same binding returns the byte-identical stored
+          receipt and adds no second ``plan_published``;
+        - the two bare ``ValueError`` guards become contract errors:
+          digest lie -> PLAN_DIGEST_MISMATCH, second approval set ->
+          POLICY_VIOLATION (§5 case D; design §7 calls the 400->403 the
+          only externally visible correction);
+        - a STALE expected_plan_version now raises PLAN_VERSION_CONFLICT
+          BEFORE the approval-set checks (design §4 pins the step order:
+          version preflight is step 4, require_approved is step 6).
+
+        The role gate is kept as defense-in-depth for non-HTTP drivers;
+        the first line of defence is the route's ``_auth
+        ("approve_publish")`` (design §4 step 1).
+        """
         if application_role != "planner":
             raise PermissionError("only Production Planner may publish")
-        timestamp = self.clock.now()
+        request = {
+            "plan_id": plan_id,
+            "expected_plan_version": version,
+            "plan_digest": digest,
+            "approval_set_id": approval_set_id,
+            # The legacy positional entry has no key; the publisher
+            # demands exactly the 5 contract fields. A deterministic
+            # FIXED-LENGTH hash key (never the raw binding, whose
+            # plan_id has no contract length bound) keeps the derived
+            # key inside 16–128 and preserves the old "same binding
+            # replays" behaviour: case A returns the stored receipt
+            # verbatim.
+            "idempotency_key": _legacy_publish_key(plan_id, version),
+        }
+        return self._publisher_service().publish(request, actor=actor)
 
-        def operation(store, approvals):
-            content = store.get_content(plan_id, version)
-            recomputed = store.verify_digest(plan_id, version)
-            if digest != recomputed or content["plan_digest"] != recomputed:
-                raise ValueError("published plan digest does not match stored content")
-            lifecycle = store.get_lifecycle(plan_id, version)
-            if lifecycle["status"] == "PUBLISHED":
-                if lifecycle["approval_set_id"] != approval_set_id:
-                    raise ValueError("publication retry uses a different approval set")
-                return _Unchanged(lifecycle)
-            approvals.require_approved(
-                approval_set_id, plan_id, version, digest, timestamp
-            )
-            if lifecycle["status"] != "APPROVED":
-                store.transition(
-                    plan_id, version, "APPROVED", timestamp,
-                    approval_set_id=approval_set_id,
-                    expected_plan_version=version,
-                )
-            return store.transition(
-                plan_id, version, "PUBLISHED", timestamp,
-                approval_set_id=approval_set_id,
-                published_version=version,
-                expected_plan_version=version,
-            )
-
-        return self._mutate(
-            operation, plan_id=plan_id, actor=actor, event="plan_published"
-        )
+    def _publisher_service(self):
+        # Lazy construction keeps the module graph acyclic (publisher
+        # imports authority at top level; this is the one back-edge).
+        if self._publisher is None:
+            from .publisher import PublisherService
+            self._publisher = PublisherService(self.database, self)
+        return self._publisher
 
     @property
     def revision(self) -> int:

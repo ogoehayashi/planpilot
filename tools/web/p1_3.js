@@ -253,7 +253,11 @@
         plan_digest:b.plan_digest, approval_set_id:setId,
         idempotency_key:'planpilot-web-publish-' + b.plan_id + '-' + b.plan_version,
       })});
-      selectedRecord.lifecycle = result;
+      // p2-5: /publish now returns the contract receipt
+      // {plan_id, published_version, status, audit_log_id}; merge the
+      // authoritative fields onto the lifecycle view instead of
+      // replacing it (approval_set_id etc. come from GET /plans).
+      Object.assign(selectedRecord.lifecycle, result);
       updatePlanHeader();
       await refreshAudit();
       $('status').textContent = '计划已发布，版本与摘要已重新核对。';

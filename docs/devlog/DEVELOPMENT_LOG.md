@@ -824,3 +824,102 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   rollback completes; fix digest-mismatch details`——13 文件
   （amend 前初始 SHA 为 `36961d2`，因 devlog 证据段补正被改写，
   如实记录；本行补正随下一 devlog-only 提交入仓）。
+
+## 2026-09-22 — p2-5：/publish 路由重接为薄适配器（reviewer 七条红线逐条落地）
+
+- **主线**：`api_server` 的 `/publish` 不再手写平行发布路径，重接为
+  设计 §6.1 的薄适配器——认证留路由、执行入共享中间件、审计带真实
+  actor、响应原样出字节。旧 `authority.publish_plan()` 改为委托
+  Publisher，生产入口唯一化。
+- **七条红线对账**（reviewer 原话 → 落点）：
+  1. `_auth("approve_publish")` 留在 middleware 外：路由内先认证，
+     缺失/权限不足的 token 仍按裸传输层 403 出（无 tool_error 信封），
+     行为与旧路径逐字一致；
+  2. `principal["sub"]` 传入 `prepared_call(actor=…)`：真实 actor 落在
+     `plan_published` **审计记录**里（publication receipt 与 decision
+     trace 的 schema 本身没有 actor 字段——receipt 通过 `audit_log_id`
+     指针绑定到该条审计记录，trace 只证明该次调用被观察，身份由
+     correlation_id 承担）；新测试钉的是**存回来的审计链内容**加
+     receipt 的 audit_log_id 绑定，不是响应回显；
+  3. 删除路由层重复的 `validate_tool_payload()`：payload 校验唯一
+     归中间件（与 M2/MCP 驱动同一函数、同一处调用）；
+  4. 路由必须调共享 `ToolErrorMiddleware.execute("publish_plan", …)`：
+     错误码、retryable、tool_error 信封三驱动一处出；
+  5. 原样写出 `outcome.wire_bytes`：新增 `_wire()`，重放测试断言
+     两次响应**字节相同**且第二次**零新增审计行**（只加 trace）；
+  6. 补 non-planner / 窗口关闭 / 非法 payload / 真实 actor / §6.3
+     状态映射 / observer trace 测试：新文件
+     `tests/unit/test_p2_5_http_publish.py` 共 8 项，全部对**真起
+     的 HTTP 服务器**打真请求（对齐 `test_server_clock_policy` 的
+     做法，而非直接调内部函数）；
+  7. 旧 `authority.publish_plan()` 不再构成绕开 Publisher 事务的
+     生产入口：`RuntimeAuthority.publish_plan` 改为惰性构造并委托
+     `PublisherService.publish(...)`（§4.5 同一事务，约束见该节），
+     方法 docstring 钉死语义差异。
+- **§6.3 状态映射表**：路由内一张 `PUBLISH_STATUS_BY_ERROR_CODE`
+  逐行照抄设计 §6.3；**一处主动修正**——补录 `STATE_NOT_FOUND`
+  →409：旧路由将其归 store 域（StoreError→409），设计表原只点名
+  PLAN_* 两个 store 码，漏收会让未知 plan 发布从 409 静默退化为
+  503，故按旧行为收编，并同步补进 `.kiro` 设计 §6.3 表（reviewer
+  第 8 轮：报告称补录而设计文档未改，本轮已文档/代码一致）。
+- **兼容修正（响应形状变化引发，非回归）**：
+  - `tools/web/p1_3.js`：新 publish 响应是 4 字段契约收据，不再回显
+    `approval_set_id` 等；JS 从整体覆盖 lifecycle 改为 merge，
+    lifecycle 视图字段不再被收据抹掉；
+  - `tests/unit/test_runtime_authority.py`：委托后走 §4 步骤序，
+    版本预检（step 4）先于审批检查（step 6），stale 版本发布报
+    `PLAN_VERSION_CONFLICT` 而非旧的 `APPROVAL_SET_INVALIDATED`——
+    测试断言改为钉委托语义（这是 publisher 的正统顺序，不是新行为）；
+  - `tests/unit/test_p1_3_web_approval.py`：旧路由从不查幂等注册表,
+    两处测试在同一 key 上发第二个 binding；委托后共享注册表按 §5
+    case B 正确拒绝，测试改用独立 key + 新增 case A 重放断言
+    （同 key 同 body 重放 → 同一收据、零新审计）。
+- **过程错误如实记录**（两次，均在证据落盘前发现并纠正）：
+  1. 导入虚构：初版从 publisher 导入了不存在的
+     `PublisherPoisonedError`（毒态实际抛 `internal_error(...)` 的
+     FrameworkDomainError，路由用不到），自查后清除，冻结 import 仅
+     `PublisherService`；
+  2. 证据污染：一次误把 finalize 脚本写进 `_pack_staging/`（树内），
+     同时并发起了第二个全套——repo-scan 类守卫扫到新 .py 报 10 failed
+     + 1 error（假阳性，非代码问题）。处置：finalize 移出到树外
+     （Temp），孤儿 pytest 进程清理，**冻结树全套 + negctl 全部重跑**，
+     本条目以下所有数字来自重跑后的终版日志。
+- **第 8 轮 reviewer 阻塞（CHANGES REQUESTED 两项 P1）与修复**：
+  1. **P1-1 非法幂等键**：委托处曾用 `f"{plan_id}:{version}"`，
+     而合同对 key 有 16–128 长度约束、`plan_id` 本身无界，且
+     `PublisherService.publish` 不重跑输入 schema——实测
+     `plan_id="P"` 会把 3 字符 key 真实写进 registry。改为
+     `legacy-publish-` + sha256(canonical([plan_id, version]))
+     （固定 79 字符、同绑定确定性重放、版本敏感、分隔符注入安全：
+     `A:1`@2 与 `A`@1 不同键）。回归 2 项进
+     `test_runtime_authority.py`：1 字符/5000 字符 plan id、
+     确定性、版本敏感性、registry 存的 key 满足 16–128、
+     重放返回原收据。
+  2. **P1-2 非对象 JSON 绕过信封**：分发前的全局 object guard 以
+     裸 `{"error": …}` 400 拒绝数组/字符串/数字/null，绕过
+     middleware 唯一校验入口（无 INVALID_INPUT/retryable/
+     correlation_id/details，无 trace）。改为 `/publish` 把**任意**
+     已解析 JSON 值交给 middleware（非 Mapping 时 refs={}，不再先
+     `body.get()`），其余旧路由保留原 guard。HTTP 测试一组四例。
+  3. **证据文字更正**：actor 声明按真实 schema 收窄（见上红线 2
+     改写）；STATE_NOT_FOUND→409 同步补进 `.kiro` 设计 §6.3 表，
+     文档/代码一致。
+- **冻结树复跑（第 8 轮修复之后；此前 8/739/746 各次作废）**：
+  `test_p2_5_http_publish.py` **9 passed**（+非对象四例一组）；
+  RA+Web 兼容 **11 passed**（+legacy-key 回归 2）；publisher 两文件
+  矩阵 **61 passed**；unit **742 passed**（731 基线 + 11 新增，对账
+  吻合）；全套 `tests/` **749 passed in 438.90s**（742+7 对账吻合，
+  EXIT=0）；`tests/negative_control` **7 passed in 436.44s**；词表
+  守卫 **PASS**；合同 SHA `b92e53f4…` 未动，`contract_changed:
+  false`。**如实记录**：修复后第一次全套出现 1 例 negctl
+  沙箱上下文相关误报（allow_nan 变异在 58 连跑中报
+  test_http_authentication_and_full_publish_flow 变红）；用同一变异
+  做三种隔离复现（单测/单文件/整个 unit 套件）均绿，干净重跑 0 失败
+  ——判定为该控制自身的 flake（其文件注释有既往同类记录），最终以
+  干净重跑入包，变异目标文件全程先备份后字节级复原。
+- 证据包：`tests/evidence/g2-phase2-5-http-wiring/EVIDENCE.json`
+  （7 日志 + SHA，`raw_stdout.artifacts` 体例沿用 Phase 2.0.1；
+  finalize 后复跑 integrity 与守卫；`_pack_staging` 清空，
+  finalize 脚本在树外（Temp）运行后删除）。
+- **边界**：本条目只覆盖 p2-5 实现证据；p2-7（Phase 2 收口 + G3
+  复验包）另立条目。未动合同、tag、Phase 3。

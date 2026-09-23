@@ -514,7 +514,7 @@ keyed off `outcome.payload["error_code"]` when `is_error`:
 | `INVALID_INPUT` (input-schema failure inside `execute`) | 400 |
 | `VALIDATION_FAILED` | 400 |
 | `POLICY_VIOLATION` | 403 |
-| `IDEMPOTENCY_CONFLICT`, `PLAN_VERSION_CONFLICT`, `PLAN_DIGEST_MISMATCH`, approval-domain codes | 409 |
+| `IDEMPOTENCY_CONFLICT`, `PLAN_VERSION_CONFLICT`, `PLAN_DIGEST_MISMATCH`, `STATE_NOT_FOUND`, approval-domain codes | 409 |
 | `INTERNAL_ERROR`, `DEADLINE_EXCEEDED`, any unmapped code | 503 |
 
 (Illegal lifecycle transitions are an internal invariant violation with no

@@ -15,18 +15,49 @@ from planpilot.authority import RuntimeAuthority
 from planpilot.approval import ApprovalError
 from planpilot.clock import Clock, WallClock, clock_from_env
 from planpilot.persistence import Database
+from planpilot.publisher import PublisherService
 from planpilot.runtime_planning import generate_authoritative_plans_from_state
 from planpilot.security import authenticate
 from planpilot.store import StoreError
+from planpilot.tools.middleware import ToolErrorMiddleware
 from planpilot.validation.schema import validate_tool_payload
 from planpilot.workflow.events import EventWorkflow
 from planpilot.agent.chat import ChatService
 from planpilot.inference.bedrock_client import BedrockClient, InferenceError
-from planpilot.audit import SecurityEventService
+from planpilot.audit import AuditTrail, DecisionTraceWriter, SecurityEventService
 
 ROOT = Path(__file__).resolve().parents[1]
 LOGGER = logging.getLogger("planpilot.api")
 MAX_BODY = 2 * 1024 * 1024
+
+# p2-5 design §6.3: the /publish route's error_code -> HTTP status table.
+# The contract defines no HTTP statuses (failure_transport only mandates the
+# tool_error envelope); this is a route convention continuation of the
+# pre-middleware classification (PermissionError->403, Store/Approval->409,
+# schema->400, other->503). Any unmapped code falls through to 503 exactly
+# as the old catch-all did. Approval-domain codes are the six APPROVAL_*.
+PUBLISH_STATUS_BY_ERROR_CODE = {
+    "INVALID_INPUT": 400,
+    "VALIDATION_FAILED": 400,
+    "POLICY_VIOLATION": 403,
+    "IDEMPOTENCY_CONFLICT": 409,
+    "PLAN_VERSION_CONFLICT": 409,
+    "PLAN_DIGEST_MISMATCH": 409,
+    # STATE_NOT_FOUND (PlanNotFoundError / ApprovalStateNotFoundError) is a
+    # store-domain code: the old classification sent every StoreError to 409
+    # (§6.3 "reproduces today's classifications"). NO_FEASIBLE_PLAN,
+    # RATE_LIMITED and SEARCH_ESCALATION_EXHAUSTED cannot occur on this
+    # path; unmapped codes still fall through to 503.
+    "STATE_NOT_FOUND": 409,
+    "APPROVAL_REQUIRED": 409,
+    "APPROVAL_REJECTED": 409,
+    "APPROVAL_SET_INCOMPLETE": 409,
+    "APPROVAL_EXPIRED": 409,
+    "APPROVAL_SET_INVALIDATED": 409,
+    "APPROVAL_WINDOW_CLOSED": 409,
+    "INTERNAL_ERROR": 503,
+    "DEADLINE_EXCEEDED": 503,
+}
 
 
 class Server(ThreadingHTTPServer):
@@ -53,6 +84,14 @@ class Server(ThreadingHTTPServer):
         self.authority = RuntimeAuthority(db, self.clock)
         self.factory_states = FactoryStateRegistry(db)
         self.security_events = SecurityEventService(db)
+        # p2-5 (design §6.1): ONE shared middleware + publisher per server.
+        # The observer is the P0-5 DecisionTraceWriter — one decision_trace
+        # row per execute (success AND failure), exceptions swallowed by
+        # _finish: observability never changes outcomes.
+        self.publisher = PublisherService(db, self.authority)
+        self.middleware = ToolErrorMiddleware(
+            observer=DecisionTraceWriter(AuditTrail(db))
+        )
         self.factory_root = Path(factory_root).resolve()
         self.scheduling = threading.BoundedSemaphore(1)
         self.inference = BedrockClient(db)
@@ -69,6 +108,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self, value, status=200):
         raw = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
+        self._wire(raw, status)
+
+    def _wire(self, raw: bytes, status=200):
+        # p2-5 (§6.3): write middleware-produced bytes UNMODIFIED — the
+        # envelope (success or tool_error) is already contract-validated
+        # and canonically serialised by json_wire/failure_wire. Re-dumping
+        # here would break the byte-identical replay guarantee.
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
@@ -82,6 +128,40 @@ class Handler(BaseHTTPRequestHandler):
         if not header.startswith("Bearer "):
             raise PermissionError("Bearer token required")
         return authenticate(header[7:], self.server.secret, permission)
+
+    def _handle_publish(self, body):
+        # p2-5 (design §4, §6.2): auth stays in the route — a
+        # missing/insufficient token is a transport 403, never a
+        # tool_error. Everything after auth runs in the shared
+        # middleware: input validation happens EXACTLY ONCE inside
+        # execute() — for ANY parsed JSON value, including non-objects
+        # (reviewer P1: a bare object-guard here would bypass the
+        # envelope) — the publisher's PreparedCall holds the §4.5
+        # transaction, and the route writes outcome.wire_bytes
+        # verbatim: no re-validation, no re-serialisation here.
+        principal = self._auth("approve_publish")
+        refs = {}
+        if isinstance(body, dict):
+            for field in ("plan_id", "approval_set_id",
+                          "plan_digest", "idempotency_key"):
+                value = body.get(field)
+                if isinstance(value, str):
+                    refs[field] = value
+            version = body.get("expected_plan_version")
+            if isinstance(version, int) and not isinstance(version, bool):
+                refs["plan_version"] = str(version)
+        outcome = self.server.middleware.execute(
+            "publish_plan",
+            body,
+            self.server.publisher.prepared_call(actor=principal["sub"]),
+            entity_references=refs,
+        )
+        status = 200
+        if outcome.is_error:
+            status = PUBLISH_STATUS_BY_ERROR_CODE.get(
+                outcome.payload.get("error_code"), 503
+            )
+        self._wire(outcome.wire_bytes, status)
 
     def do_GET(self):
         with Timer("http_get"):
@@ -187,6 +267,15 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "application/json required"}, 415)
                     return
                 body = json.loads(self.rfile.read(length))
+                if self.path == "/publish":
+                    # p2-5: ANY parsed JSON value (list, string, number,
+                    # null included) goes to the middleware — it is the
+                    # single contract validation entry and already wraps
+                    # non-Mapping payloads (middleware.py:174) into the
+                    # INVALID_INPUT envelope + trace. A bare guard here
+                    # would bypass the envelope.
+                    self._handle_publish(body)
+                    return
                 if not isinstance(body, dict):
                     raise ValueError("request body must be an object")
                 authority = self.server.authority
@@ -212,15 +301,6 @@ class Handler(BaseHTTPRequestHandler):
                         body["request_id"], body["decision"], principal["sub"],
                         principal["role"], decision_reason=body.get("decision_reason"),
                         decision_comment=body.get("decision_comment"),
-                    ))
-                elif self.path == "/publish":
-                    principal = self._auth("approve_publish")
-                    validate_tool_payload(
-                        body, "publish_plan", "input_schema", "publish_plan_input"
-                    )
-                    self._json(authority.publish_plan(
-                        body["plan_id"], body["expected_plan_version"], body["plan_digest"],
-                        body["approval_set_id"], principal["sub"], principal["role"],
                     ))
                 else:
                     if not self.server.scheduling.acquire(blocking=False):

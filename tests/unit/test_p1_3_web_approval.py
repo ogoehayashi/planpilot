@@ -96,7 +96,8 @@ def test_web_assets_and_http_approval_lifecycle(tmp_path):
         publish = {"plan_id": option["plan_id"], "expected_plan_version": option["plan_version"],
                    "plan_digest": option["plan_digest"], "approval_set_id": requested["approval_set_id"],
                    "idempotency_key": "p1-3-web-publish-0001"}
-        assert call("/publish", publish)[1]["status"] == "PUBLISHED"
+        first_status, first_response = call("/publish", publish)
+        assert first_status == 200 and first_response["status"] == "PUBLISHED"
         audit = call("/audit/status")[1]
         assert audit["verified"] is True
         assert audit["entry_count"] >= 1 and len(audit["head_hash"]) == 64
@@ -112,6 +113,11 @@ def test_web_assets_and_http_approval_lifecycle(tmp_path):
         rejected_publish = {**publish, **binding(rejected_option),
                             "expected_plan_version": rejected_option["plan_version"],
                             "approval_set_id": rejected["approval_set_id"]}
+        # p2-5: the middleware registry keys by idempotency_key — reusing
+        # the first publish's key for a DIFFERENT binding is §5 case B
+        # (IDEMPOTENCY_CONFLICT), not an approval check. This leg tests
+        # the rejected-approval path, so it needs its own key.
+        rejected_publish["idempotency_key"] = "p1-3-web-rejected-publish-0002"
         rejected_publish.pop("plan_version")
         status, error = call("/publish", rejected_publish)
         assert status == 409 and error["error_code"] == "APPROVAL_REJECTED"
@@ -119,8 +125,21 @@ def test_web_assets_and_http_approval_lifecycle(tmp_path):
         call("/schedule", {"factory_data": state})
         stale = call("/approval/status?" + query)[1]
         assert stale["aggregate_status"] == "INVALIDATED"
-        status, error = call("/publish", publish)
-        assert status == 409 and error["error_code"] == "APPROVAL_SET_INVALIDATED"
+        # p2-5 §5 case A: the SAME key + SAME binding replays the stored
+        # receipt verbatim — registry hit precedes every approval check,
+        # so a later invalidation cannot revoke a completed publication.
+        replay_status, replay = call("/publish", publish)
+        assert replay_status == 200 and replay["status"] == "PUBLISHED"
+        assert replay["audit_log_id"] == first_response["audit_log_id"]
+        # Fresh key against the superseded v1 binding: the publisher's
+        # step-4 version preflight blocks it PLAN_VERSION_CONFLICT (409)
+        # before the approval set is consulted. The APPROVAL_SET_INVALIDATED
+        # leg lives in the publisher matrix (§8 case 12), which can
+        # invalidate a set WITHOUT superseding its version.
+        status, error = call("/publish", {
+            **publish, "idempotency_key": "p1-3-web-stale-publish-0003",
+        })
+        assert status == 409 and error["error_code"] == "PLAN_VERSION_CONFLICT"
     finally:
         server.shutdown()
         server.server_close()

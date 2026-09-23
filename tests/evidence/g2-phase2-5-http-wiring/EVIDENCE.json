@@ -1,0 +1,76 @@
+{
+  "evidence_id": "g2-phase2-5-http-wiring",
+  "gate": "G2 p2-5 (/publish HTTP route rewired as thin adapter over ToolErrorMiddleware + PublisherPreparedCall; authority.publish_plan no longer a parallel production path; reviewer round-8 P1 fixes included)",
+  "date": "2026-09-22",
+  "branch": "p1-3-hardening",
+  "base_commit": "2e39fd1",
+  "reviewer_redlines_addressed": [
+    "_auth('approve_publish') stays OUTSIDE middleware.execute in the route: a missing/insufficient token is a bare transport 403 with no contract tool_error, exactly as before",
+    "principal['sub'] is passed to prepared_call(actor=...) — the REAL actor is stored on the plan_published AUDIT RECORD. Per the reviewer's wording correction, precisely: the publication receipt has no actor field (it binds the actor through its audit_log_id pointer to exactly that record) and the decision-trace schema has no actor field either (a trace proves the invocation was observed; correlation identity is the trace's job, not authorship). The test pins the stored audit-chain record AND the receipt's audit_log_id binding — never a response echo",
+    "route-level duplicate validate_tool_payload() removed — payload validation is the middleware's (same function the M2/MCP drivers use)",
+    "route calls the shared ToolErrorMiddleware.execute('publish_plan', ...) — error codes, retryable flags and the tool_error envelope come from one place for all three drivers",
+    "outcome.wire_bytes written verbatim via _wire(); no re-serialization (replay test asserts byte-identical bodies and zero added audit rows)",
+    "tests added for non-planner, approval-window-closed, invalid payload, real actor, §6.3 HTTP status mapping and observer trace (tests/unit/test_p2_5_http_publish.py)",
+    "authority.publish_plan() now DELEGATES to PublisherService.publish (same §4.5 transaction) — it can no longer bypass the Publisher transaction as a production entry; tests/unit/test_runtime_authority.py updated to pin delegation semantics (PLAN_VERSION_CONFLICT precedes APPROVAL_SET_INVALIDATED per §4 step order)"
+  ],
+  "reviewer_round8_fixes": [
+    "P1-1 (authority.py legacy idempotency key): f'{plan_id}:{version}' could violate the contract 16–128 length rule because plan_id has no bounded length and PublisherService.publish does not re-run the input schema, so an illegal key would land in idempotency_registry verbatim. Replaced with _legacy_publish_key = 'legacy-publish-' + sha256(canonical([plan_id, version])) — fixed 79-char length for ANY plan_id, deterministic per binding (case A replay preserved), separator-injection-safe. Regression tests: 1-char id, 5000-char id, same-binding determinism, version sensitivity, 'A:1'@2 vs 'A'@1 non-collision, stored registry key bounds, replay returns the original receipt (tests/unit/test_runtime_authority.py, 2 new tests)",
+    "P1-2 (api_server.py object guard): the pre-dispatch 'request body must be an object' bare-400 guard ran BEFORE middleware.execute, so array/string/number/null bodies on /publish bypassed the contract envelope, got no INVALID_INPUT/retryable/correlation_id/details and produced no observer trace. /publish now passes ANY parsed JSON value (refs={} for non-mappings) into the shared middleware; only the legacy routes keep the object guard. HTTP test pins all four non-object bodies -> 400 + INVALID_INPUT tool_error + exactly one trace + zero writes (tests/unit/test_p2_5_http_publish.py, 1 new test)",
+    "Evidence wording (both points corrected here and in the devlog entry): the actor claim now states audit-record truth (receipt/trace carry no actor field; the receipt binds via audit_log_id); the STATE_NOT_FOUND->409 correction is no longer code-only — the §6.3 table in .kiro/specs/publisher-transaction/design.md now lists STATE_NOT_FOUND in the 409 row, so design and code agree"
+  ],
+  "compat_notes": [
+    "tools/web/p1_3.js merges the 4-field contract receipt into the lifecycle view instead of replacing it (response no longer echoes approval_set_id)",
+    "STATE_NOT_FOUND added to the §6.3 mapping at 409 AND to the design §6.3 table row: the old route classified it store-domain (StoreError -> 409); omitting it would have silently regressed unknown-plan publishes from 409 to 503",
+    "tests/unit/test_p1_3_web_approval.py second-publish calls use fresh idempotency keys where the old route reused one: the shared registry correctly refuses a different binding under the same key (case B), which the old bypassing route never saw"
+  ],
+  "raw_stdout": {
+    "note": "Files below are the untouched stdout of the exact commands listed; hashes are SHA-256 of the shipped LF bytes. Reproduce with env -u PYTHONUTF8 (default Windows GBK environment).",
+    "artifacts": {
+      "p2_5_http.log": {
+        "sha256": "625f89812049955453b39df6f1aa849c0b238d7125e986afbfa9df9137498d40",
+        "command": "pytest tests/unit/test_p2_5_http_publish.py -q --tb=short",
+        "outcome": "9 passed, EXIT=0 (non-planner 403 transport guard; invalid-payload tool_error via shared middleware; real actor on the plan_published audit RECORD with the receipt binding it via audit_log_id; §6.3 status mapping line by line; replay byte-identical wire_bytes; observer trace per outcome; window-closed at both entry points; authority.publish_plan delegation; REVIEWER P1-2: array/string/number/null bodies all get the contract INVALID_INPUT envelope with one trace each, no bare 400)",
+        "tail": "9 passed in 6.69s | EXIT=0"
+      },
+      "publisher_matrix.log": {
+        "sha256": "562a54e6df4b5af566ee6012478fa4fbab7ab76d2d926b28b0f3530e0581ae7e",
+        "command": "pytest tests/unit/test_publisher_transaction.py tests/unit/test_publisher_idempotency.py -q --tb=short",
+        "outcome": "61 passed, EXIT=0 (§8 publisher matrix + idempotency suite intact after p2-5 rewiring)",
+        "tail": "61 passed in 7.73s | EXIT=0"
+      },
+      "authority_web_compat.log": {
+        "sha256": "66351a908d21064f488333728425ba2bf3033bab1b824ef35c97f4d552906399",
+        "command": "pytest tests/unit/test_runtime_authority.py tests/unit/test_p1_3_web_approval.py -q --tb=short",
+        "outcome": "11 passed, EXIT=0 (RuntimeAuthority delegation incl. REVIEWER P1-1 legacy-key regression: 1-char and 5000-char plan ids, determinism, version sensitivity, injection-safety, stored-key contract bounds, replay returns original receipt; web approval case A/B key semantics)",
+        "tail": "11 passed in 5.94s | EXIT=0"
+      },
+      "unit.log": {
+        "sha256": "82dbb3113c2ca534a68e7999765f6d37b39bc4b9d255531f9b623b5b0dd2c3cb",
+        "command": "pytest tests/unit -q --tb=short",
+        "outcome": "742 passed, EXIT=0 (731 Phase-2.0.1 baseline + 11 new: 9 p2-5 HTTP incl. non-object bodies, 2 legacy-key regressions in runtime authority; arithmetic pinned)",
+        "tail": "742 passed in 60.47s (0:01:00) | EXIT=0"
+      },
+      "full.log": {
+        "sha256": "7a8083f85427f8a2a9743677598aa3f8aa81c1b6095d22185a0dd96e786659cf",
+        "command": "pytest tests/ -q --tb=short",
+        "outcome": "749 passed, EXIT=0, 0 failed/0 error, 438.90s (742 unit + 7 negctl reconciliation); an earlier full attempt surfaced one context-dependent negctl sandbox false-escape which did not reproduce in three isolation modes (single test / single file / full unit with allow_nan mutation) and cleared on this clean rerun — logged honestly in the devlog entry",
+        "tail": "749 passed in 438.90s (0:07:18) | EXIT=0"
+      },
+      "negative_control.log": {
+        "sha256": "4fb8f38084f6b3df2d8259b7bc6655d9e7a8cc8f789ba9331b6669db7c639101",
+        "command": "pytest tests/negative_control -q --tb=short",
+        "outcome": "7 passed, EXIT=0, 436.44s (frozen tree with reviewer round-8 P1 fixes present)",
+        "tail": "7 passed in 436.44s (0:07:16) | EXIT=0"
+      },
+      "vocabulary_guard.log": {
+        "sha256": "dd6c31230bfdec902f28fc0f17b02323fa13374a21d8fe55a61e06b8d095e1cf",
+        "command": "python tools/check_closed_vocabularies.py",
+        "outcome": "CLOSED VOCABULARY CHECK | PASS",
+        "tail": "CLOSED VOCABULARY CHECK | PASS | EXIT=0"
+      }
+    }
+  },
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "contract_changed": false,
+  "scope_note": "p2-7 (Phase 2 closure: G3 re-verification pack) is the NEXT step; this pack covers p2-5 implementation evidence including the reviewer round-8 P1 fixes"
+}

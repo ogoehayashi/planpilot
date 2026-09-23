@@ -766,12 +766,16 @@ class PublisherService:
             self, response_mutator=response_mutator, actor=actor
         )
 
-    def publish(self, request: Mapping[str, Any]) -> dict[str, Any]:
+    def publish(self, request: Mapping[str, Any], *,
+                actor: str = "system") -> dict[str, Any]:
         """Convenience non-HTTP path: run one PreparedCall to completion.
 
-        Used by scripts/tests that do not go through the middleware; the
-        HTTP route goes through ``middleware.execute`` instead (p2-5), and
-        both share this exact PreparedCall — one core, two drivers.
+        Used by scripts/tests and the §7 compat wrapper that do not go
+        through the middleware; the HTTP route goes through
+        ``middleware.execute`` instead (p2-5), and both share this exact
+        PreparedCall — one core, two drivers. ``actor`` lands on the
+        ``plan_published`` audit event (p2-5: the route passes the
+        authenticated ``principal["sub"]``).
 
         One rollback guard covers the WHOLE lifecycle (reviewer round-7
         P0): a commit() that fails before the durable point used to slip
@@ -782,7 +786,7 @@ class PublisherService:
         exactly once; a commit that crossed the durable point has already
         moved to FINISHED and rollback() is the rule-1 no-op.
         """
-        prepared = self.prepared_call()
+        prepared = self.prepared_call(actor=actor)
         try:
             candidate = prepared.prepare(request, None)
             # Defense-in-depth mirroring middleware.py:210 — the non-HTTP

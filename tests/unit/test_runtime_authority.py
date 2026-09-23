@@ -11,12 +11,15 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from planpilot.approval import ApprovalRequiredError, ApprovalSetInvalidatedError
-from planpilot.authority import AuthorityConflictError, RuntimeAuthority
+from planpilot.approval import ApprovalRequiredError
+from planpilot.authority import (LEGACY_PUBLISH_KEY_PREFIX,
+                                 AuthorityConflictError, RuntimeAuthority,
+                                 _legacy_publish_key)
 from planpilot.clock import FixedClock
 from planpilot.persistence import Database
 from planpilot.security import issue_token
-from planpilot.store import DigestMismatchError, SchemaViolationError, canonical_plan_digest
+from planpilot.store import (DigestMismatchError, SchemaViolationError,
+                             VersionConflictError, canonical_plan_digest)
 
 NOW = "2026-09-14T08:00:00+08:00"
 HORIZON_END = "2026-09-18T17:00:00+08:00"
@@ -165,11 +168,18 @@ def test_regeneration_invalidates_old_approval_and_blocks_stale_publish(tmp_path
     second = signed_content(fixtures, version=2)
     install(authority, second)
     assert authority.get_plan(first["plan_id"], 1)["lifecycle"]["status"] == "SUPERSEDED"
-    with pytest.raises(ApprovalSetInvalidatedError):
+    # p2-5: publish_plan delegates to the §4.5 publisher, whose pinned
+    # step order (design §4) version-preflights BEFORE the approval-set
+    # load — the stale v1 binding is blocked with PLAN_VERSION_CONFLICT.
+    # The invalidated-set leg stays covered by the publisher matrix
+    # (§8 case 12, test_publisher_transaction) and the HTTP route test
+    # in test_p1_3_web_approval (v2, never superseded).
+    with pytest.raises(VersionConflictError):
         authority.publish_plan(
             first["plan_id"], 1, first["plan_digest"], old["approval_set_id"],
             "p", "planner",
         )
+    assert authority.get_plan(first["plan_id"], 1)["lifecycle"]["status"] == "SUPERSEDED"
     assert authority.get_plan(first["plan_id"], 2)["lifecycle"]["status"] == "PROPOSED"
     db.close()
 
@@ -285,3 +295,63 @@ def test_http_approval_and_publish_use_runtime_authority(tmp_path, fixtures):
         server.server_close()
         worker.join(timeout=5)
         db.close()
+
+
+# ---------------------------------------------------------------- p2-5 reviewer P1
+#
+# The legacy positional publish_plan entry must derive an idempotency key
+# that satisfies the contract (16–128 chars) for ANY plan_id, because
+# PublisherService.publish (the non-HTTP convenience path) does not
+# re-run the input schema and the key lands in idempotency_registry
+# verbatim. A raw f"{plan_id}:{version}" key was contract-illegal for a
+# 1-char plan_id (length 3). The fix: fixed-length hash of the canonical
+# binding — deterministic (same binding replays, case A) yet bounded.
+
+def test_legacy_publish_key_contract_bounds_and_determinism():
+    short = _legacy_publish_key("P", 1)          # 1-char plan id
+    long = _legacy_publish_key("X" * 5000, 1)    # absurdly long plan id
+    for key in (short, long, _legacy_publish_key("PLAN-RUNTIME-1", 1)):
+        assert key.startswith(LEGACY_PUBLISH_KEY_PREFIX)
+        assert 16 <= len(key) <= 128
+    # Same binding → same key (replay stays possible)…
+    assert _legacy_publish_key("P", 1) == short
+    assert _legacy_publish_key("X" * 5000, 1) == long
+    # …different version → different key, and no separator injection:
+    # plan_id "A:1" version 2 must NOT collide with plan_id "A"
+    # version "1:2"-style raw concat would.
+    assert _legacy_publish_key("PLAN-A", 1) != _legacy_publish_key("PLAN-A", 2)
+    assert _legacy_publish_key("A:1", 2) != _legacy_publish_key("A", 1)
+
+
+def test_legacy_delegation_stores_contract_valid_key_and_replays_receipt(tmp_path, fixtures):
+    db = Database(tmp_path / "state.db")
+    authority = RuntimeAuthority(db, clock())
+    content = signed_content(fixtures)
+    install(authority, content)
+    request = authority.request_approval(
+        content["plan_id"], 1, content["plan_digest"],
+        "publish_plan", "planner",
+    )
+    authority.decide_approval(
+        request["approvals"][0]["approval_request_id"], "APPROVED",
+        "planner", "planner",
+    )
+    first = authority.publish_plan(
+        content["plan_id"], 1, content["plan_digest"],
+        request["approval_set_id"], "planner", "planner",
+    )
+    with db.lock:
+        row = db.conn.execute(
+            "SELECT idempotency_key FROM idempotency_registry"
+        ).fetchone()
+    assert row is not None
+    stored_key = row["idempotency_key"]
+    assert 16 <= len(stored_key) <= 128
+    assert stored_key == _legacy_publish_key(content["plan_id"], 1)
+    # Replay of the same binding returns the original receipt verbatim.
+    again = authority.publish_plan(
+        content["plan_id"], 1, content["plan_digest"],
+        request["approval_set_id"], "planner", "planner",
+    )
+    assert again == first
+    db.close()
