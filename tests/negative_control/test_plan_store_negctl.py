@@ -81,8 +81,9 @@ def _sub_once(source: str, old: str, new: str, label: str) -> str:
     return source.replace(old, new)
 
 
-# (label, file, mutation, suite that must fail)
-MUTATIONS: list[tuple[str, str, object, str]] = [
+# (label, file, mutation, suite that must fail [str] — or defence-in-depth
+#  HOLD suite that must still PASS [tuple of socket-free files, p2-7])
+MUTATIONS: list[tuple[str, str, object, str | tuple[str, ...]]] = [
     # ---- canonical form
     (
         "canonical_json loses sort_keys",
@@ -1029,11 +1030,17 @@ def test_defence_suites_are_http_free():
     hold verdict rides on socket timing under load — the exact defect that
     once produced an unreproducible false escape via
     test_http_authentication_and_full_publish_flow. So every file named in
-    a tuple hold suite is asserted to contain no HTTP/socket machinery at
-    all. Adding a flaky file to a hold suite now fails here, in seconds,
-    instead of producing a phantom escape an hour later.
+    a tuple hold suite is asserted to contain none of the KNOWN network
+    entry points below. This is a keyword tripwire, not a proof of total
+    network absence: it stops the usual ways a flaky file creeps into a
+    hold suite (serving, client libs, raw sockets), and adding such a file
+    fails here in seconds instead of producing a phantom escape an hour
+    later.
     """
-    banned = ("urlopen", "http.server", "HTTPServer", "socket", "Request(")
+    banned = (
+        "urlopen", "http.server", "HTTPServer", "socket", "Request(",
+        "requests", "httpx", "aiohttp", "socketserver", "urllib",
+    )
     offenders = {}
     hold_files = {f for m in MUTATIONS if isinstance(m[3], tuple) for f in m[3]}
     assert hold_files, "the defence-in-depth hold suites vanished from MUTATIONS"

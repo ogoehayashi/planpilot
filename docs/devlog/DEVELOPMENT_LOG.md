@@ -968,3 +968,23 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
 - **边界**：Phase 2 至此实现 + 证据 + flake 关闭三事齐备，等待
   reviewer 对收口提交（tasks.md 勾选 + negctl 收窄 + 证据包）的
   授权；G3 复验包与 Phase 3 另立条目。
+
+## 2026-09-23 — G3 顺手项：p2-7 两项非阻断 P3 修正（reviewer 授权范围内）
+
+- **背景**：p2-7 已入库 `7b6b238`（提交后 integrity 对最终
+  blob **1 passed**、status 干净、`git show --stat` 与报告一致）。
+  reviewer 批准进入 G3，同时点名两项非阻断 P3「可在 G3 顺手处理」。
+- **P3-1 类型注解**：`MUTATIONS` 注解末项原写 `str`，p2-7 后实际
+  语义是 `str`（must-fail 套件）| `tuple[str, ...]`（defence-in-depth
+  hold 套件）。改为 `list[tuple[str, str, object, str | tuple[str, ...]]]`，
+  并同步修正表头过时注释（原只写 "suite that must fail"）。
+- **P3-2 守卫措辞与词表**：`test_defence_suites_are_http_free` 的
+  docstring 原称 hold 文件"不含任何 HTTP/socket 机制"，措辞强于实现
+  （实现是关键词扫描）。收紧为 **known network entry points 的
+  tripwire，非网络缺席的全程证明**；词表按 reviewer 处方扩充
+  `requests / httpx / aiohttp / socketserver / urllib`（三个 hold 文件
+  对全部 10 词实测零命中，扩充不误伤）。
+- **验证**：三条快守卫（http_free / vocab self-test / repo scan）
+  **3 passed**；p2-5 HTTP + RuntimeAuthority 回归 **19 passed**；
+  devlog 追加后词表守卫 **PASS**。58-mutation 长跑不受影响
+  （本提交未触碰任何 MUTATION 条目与执行分支）。
