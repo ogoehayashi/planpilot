@@ -988,3 +988,39 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   **3 passed**；p2-5 HTTP + RuntimeAuthority 回归 **19 passed**；
   devlog 追加后词表守卫 **PASS**。58-mutation 长跑不受影响
   （本提交未触碰任何 MUTATION 条目与执行分支）。
+
+## 2026-09-23 — G3：Publisher 事务复验包 + Phase 3–4 勾账（待 reviewer 授权提交）
+
+- **前置**：p2-5 `5d2b656`、p2-7 `7b6b238`、P3 顺手项 `1d14a1e`
+  均已入库并做提交后三连复验；reviewer 明确 Phase 0–2 关闭，
+  G3 负责 crash matrix/并发/硬杀/证据包/handoff 收口。
+- **§8 逐案对账（1–18）**：每条 case 映射到
+  `tests/unit/test_publisher_transaction.py`（及 idempotency /
+  p2_5_http_publish / runtime_authority / server_clock_policy /
+  evidence_integrity）的具体测试名与断言向量，逐条人工核读，
+  无凭空勾选项。恢复类 case（8/10/14）全部经真实
+  `os._exit` 子进程 + 重开句柄验证，非内存模拟。
+- **冻结树四组复跑**（串行，HEAD `1d14a1e` + 本次证据包）：
+  matrix 定向 **92 passed**；全套 **750 passed / 352.48s**；
+  negctl **8 passed / 276.10s**；词表 **PASS**（27 sets）。
+- **证据包 `tests/evidence/g2-publisher-transaction/`**：
+  5 份命令日志（targeted / unit / full / negctl / vocabulary_guard，
+  按 4.1 阶梯含独立 full-unit 阶段）+ EVIDENCE.json（sha256 按打包终态
+  字节，CRLF→LF 归一后计算；contract SHA `b92e53f4…fe639` 硬编码自复核
+  值；`case_map` 逐案映射 + `known_gaps` 缺口注记）。
+  finalizer 断言在 staging 抓到 targeted.log 缺 EXIT 标记的不一致，
+  以**补跑真实一次**闭环而非回填文本——该纪律沿用第 7 轮教训。
+- **integrity 路径澄清（reviewer 第 9 轮指正）**：本条目初稿曾写
+  “主仓最终 Git blob 1 passed”——当时证据包仍是未跟踪目录，integrity
+  实际走的是 working-file fallback，不是 committed blob；该说法撤回。
+  committed-blob integrity、无 .git harness integrity、bundle→temp
+  clone 恢复验证，均改在**证据主体 commit 之后**执行，结论以
+  attestation commit 记录被验证的准确 SHA。
+- **勾账**：tasks.md 3.1–3.6、4.1 逐项对账后勾选；**4.2、4.4 暂恢复
+  未勾**（其验收对象是尚未发生的 committed-blob 验证与含 G3 证据的
+  bundle），待验证通过后由 attestation commit 勾选并写明被验证的
+  commit SHA。Phase 0–3 + 4.1/4.3 合计 21/23。
+- **negctl 卫生**：沙箱恢复为字节比对断言，本轮 8 passed 内含
+  自检；无 `# MUTATION:` 残留。
+- **待办**：reviewer 授权后提交 `test(g2-p3): …` 之后的收口 commit
+  （tasks.md + 证据包 + 本 devlog 条目），提交后照例三连复验。

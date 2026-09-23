@@ -111,26 +111,26 @@ this file and `design.md`. Phase 0 is verification-only (no code).
 
 ## Phase 3 — crash matrix (blocking evidence, design §8)
 
-- [ ] **3.1 Fault-injection harness**
+- [x] **3.1 Fault-injection harness**
       Deterministic raise-after-step hook in `PublisherService` (test-only
       seam), restart = reopen the same file (G1.0.2 clock discipline:
       persisted `clock_session`, no re-anchor).
-- [ ] **3.2 Crash points 1–5**
+- [x] **3.2 Crash points 1–5**
       Before-lifecycle / after-lifecycle-before-audit / after-audit-before-
       receipt / after-receipt-before-commit / after-commit-before-response;
       each asserts the exact persisted-state vector (lifecycle, audit count
       + `verify_audit()`, revision, receipt, registry).
-- [ ] **3.3 Concurrency matrix (6–7) + restart replay (8)**
+- [x] **3.3 Concurrency matrix (6–7) + restart replay (8)**
       Two open `Database`s + two `PublisherService`s, barrier-synced, same
       key; same key different payload; genuine restart replay.
-- [ ] **3.4 Output-validation rollback proof (9) + audit identity (10–11)**
+- [x] **3.4 Output-validation rollback proof (9) + audit identity (10–11)**
       Mutation-injected bad output → full rollback; exact retry same
       `audit_log_id`, entry_count unchanged; retry adds zero `plan_published`.
-- [ ] **3.5 Negative zero-change matrix (12)**
+- [x] **3.5 Negative zero-change matrix (12)**
       non-planner, expired/rejected/invalidated approval, stale version,
       digest mismatch, approval-window-closed → contract errors, all four
       persisted layers untouched.
-- [ ] **3.6 Poisoned authority + real hard-kills + immutability +
+- [x] **3.6 Poisoned authority + real hard-kills + immutability +
       evidence negative + traces (cases 13–18, reviewer P1)**
       (a) exception injected between `conn.commit()` and the in-memory swap →
       THE CALL STILL RETURNS 200 + byte-identical verified receipt, DB
@@ -154,14 +154,14 @@ this file and `design.md`. Phase 0 is verification-only (no code).
 
 ## Phase 4 — suite, evidence, review handoff
 
-- [ ] **4.1 Full regression**
+- [x] **4.1 Full regression**
       Targeted → clock/evidence regressions → full unit → full suite →
       negctl + restore hashes. No inherited count may drop.
 - [ ] **4.2 Evidence pack**
       `tests/evidence/g2-publisher-transaction/` + `EVIDENCE.json` with
       hashes from final committed LF blobs; `test_evidence_integrity.py`
       green in main repo AND harness copy (no-.git path).
-- [ ] **4.3 Devlog entry (append-only)**
+- [x] **4.3 Devlog entry (append-only)**
       Record actual counts (never copied), the case-C alias decision +
       rationale, case-D `POLICY_VIOLATION` decision, and this spec's gate
       state.

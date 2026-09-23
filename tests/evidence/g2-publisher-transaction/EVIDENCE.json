@@ -1,0 +1,59 @@
+{
+  "id": "g2-publisher-transaction",
+  "title": "G2 §8 crash & concurrency matrix — blocking evidence (design §8/§9, tasks 3.1–3.6 + 4.1; 4.2/4.4 attestation lands in the follow-up commit)",
+  "date": "2026-09-23",
+  "head_before_evidence_commit": "1d14a1e",
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "commands": {
+    "targeted.log": "python -m pytest tests/unit/test_publisher_transaction.py tests/unit/test_publisher_idempotency.py tests/unit/test_server_clock_policy.py tests/unit/test_evidence_integrity.py tests/unit/test_p2_5_http_publish.py -q",
+    "unit.log": "python -m pytest tests/unit -q --tb=short -p no:cacheprovider",
+    "full.log": "python -m pytest tests/ -q --tb=short -p no:cacheprovider",
+    "negctl.log": "python -m pytest tests/negative_control -q --tb=short -p no:cacheprovider",
+    "vocabulary_guard.log": "python tools/check_closed_vocabularies.py"
+  },
+  "case_map": {
+    "1-4": "test_crash_before_commit_rolls_back_everything[3 points] + lifecycle-untouched re-check",
+    "5": "test_replay_after_commit_is_verbatim_and_inert",
+    "6": "test_two_connections_same_key_race (barrier, 2 Databases, 2 services)",
+    "7": "test_two_connections_same_key_different_payload (winner E / loser B, order-insensitive)",
+    "8": "test_replay_after_commit_is_verbatim_and_inert + hard-kill case-15 fresh-process reopen (no clock re-anchor: clock_session high-water asserted)",
+    "9": "test_output_validation_failure_rolls_back_all",
+    "10-11": "test_replay_after_commit_is_verbatim_and_inert (audit_log_id + entry_count + zero delta)",
+    "12": "negatives: pending/rejected/expired/invalidated/stale/digest + window-closed (p2-5 HTTP route) + non-planner 403 (p2-5 route) — zero four-layer change",
+    "13": "test_post_commit_sync_failure_poisons_then_recovers (both halves) + p0 release-timing guards",
+    "14": "test_hard_kill_after_audit_rolls_back_under_recovery (os._exit, fresh process)",
+    "15": "test_hard_kill_after_commit_replays_verbatim (os._exit post-commit)",
+    "16": "test_alias_replay_leaves_receipt_and_original_row_untouched (byte-identical snapshots)",
+    "17": "test_missing_validator_evidence_fails_closed (INTERNAL_ERROR, ApprovalInvariantError, zero-change)",
+    "18": "test_trace_observer_one_record_per_outcome + middleware-level observer tests"
+  },
+  "known_gaps": [
+    "Case 12 non-planner and window-closed legs are pinned at the publish ENTRY via the p2-5 HTTP route tests (test_non_planner_403, window-closed section), not inside publisher_transaction.py — the publisher-service layer itself does not re-check principal/window; that is the middleware's job by design (seam: publish() validates approval state only).",
+    "raw stdout captured per run; timings vary by machine load."
+  ],
+  "notes": "4.1 ladder order: targeted -> unit -> full -> negctl -> vocabulary. targeted/full/negctl/vocab ran on HEAD 1d14a1e with the pack staged outside tests/; unit.log re-ran on the same code tree (pack dir contents identical to what ships). EVIDENCE.json hashes are the LF bytes shipped here. Committed-blob integrity, no-.git harness integrity and bundle->temp-clone recovery are attested in the follow-up commit against THIS pack commit's SHA.",
+  "raw_stdout": {
+    "artifacts": {
+      "targeted.log": {
+        "sha256": "a34c899d429e2464fa9ced01bcc9739a580c14e9c14a3508cab8ea15e7c6ab16",
+        "bytes": 187
+      },
+      "unit.log": {
+        "sha256": "75b06dc208380e445e39c46597a38890b19072ced8ddb1fb0e1eb29970bf88ba",
+        "bytes": 918
+      },
+      "full.log": {
+        "sha256": "3cc45f1167a1cfba040d60104b5466bba05b26c7686673d958778ad0f82768ea",
+        "bytes": 919
+      },
+      "negctl.log": {
+        "sha256": "a969783a6a82bf5d64ddec9b77c5164d41f02b649f6cf7bb5cf68538a1bc6f91",
+        "bytes": 117
+      },
+      "vocabulary_guard.log": {
+        "sha256": "dd6c31230bfdec902f28fc0f17b02323fa13374a21d8fe55a61e06b8d095e1cf",
+        "bytes": 2754
+      }
+    }
+  }
+}
