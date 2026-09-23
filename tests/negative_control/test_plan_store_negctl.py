@@ -194,7 +194,12 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
         "float layer 2 removed (allow_nan) — layer 1 must still hold",
         "digest.py",
         lambda s: _sub_once(s, "allow_nan=False", "allow_nan=True", "allow_nan"),
-        None,  # genuinely still passes: _reject_non_finite runs first
+        # Deterministic hold suite (p2-7 reviewer: defence-in-depth checks
+        # must not be exposed to the full-suite HTTP flake): the two files
+        # that exercise non-finite floats through layer 1 — canonicalization
+        # and the tool-error contract shape. Neither opens a socket
+        # (asserted structurally by test_defence_suites_are_http_free).
+        ("test_digest_determinism.py", "test_tool_error_middleware.py"),
     ),
     (
         "float defence removed entirely — suite MUST fail",
@@ -553,7 +558,11 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
             "            if False:  # MUTATION",
             "event requires SUPERSEDED",
         ),
-        None,
+        # Deterministic hold suite (p2-7 reviewer, same rule as the float
+        # layer-2 case): layer 3's independent catch lives in the audit-3
+        # regressions (stale-version-holds-authority on the load path).
+        # Socket-free, so this verdict cannot ride on HTTP timing.
+        ("test_audit3_regressions.py",),
     ),
     # Incidental: dump_state must sort superseded_events, or the evidence hash
     # depends on insertion order (F4/F12 class).
@@ -781,9 +790,14 @@ MUTATIONS: list[tuple[str, str, object, str]] = [
 ]
 
 
-def _run_suite(root: Path, test_file: str | None) -> subprocess.CompletedProcess:
+def _run_suite(root: Path, test_file) -> subprocess.CompletedProcess:
     unit_tests = root / "tests" / "unit"
-    target = unit_tests if test_file is None else unit_tests / test_file
+    if test_file is None:
+        targets = [unit_tests]
+    elif isinstance(test_file, str):
+        targets = [unit_tests / test_file]
+    else:
+        targets = [unit_tests / f for f in test_file]
     # PYTHONDONTWRITEBYTECODE is load-bearing, not a tidy-up. CPython validates a
     # cached .pyc against the source mtime TRUNCATED TO WHOLE SECONDS plus its
     # size, so when two mutations are written within the same second and happen to
@@ -804,7 +818,7 @@ def _run_suite(root: Path, test_file: str | None) -> subprocess.CompletedProcess
         "PYTHONPATH": sandbox_path + (os.pathsep + inherited_path if inherited_path else ""),
     }
     return subprocess.run(
-        [*PYTEST, str(target)],
+        [*PYTEST, *[str(t) for t in targets]],
         cwd=root, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=600, env=env,
     )
@@ -866,8 +880,14 @@ def baseline(sandbox_root):
 
 def test_mutations_are_detected(baseline, sandbox_root):
     caught, escaped, broken = [], [], []
-    # Mutations with expected_suite=None assert defence-in-depth: removing ONE
-    # layer must NOT break the suite, because the other layer still holds.
+    # Defence-in-depth mutations carry an explicit HOLD SUITE (a tuple of
+    # socket-free unit files): removing ONE layer must NOT break those tests,
+    # because the other layer still holds. The old form of this check ran the
+    # ENTIRE tests/unit directory for the hold verdict, which exposed it to
+    # the local-HTTP delivery test (urlopen timing under the control's own
+    # 58-child load) and produced an unreproducible false escape. A hold
+    # verdict must never depend on network timing again — and
+    # test_defence_suites_are_http_free keeps that promise structurally.
     still_held = []
 
     pristine_names = (
@@ -912,16 +932,16 @@ def test_mutations_are_detected(baseline, sandbox_root):
 
             failed = result.returncode != 0
 
-            if expected_suite is None:
-                # defence in depth: the suite must STILL PASS
+            if isinstance(expected_suite, tuple):
+                # defence in depth: the hold suite must STILL PASS
                 if failed:
                     # Record WHICH tests failed, not just that the suite did. This
-                    # control once reported an escape here that could not be
+                    # control once reported an escape that could not be
                     # reproduced by applying the same mutation in isolation (six
-                    # runs, all green), so the failure depended on the control's
-                    # own sequential context. Without the failing test ids the
-                    # report is unactionable — the same defect class as D5, where
-                    # an unreliable verdict was worse than none.
+                    # runs, all green): the hold verdict had ridden on the full
+                    # suite's local-HTTP test. The hold suites are socket-free
+                    # now, but the detailed report stays — an unreliable verdict
+                    # without failing test ids is worse than none (class of D5).
                     import re as _re
                     failed_ids = _re.findall(r"^FAILED (\S+)", result.stdout, _re.M)
                     err_ids = _re.findall(r"^ERROR (\S+)", result.stdout, _re.M)
@@ -992,9 +1012,40 @@ def test_mutations_are_detected(baseline, sandbox_root):
     )
     assert not broken, f"{len(broken)} mutation fixtures did not apply; results would be theatre"
     assert not escaped, f"{len(escaped)} mutations escaped detection"
-    # every "must fail" mutation caught, plus every defence-in-depth case held
-    expected_caught = sum(1 for m in MUTATIONS if m[3] is not None)
+    # every "must fail" mutation (str suite) caught, plus every defence-in-depth
+    # case (tuple hold suite) held
+    expected_caught = sum(1 for m in MUTATIONS if isinstance(m[3], str))
     assert len(caught) == expected_caught, f"caught {len(caught)}, expected {expected_caught}"
+    expected_held = sum(1 for m in MUTATIONS if isinstance(m[3], tuple))
+    assert len(still_held) == expected_held, (
+        f"defence-in-depth cases held {len(still_held)}, expected {expected_held}")
+
+
+def test_defence_suites_are_http_free():
+    """Structural guard for the p2-7 reviewer closure.
+
+    Defence-in-depth HOLD suites run inside the mutation loop (up to 58
+    sequential children). If any of them opens a local HTTP server, the
+    hold verdict rides on socket timing under load — the exact defect that
+    once produced an unreproducible false escape via
+    test_http_authentication_and_full_publish_flow. So every file named in
+    a tuple hold suite is asserted to contain no HTTP/socket machinery at
+    all. Adding a flaky file to a hold suite now fails here, in seconds,
+    instead of producing a phantom escape an hour later.
+    """
+    banned = ("urlopen", "http.server", "HTTPServer", "socket", "Request(")
+    offenders = {}
+    hold_files = {f for m in MUTATIONS if isinstance(m[3], tuple) for f in m[3]}
+    assert hold_files, "the defence-in-depth hold suites vanished from MUTATIONS"
+    for name in sorted(hold_files):
+        path = ROOT / "tests" / "unit" / name
+        text = path.read_text(encoding="utf-8")
+        hits = [b for b in banned if b in text]
+        if hits:
+            offenders[name] = hits
+    assert not offenders, (
+        f"hold-suite files must be socket-free, but these use HTTP: {offenders}"
+    )
 
 
 def test_guard_self_test_still_passes():

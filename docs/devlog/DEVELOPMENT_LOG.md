@@ -923,3 +923,48 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   finalize 脚本在树外（Temp）运行后删除）。
 - **边界**：本条目只覆盖 p2-5 实现证据；p2-7（Phase 2 收口 + G3
   复验包）另立条目。未动合同、tag、Phase 3。
+
+## 2026-09-23 — p2-7：Phase 2 收口（negctl 上下文 flake 结构性关闭 + tasks 勾选）
+
+- **前置**：reviewer 授权提交 p2-5（第 8 轮两项 P1 关闭后），入库
+  `5d2b656`；提交后按点名复验：`git status --porcelain` 干净、
+  `test_evidence_integrity` 对最终 Git blob **1 passed**。措辞更正
+  （「类型标签」→「紧凑 JSON 数组编码」）已接受：仓库注释与实现
+  本来就是 `json.dumps([plan_id, version], separators=(",", ":"))`，
+  该词仅存在于聊天报告，已按 reviewer 口径使用。
+- **flake 定根因（不靠重跑）**：defense-in-depth 变异（`float layer 2
+  removed (allow_nan)`、`P1-a(2)`）的 hold 判定当时 `expected_suite`
+  为 None → 在变异循环内重跑**整个 tests/unit**（~742 项，含本地
+  HTTP 交付测试，子进程 600s 超时、单请求 30s urlopen）。该循环连跑
+  58 个变异子进程，负载下 HTTP 计时偶发抖动被记为 escape——上一轮
+  全套即出现 1 例，且三种隔离复现全绿、不可复现，即 reviewer 点名
+  要消灭的"随机 escape"。
+- **结构性修复（reviewer 处方第一条）**：
+  1. hold 套件从"整个 unit 目录"收窄为**显式 socket-free 文件组**：
+     layer-2 → `("test_digest_determinism.py",
+     "test_tool_error_middleware.py")`（63 项，0.5s）；
+     P1-a(2) → `("test_audit3_regressions.py",)`（43 项，0.7s）。
+     两组各手工变异 ×5/×3 全绿验证（跑前备份、跑后字节级复原）。
+  2. `test_mutations_are_detected` 的 hold 分支按 tuple 判定，新增硬
+     断言 `still_held == 2`、`caught == 56`（58 = 56 fail + 2 hold，
+     对账吻合）；详细失败报告保留（D5 教训：无 test-id 的报告不可行动）。
+  3. 新增结构守卫 `test_defence_suites_are_http_free`：对 hold 套件
+     源文件逐一断言不含 HTTP/socket 字样（urlopen、http.server、
+     HTTPServer、socket、Request( 等），防止未来任何 hold 套件悄悄
+     把网络计时重新引入变异判定。
+- **tasks.md 2.1–2.6 逐项对账后勾选**：每条的落点（revalidate /
+  require_validated_binding / audit id 捕获 / 输出 schema 闸门 /
+  单 COMMIT + §6.3 映射 / case C 别名 + case D fail-closed / observer
+  trace + envelope 唯一出口）均已在 p2-1~p2-5 实现并有测试钉住；
+  无测试读取 tasks.md 勾选状态（grep 复核），勾选项随收口提交入仓。
+- **冻结树复跑**（含上述修复）：全套 **750 passed in 323.97s**
+  （749 基线 + 1 新守卫，EXIT=0、0 FAILED）；negctl **8 passed**
+  （7 原有 + 1 新守卫，**连跑两次** 268.64s / 268.27s 双绿——收窄后
+  的 hold 判定不再依赖任何网络路径）；词表守卫 PASS；
+  integrity + binding 守卫 10 passed。合同 SHA `b92e53f4…` 未动。
+- 证据包：`tests/evidence/g2-phase2-closeout/`（full/negctl/vocab
+  三日志 + EVIDENCE.json，含 reviewer 指令原文与本方案的对应关系；
+  finalize 在树外运行后删除，staging 清空）。
+- **边界**：Phase 2 至此实现 + 证据 + flake 关闭三事齐备，等待
+  reviewer 对收口提交（tasks.md 勾选 + negctl 收窄 + 证据包）的
+  授权；G3 复验包与 Phase 3 另立条目。

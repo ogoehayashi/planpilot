@@ -1,0 +1,32 @@
+{
+  "id": "g2-phase2-closeout",
+  "title": "G2 Phase 2 closeout: p2-7 defence-suite narrowing + full-suite green with the structural HTTP-free hold guard",
+  "date": "2026-09-23",
+  "reviewer_instruction": "提交后可以进入 p2-7，但 negctl 的上下文 flake 必须作为 p2-7 关闭项处理。建议优先收窄 defense-in-depth mutation 的验证套件或稳定本地 HTTP 测试，不能只靠重跑获得绿色。Phase 2 最终关闭前应证明该控制不会因无关 HTTP 波动产生随机 escape。",
+  "commands": {
+    "full.log": "python -m pytest tests/ -q --tb=short -p no:cacheprovider",
+    "negctl.log": "python -m pytest tests/negative_control -q --tb=short -p no:cacheprovider",
+    "vocabulary_guard.log": "python tools/check_closed_vocabularies.py"
+  },
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "raw_stdout": {
+    "artifacts": {
+      "full.log": {
+        "sha256": "937442aa76a1139e736fb41ddc791163d82fc1a57ba14e8dc86242b88f065429",
+        "bytes": 919,
+        "outcome": "750 passed"
+      },
+      "negctl.log": {
+        "sha256": "0678e2d0865c4580a0657e864251ea86874d718600e055d6485f5578797a71dc",
+        "bytes": 117,
+        "outcome": "8 passed"
+      },
+      "vocabulary_guard.log": {
+        "sha256": "dd6c31230bfdec902f28fc0f17b02323fa13374a21d8fe55a61e06b8d095e1cf",
+        "bytes": 2754,
+        "outcome": "CLOSED VOCABULARY CHECK | PASS"
+      }
+    }
+  },
+  "notes": "750 = 749 (p2-5 baseline) + 1 new structural guard test_defence_suites_are_http_free. The two defence-in-depth mutations (float layer 2, P1-a(2)) now hold on socket-free file-scoped suites inside the mutation loop; caught=56 / held=2 are hard assertions in test_mutations_are_detected."
+}

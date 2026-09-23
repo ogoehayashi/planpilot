@@ -60,21 +60,21 @@ this file and `design.md`. Phase 0 is verification-only (no code).
 
 ## Phase 2 — first-publication transaction (steps 5–12)
 
-- [ ] **2.1 Revalidation + approval precondition inside txn**
+- [x] **2.1 Revalidation + approval precondition inside txn**
       Digest/version re-checks → contract error codes (cases F matrix);
       validator evidence re-checked EXPLICITLY via the new read-only
       `approvals.require_validated_binding(plan_id, version, digest)`
       (design §4 step 5: existence + `digest_verified` + `is_feasible` +
       `hard_violations==[]` + recomputed digest + approval-set/required-actions
       binding) — never inferred from lifecycle; `require_approved` wired.
-- [ ] **2.2 Lifecycle → PUBLISHED, capture real audit id**
+- [x] **2.2 Lifecycle → PUBLISHED, capture real audit id**
       Transition via existing authority core inside the SAME transaction;
       `_audit(...)` return value captured into a local (the G1 gap).
       `plan_published` audit event stays the only new event.
-- [ ] **2.3 Response build + output-schema gate + receipt/registry insert**
+- [x] **2.3 Response build + output-schema gate + receipt/registry insert**
       Steps 9–11; strict output validation BEFORE commit; failure → full
       rollback (§8 case 9 test lands here).
-- [ ] **2.4 Single COMMIT + `/publish` route rewiring (§4.5 state machine)**
+- [x] **2.4 Single COMMIT + `/publish` route rewiring (§4.5 state machine)**
       api_server `/publish` → `ToolErrorMiddleware.execute("publish_plan",
       body, PublisherPreparedCall(...))` — prepare holds `db.lock` + manual
       `BEGIN IMMEDIATE` and runs steps 3–11 (§4.5), commit = step 12 COMMIT
@@ -92,7 +92,7 @@ this file and `design.md`. Phase 0 is verification-only (no code).
       (receipt replay/alias or `POLICY_VIOLATION`) — there is NO new internal
       exception type for replay. Remove the discarded-`_audit` publish path;
       `_mutate` stays for other writers.
-- [ ] **2.5 Alias semantics (case C) + fail-closed second set (case D)**
+- [x] **2.5 Alias semantics (case C) + fail-closed second set (case D)**
       New key + same binding + same approval set → stored receipt + alias
       registry row, zero new audit, receipt/audit-id/original-row immutable
       (§8 case 16); different approval set → **`POLICY_VIOLATION`** with
@@ -100,7 +100,7 @@ this file and `design.md`. Phase 0 is verification-only (no code).
       blocked_action:"publish_plan", approval_action:"publish_plan",
       security_event_id:null}` (reviewer round-2: Case D is NOT a key-reuse
       conflict; `IDEMPOTENCY_CONFLICT` stays reserved for case B).
-- [ ] **2.6 Transport + observer wiring (design §6)**
+- [x] **2.6 Transport + observer wiring (design §6)**
       `ToolErrorMiddleware(observer=DecisionTraceWriter(AuditTrail(db)))`
       constructed once at Server startup and shared; route writes
       `outcome.wire_bytes` verbatim with the §6 error-code→HTTP mapping;
