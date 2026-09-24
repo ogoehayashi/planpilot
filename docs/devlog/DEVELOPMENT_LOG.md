@@ -1216,3 +1216,32 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   其余 SHA 内容一致），已 `git checkout` 复原——封口证据不因复跑刷新；
   Phase 0 探针证据一律以仓外 staging 日志为准。后续复跑 run_evals 的
   任务（如 Phase 6）须先确认是否允许刷新该文件。
+
+## 2026-09-24 — G4 Phase 1 完成：clock_session 防御纵深（A1 fail-closed + A2 三触发器 + shape guard + A4 negctl）
+
+- A1 clock.py::_persist：row-None fail-open（return stamp）改 raise
+  RuntimeError；诚实路径不可达（attach 先 INSERT 后绑 _db），仅篡改可达。
+- A2 persistence.py executescript 追加三触发器（真 4 列；no_delete /
+  anchor_immutable(scenario_anchor,real_wall_started_at) / no_rewind
+  (WHEN NEW<OLD last_issued，前向 UPDATE 保持合法)）；RAISE 实测抛
+  IntegrityError（非 OperationalError），测试按实测断言。
+- A2' shape guard：_CLOCK_TRIGGERS 规范文本单点声明；构造后逐 trigger
+  比对 sqlite_master 存储体（逐行折叠+去 IF NOT EXISTS 后 sha256）。
+  实测钉住：IF NOT EXISTS 对同名空壳静默 no-op → 预植 hollow shell 被
+  digest 拒绝构造。残留洞诚实登记：out-of-band DROP TRIGGER 后重开等同
+  pre-G4 resume 文件（拒绝它会砖化合法升级路径），重开自愈重装规范体，
+  test_out_of_band_dropped_defence_self_heals_on_reopen 钉住该语义。
+- rename 探针：ALTER TABLE/RENAME COLUMN 不被 BEFORE 触发器拦截，但触发器
+  随表迁移继续拦截 DELETE/UPDATE（digest 会因 ON "新名" 失配而拒开）——
+  行为已验证，未额外造轮。
+- A4 tests/negative_control/test_clock_defence_negctl.py：两变异
+  （strip 三触发器 / _persist 回 fail-open），socket-free focused 子集
+  （test_clock_session_defence + test_plan_store_persistence），
+  caught=2 escaped=0；real tree 字节哈希复原断言。
+- 测试适配 1 处：test_pending_approval_cannot_be_revived_by_restart 原靠
+  回写 real_wall_started_at 模拟停机——恰是新防线拦截的篡改形；改为平移
+  观察器（clock_mod.datetime 包 _ShiftedDatetime 覆盖 Database+_start 的
+  attach 窗口），语义等价（downtime=REAL elapsed）且不再自我篡改。
+- 数字：unit 750 passed（+8 defence 文件，21 clock-policy 全绿不变）；
+  negctl 8→9 passed（333.64s 全量）；定向 43 passed；词表 PASS；
+  git diff --check 干净；tasks 勾 1.1-1.4（未勾 31→27）。

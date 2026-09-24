@@ -75,16 +75,16 @@ drift alignment; architecture unchanged)
 
 ## Phase 1 — clock_session defense-in-depth (design §2)
 
-- [ ] 1.1 A1: edit `clock.py::_persist` return-None fail-open => raise
+- [x] 1.1 A1: edit `clock.py::_persist` return-None fail-open => raise
       `RuntimeError` when the anchor row is gone; `_read_row`-None
       attach/resume path untouched; clock.py stays stdlib-only.
-- [ ] 1.2 A2: three triggers on the REAL 4 columns, reusing the
+- [x] 1.2 A2: three triggers on the REAL 4 columns, reusing the
       `RAISE(...)` precedent verbatim, inserted at persistence.py:133.
-- [ ] 1.3 A2 shape guard: `Database.__init__` computes sqlite_master SQL
+- [x] 1.3 A2 shape guard: `Database.__init__` computes sqlite_master SQL
       digests for the three; mismatch (incl. pre-seeded no-op) => raise.
       Same-named existing row with different SQL => `CREATE TRIGGER`
       silently no-ops (empirically pinned), so the guard is mandatory.
-- [ ] 1.4 unit: delete/rewind-anchor/rewall/rename/`UPDATE ... WHERE 1`
+- [x] 1.4 unit: delete/rewind-anchor/rewall/rename/`UPDATE ... WHERE 1`
       tamper matrix aborts; clean start/resume 50->51 passes;
       hollow-trigger pre-plant => digest raises; A1 row-drop raises
       (guards absent) via sandbox subprocess, never a red main test.

@@ -203,7 +203,14 @@ class ScenarioClock(Clock):
                 " RETURNING last_issued_scenario_time",
                 (stamp, stamp)).fetchone()
             if row is None:
-                return stamp
+                # G4 A1 (design §2): the anchor row is GONE. Honest flow
+                # cannot reach here — attach_database INSERTs the singleton
+                # BEFORE binding _db — so this is tamper (delete bypassing
+                # the trigger, or a hand-carved file). Fail CLOSED: never
+                # hand back an un-persisted stamp as if it were durable.
+                raise RuntimeError(
+                    "clock session row missing — refusing to issue "
+                    "un-persisted scenario time")
             self._saved = row[0]
             return self._saved
 

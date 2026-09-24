@@ -531,18 +531,32 @@ def test_pending_approval_cannot_be_revived_by_restart(tmp_path):
     finally:
         _stop(server, thread, db1)
 
-    # Three real days of wall downtime: rewind the persisted session start so
-    # the resumed scenario clock must jump ahead of the pending expiry.
-    from datetime import datetime, timedelta
-    db2 = Database(path)
-    row = _clock_session(db2)
-    old = datetime.fromisoformat(row["real_wall_started_at"]) - timedelta(days=3)
-    db2.conn.execute("UPDATE clock_session SET real_wall_started_at=?",
-                     (old.isoformat(timespec="seconds"),))
-    db2.close()
+    # Three real days of wall downtime, simulated HONESTLY: the resume
+    # attach (which happens inside Server.__init__ -> db.bind_clock) sees
+    # wall-clock now three days ahead. Rewinding the stored
+    # real_wall_started_at in place is exactly the tamper the G4 clock
+    # defence now blocks (pinned in test_clock_session_defence.py), so
+    # the scenario moves the OBSERVER, not the durable session.
+    import planpilot.clock as clock_mod
+    from datetime import timedelta
 
-    db3 = Database(path)
-    server3, thread3 = _start(api, db3, secret, ScenarioClock(anchor))
+    class _ShiftedDatetime:
+        def __init__(self, base, delta):
+            self._base, self._delta = base, delta
+
+        def now(self, tz=None):
+            return self._base.now(tz) + self._delta
+
+        def __getattr__(self, name):
+            return getattr(self._base, name)
+
+    _real_dt = clock_mod.datetime
+    clock_mod.datetime = _ShiftedDatetime(_real_dt, timedelta(days=3))
+    try:
+        db3 = Database(path)
+        server3, thread3 = _start(api, db3, secret, ScenarioClock(anchor))
+    finally:
+        clock_mod.datetime = _real_dt
     try:
         now_after = server3.clock.now()
         assert now_after >= expires, (

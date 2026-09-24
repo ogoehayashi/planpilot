@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 import sqlite3
 import threading
 
@@ -27,6 +28,52 @@ def now():
     Clock instead (G1.0.1) so audit/trace/state stamps agree with lifecycle
     stamps; do not add new authoritative writers that call this directly."""
     return datetime.now(timezone(timedelta(hours=8))).isoformat()
+
+
+# --- G4 Phase 1 (design §2 A2): clock_session defence in depth ----------
+# The three trigger bodies are declared ONCE here as the canonical
+# (whitespace-normalised) text. executescript() installs them with
+# IF NOT EXISTS; the shape guard in Database.__init__ compares the STORED
+# sqlite_master body of each against this same literal (normalised, then
+# sha256). That matters because CREATE TRIGGER IF NOT EXISTS silently
+# no-ops against a same-named hollow shell pre-planted in an old database
+# file — "the name exists" is not the check, "the body is ours" is.
+_CLOCK_TRIGGERS = {
+    "clock_session_no_delete": (
+        "CREATE TRIGGER clock_session_no_delete BEFORE DELETE ON clock_session "
+        "BEGIN SELECT RAISE(ABORT, 'clock_session is anchored; delete is forbidden'); "
+        "END"
+    ),
+    "clock_session_anchor_immutable": (
+        "CREATE TRIGGER clock_session_anchor_immutable BEFORE UPDATE OF "
+        "scenario_anchor, real_wall_started_at ON clock_session "
+        "BEGIN SELECT RAISE(ABORT, 'clock_session anchors are immutable'); "
+        "END"
+    ),
+    "clock_session_no_rewind": (
+        "CREATE TRIGGER clock_session_no_rewind BEFORE UPDATE OF "
+        "last_issued_scenario_time ON clock_session "
+        "WHEN NEW.last_issued_scenario_time < OLD.last_issued_scenario_time "
+        "BEGIN SELECT RAISE(ABORT, 'clock_session time may not rewind'); "
+        "END"
+    ),
+}
+
+
+def _sql_fingerprint(sql: str) -> str:
+    # Compare the body line-for-line (collapsed indentation), NOT with a
+    # blanket whitespace squash: sqlite stores the CREATE TRIGGER text
+    # verbatim minus `IF NOT EXISTS` and the trailing `;`, and our
+    # canonical literals use exactly that shape. A blanket \s+ collapse
+    # would make EVERY hollow shell that boils down to the same token
+    # stream (e.g. `SELECT 1;` vs a rewired `SELECT RAISE(ABORT,...)`
+    # minus the call) fingerprint-collide with each other's variants.
+    # Per-line normalisation keeps tampering like `SELECT 1` vs
+    # `SELECT RAISE(...)` visibly different while forgiving layout.
+    lines = [re.sub(r"(?i)\bIF NOT EXISTS\b", "", ln)
+             for ln in sql.splitlines()]
+    norm = " ".join(" ".join(ln.split()) for ln in lines if ln.strip())
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()
 
 
 class Database:
@@ -126,7 +173,41 @@ class Database:
                     entry_count=excluded.entry_count,
                     event_hash=excluded.event_hash;
             END;
+            CREATE TRIGGER IF NOT EXISTS clock_session_no_delete
+            BEFORE DELETE ON clock_session BEGIN
+                SELECT RAISE(ABORT, 'clock_session is anchored; delete is forbidden');
+            END;
+            CREATE TRIGGER IF NOT EXISTS clock_session_anchor_immutable
+            BEFORE UPDATE OF scenario_anchor, real_wall_started_at ON clock_session BEGIN
+                SELECT RAISE(ABORT, 'clock_session anchors are immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS clock_session_no_rewind
+            BEFORE UPDATE OF last_issued_scenario_time ON clock_session
+            WHEN NEW.last_issued_scenario_time < OLD.last_issued_scenario_time BEGIN
+                SELECT RAISE(ABORT, 'clock_session time may not rewind');
+            END;
         """)
+        # G4 A2 shape guard (anti no-op shell), per design §2: runs AFTER
+        # executescript. A same-named hollow trigger pre-planted in an old
+        # file makes CREATE TRIGGER IF NOT EXISTS no-op silently, so "the
+        # name exists" is not the check — the STORED body must match the
+        # canonical text (per-line normalised sha256). Missing body or
+        # mismatch => refuse construction. Out-of-band DROP TRIGGER before
+        # a reopen is deliberately NOT rejected here (pre-G4 resume files
+        # legitimately have no clock triggers — rejecting that would brick
+        # honest upgrades); IF NOT EXISTS reinstalls the canonical defence
+        # on that reopen, and in-band deletion is blocked by the trigger
+        # itself. The residual out-of-band/file-editor hole is documented
+        # in design §2 A4 + the devlog.
+        for name, canonical_sql in _CLOCK_TRIGGERS.items():
+            stored = self.conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                (name,)).fetchone()
+            if stored is None or _sql_fingerprint(stored[0]) != _sql_fingerprint(canonical_sql):
+                raise RuntimeError(
+                    f"clock_session defence trigger {name!r} is missing or "
+                    "tampered (stored SQL does not match the canonical body); "
+                    "refusing to open this database")
         tail = self.conn.execute(
             "SELECT COUNT(*) AS n,COALESCE((SELECT event_hash FROM audit_chain ORDER BY id DESC LIMIT 1),?) AS head FROM audit_chain",
             ("0" * 64,),
