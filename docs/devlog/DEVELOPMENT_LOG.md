@@ -1181,3 +1181,32 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   ro-rw/EVAL 两行/六 kill 点），并补"日志先落仓外 staging"。
 - 复核：tasks 35 checkbox；词表 PASS；git diff --check 0；HEAD 855a5c0、
   合同 b92e53f4…fe639 未动。纯文档，未跑测试。
+
+## 2026-09-24 — G4 Phase 0 完成（spec commit c7e6398 之后）：事实复验四项全过，AST inventory 实证 20/22
+
+- 0.1 `855a5c0` 为 HEAD `c7e6398` 祖先 ✓；合同 SHA `b92e53f4ff05…` ✓；
+  tag g2-baseline-5bf299a 解引用 `5bf299a` ✓。
+- 0.2 §0 事实表逐行复核 ✓：clock.py 277 行 / persistence.py 231 行 /
+  api_server.py 425 行；clock_session 三列 + singleton；触发器仅
+  audit_chain_* 3 个；repair-at-init(INSERT OR IGNORE head) 在 :134；
+  backup_database -> None；scheduled_backup 返回 {backup,removed}、
+  无 status.json；auth secret <32 直接 ValueError；/publish 为实际路由；
+  Dockerfile/compose 8080、healthcheck /health、compose backups:/backups；
+  smoke OUT=tests/evidence/compact-smoke；合同 EVAL-* 唯一 id=30
+  （裸 grep 曾报 31，经 JSON-walk 复核实为同一集合，差异是 grep 模式）。
+- 0.3 [LP] 探针重跑（日志在仓外 staging E:/PlanPilot-Hackathon/
+  g4-probe-staging/，Phase 6 拷入 evidence）：
+  probeA WAL：construct+close(无事务)→目录只剩 probe.db；开放写事务未
+  close→probe.db/-shm/-wal 三件齐；close 后归一。条件形态确认。
+  probeB EVAL：line1 绝对路径(E:\…\runtime-eval)、line2
+  cases=30 passed=0 failed=0 blocked=30、EXIT=1，与 §0 逐字一致。
+  probeC ro/rw：ro begin=ok→insert 拒(attempt to write a readonly
+  database)；rw begin=ok→insert ok。P0-1 语义复证。
+- 0.4 tools/probes/inventory_env.py 交付（AST 扫描，含模块常量间接解析+
+  mapping 参数跟随；os.environ.get / environ[...] 两类）。实测
+  ALL vars=20 points=22（正则法 19/21 漏了 publisher FAULT_ENV_VAR 常量
+  间接，AST 正确捕获 PLANPILOT_PUBLISHER_FAULT:363 即 +1 var/+1 point
+  ——这 1 差正是 tasks 0.4 要求 AST 的理由）；PROD 子集 vars=15
+  points=17。19/21 已按 round-4 要求降级为对比基线。
+- tasks.md 勾 0.1-0.4（35→31 未勾）。六 kill 点矩阵探针属 Phase 4 交付
+  物，不在 Phase 0 空跑（诚实登记）。

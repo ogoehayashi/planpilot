@@ -31,15 +31,15 @@ drift alignment; architecture unchanged)
 
 ## Phase 0 — Fact verification (against HEAD; spec already committed)
 
-- [ ] 0.1 `git merge-base --is-ancestor 855a5c0 HEAD` passes (ancestor,
+- [x] 0.1 `git merge-base --is-ancestor 855a5c0 HEAD` passes (ancestor,
       not equality); contract SHA unchanged; baseline tag derefs `5bf299a`.
-- [ ] 0.2 §0 fact table re-verified line by line at HEAD (clock.py
+- [x] 0.2 §0 fact table re-verified line by line at HEAD (clock.py
       277L / persistence.py 231L / api_server.py 425L / audit.py /
       backup.py / scheduled_backup.py / run_evals.py / Dockerfile /
       compose.yaml / real columns / 3 triggers / routes / auth /
       verify_audit read-only / repair-at-init:134 / backup_database
       returns None / Sonnet 4.5).
-- [ ] 0.3 Re-run the two [LP] probes and pin them in a log:
+- [x] 0.3 Re-run the two [LP] probes and pin them in a log:
       (a) `Database` open→close on a fresh temp db with NO open
       transaction => dir has ONLY `<db>` (no -wal/-shm); and open a
       write txn WITHOUT close => `probe.db-wal`/`-shm` DO appear
@@ -52,7 +52,7 @@ drift alignment; architecture unchanged)
       path (prefix = ROOT, suffix = tests/evidence/runtime-eval, per
       run_evals.py:17, never a hardcoded relative string); line 2
       EXACT `cases=30 passed=0 failed=0 blocked=30` + exit 1.
-- [ ] 0.4 Inventory generator: `tools/probes/inventory_env.py` is an
+- [x] 0.4 Inventory generator: `tools/probes/inventory_env.py` is an
       **AST walk** (not a regex) over `src tests tools`: counts actual
       read CALLS of `os.environ`/`environ` Subscript and `.get`,
       resolves module-CONSTANT indirection (publisher.py:337
