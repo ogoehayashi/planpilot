@@ -1245,3 +1245,30 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
 - 数字：unit 750 passed（+8 defence 文件，21 clock-policy 全绿不变）；
   negctl 8→9 passed（333.64s 全量）；定向 43 passed；词表 PASS；
   git diff --check 干净；tasks 勾 1.1-1.4（未勾 31→27）。
+
+## 2026-09-25 — G4 Phase 1.0.1：Batch-A 审查五缺口收口（fast-track，Reviewer 指令直接授权）
+
+- #1 missing-trigger 语义对齐：design §2 + tasks 1.4 + persistence 注释
+  改为诚实三态（launch 前缺失=IF NOT EXISTS 自愈安装，不拒开；同名异体
+  =digest fail-closed；out-of-band 删 trigger+行=特权编辑器已知限制）。
+  删除"missing→RuntimeError"失实措辞；A3 异常类型按实测钉成
+  IntegrityError（原文误写 OperationalError）。
+- #2 rename 勾账：实测 raw `ALTER TABLE ... RENAME COLUMN` 成功且
+  SQLite 同步改写 trigger 存储体 → 下一次 Database() 打开因 digest
+  失配 RuntimeError。新测试 test_rename_column_is_not_aborted_but_next_
+  open_fails_closed 钉真实语义；tasks 1.4 不再声称 rename 当场 abort。
+- #3 第三路 negctl：mutation "shape guard neutered to pass-through"
+  （沙箱副本把 guard 条件改成 if False）→ hollow pre-plant 测试必须
+  失败。caught=3 escaped=0 broken=0；真实树前后逐文件 sha256 一致。
+- #4 构造失败连接泄漏：__init__ 主体移入 _open()，BaseException 统一
+  close-if-opened 后 re-raise 原异常（不吞不 mask）。回归
+  test_failed_open_releases_handle_no_gc：refused open 后立即
+  os.rename 成功，不依赖 gc.collect()（Windows 实测）。
+- #5 fingerprint 收紧：废除全局 IF NOT EXISTS 正则删除（会误删 RAISE
+  字符串内同文，两个不同体可碰撞）；只规范空白+单个尾分号；re import
+  已删。sqlite_master 实测本就不存结构位 IF NOT EXISTS，无需 strip。
+  test_fingerprint_does_not_strip_text_inside_strings 钉双指纹不同。
+- 数字：定向 defence 11 passed（8→11，+3 pins）；clock-policy 21；
+  unit 750→753 passed；negctl 9 passed（clock_defence 文件内
+  caught=3/0/0）；词表 PASS；git diff --check 0；合同 SHA
+  b92e53f4ff054105… 不变。tasks 无新勾（1.1-1.4 本已勾，语义已改对）。

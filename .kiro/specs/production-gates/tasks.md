@@ -84,10 +84,18 @@ drift alignment; architecture unchanged)
       digests for the three; mismatch (incl. pre-seeded no-op) => raise.
       Same-named existing row with different SQL => `CREATE TRIGGER`
       silently no-ops (empirically pinned), so the guard is mandatory.
-- [x] 1.4 unit: delete/rewind-anchor/rewall/rename/`UPDATE ... WHERE 1`
-      tamper matrix aborts; clean start/resume 50->51 passes;
-      hollow-trigger pre-plant => digest raises; A1 row-drop raises
-      (guards absent) via sandbox subprocess, never a red main test.
+- [x] 1.4 unit: delete/anchor-rewrite/time-rewind aborts (`IntegrityError`,
+      empirically pinned) + forward UPDATE regression pin + blanket
+      `UPDATE ... WHERE 1` cannot reanchor; hollow-trigger pre-plant =>
+      digest raises; missing-at-launch self-heals (design §2 1.0.1-#1
+      semantics — NO "every missing trigger RuntimeError" claim);
+      RENAME pin: raw SQLite `ALTER TABLE ... RENAME COLUMN` SUCCEEDS
+      (BEFORE triggers never fire on DDL — NOT aborted at the moment),
+      SQLite rewrites the stored trigger SQL, and the NEXT
+      `Database(...)` open fails closed on the shape digest; A1 row-drop
+      raises (guards absent) via sandbox subprocess, never a red main
+      test. Failed opens release the handle (file immediately
+      rename-/deletable on Windows, no gc.collect()).
 
 ## Phase 2 — startup config (design §3)
 

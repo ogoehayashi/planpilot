@@ -11,7 +11,6 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-import re
 import sqlite3
 import threading
 
@@ -62,17 +61,21 @@ _CLOCK_TRIGGERS = {
 
 def _sql_fingerprint(sql: str) -> str:
     # Compare the body line-for-line (collapsed indentation), NOT with a
-    # blanket whitespace squash: sqlite stores the CREATE TRIGGER text
-    # verbatim minus `IF NOT EXISTS` and the trailing `;`, and our
-    # canonical literals use exactly that shape. A blanket \s+ collapse
-    # would make EVERY hollow shell that boils down to the same token
-    # stream (e.g. `SELECT 1;` vs a rewired `SELECT RAISE(ABORT,...)`
-    # minus the call) fingerprint-collide with each other's variants.
-    # Per-line normalisation keeps tampering like `SELECT 1` vs
+    # blanket whitespace squash: a blanket \s+ collapse would make EVERY
+    # hollow shell that boils down to the same token stream fingerprint-
+    # collide with layout variants of the real body. Per-line
+    # normalisation keeps tampering like `SELECT 1` vs
     # `SELECT RAISE(...)` visibly different while forgiving layout.
-    lines = [re.sub(r"(?i)\bIF NOT EXISTS\b", "", ln)
-             for ln in sql.splitlines()]
-    norm = " ".join(" ".join(ln.split()) for ln in lines if ln.strip())
+    # NO textual token stripping is applied ANYWHERE (reviewer 1.0.1-#5):
+    # an earlier revision regex-removed "IF NOT EXISTS" across the whole
+    # statement — which would also erase the phrase inside a RAISE error
+    # STRING, colliding two genuinely different bodies. We do not need it:
+    # empirically sqlite's sqlite_master.sql never stores the structural
+    # IF NOT EXISTS at all, and CREATE TRIGGER bodies are pure statements
+    # (no user strings that could contain a semicolon), so trimming ONE
+    # optional trailing semicolon is exact.
+    lines = [" ".join(ln.split()) for ln in sql.splitlines() if ln.strip()]
+    norm = " ".join(lines).rstrip().rstrip(";").rstrip()
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()
 
 
@@ -103,6 +106,28 @@ class Database:
         # FixedClock ignore this hook.
         self._pending_clock_attach = getattr(clock, "attach_database", None)
         self.lock = threading.RLock()
+        self.conn = None
+        try:
+            self._open(path)
+        except BaseException:
+            # G4 1.0.1-#4: a FAILED construction must never leak the sqlite
+            # handle. On Windows a leaked handle keeps the file locked, so
+            # rename/delete of the db raises PermissionError WITHOUT any
+            # gc.collect() rescue (empirically pinned). Close-if-opened,
+            # then re-raise the ORIGINAL exception unchanged: cleanup must
+            # never mask the cause.
+            conn, self.conn = self.conn, None
+            if conn is not None:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
+            raise
+
+    def _open(self, path):
+        # Everything that can fail AFTER the handle is opened lives behind
+        # __init__'s single cleanup wrapper (PRAGMAs, schema script, shape
+        # guard, head row, clock attach).
         self.conn = sqlite3.connect(
             str(path), check_same_thread=False, timeout=10, isolation_level=None
         )
@@ -187,18 +212,21 @@ class Database:
                 SELECT RAISE(ABORT, 'clock_session time may not rewind');
             END;
         """)
-        # G4 A2 shape guard (anti no-op shell), per design §2: runs AFTER
-        # executescript. A same-named hollow trigger pre-planted in an old
-        # file makes CREATE TRIGGER IF NOT EXISTS no-op silently, so "the
-        # name exists" is not the check — the STORED body must match the
-        # canonical text (per-line normalised sha256). Missing body or
-        # mismatch => refuse construction. Out-of-band DROP TRIGGER before
-        # a reopen is deliberately NOT rejected here (pre-G4 resume files
-        # legitimately have no clock triggers — rejecting that would brick
-        # honest upgrades); IF NOT EXISTS reinstalls the canonical defence
-        # on that reopen, and in-band deletion is blocked by the trigger
-        # itself. The residual out-of-band/file-editor hole is documented
-        # in design §2 A4 + the devlog.
+        # G4 A2 shape guard (anti no-op shell), per design §2 (1.0.1-#1
+        # semantics): runs AFTER executescript, so a trigger that was
+        # merely MISSING before launch has already been self-healed by
+        # IF NOT EXISTS (pre-G4 resume files stay bootable — rejecting
+        # that would brick honest upgrades, and in-band DROP is
+        # impossible while the triggers live). What is NOT forgiven:
+        # a same-named DIFFERENT-BODY trigger. A hollow shell pre-planted
+        # in an old file makes IF NOT EXISTS no-op silently, so "the name
+        # exists" is not the check — the STORED body must match the
+        # canonical text (per-line normalised sha256, no token
+        # stripping). stored-None here therefore means the install itself
+        # went wrong => refuse construction; mismatch (hollow pre-plant,
+        # or SQLite-rewritten text after an out-of-band ALTER ... RENAME)
+        # => refuse. Any refusal closes the handle via __init__'s wrapper
+        # so the file is immediately rename-/deletable on Windows.
         for name, canonical_sql in _CLOCK_TRIGGERS.items():
             stored = self.conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",

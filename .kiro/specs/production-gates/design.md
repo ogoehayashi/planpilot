@@ -246,18 +246,37 @@ resumes correctly.
 INSERT of the singleton row by `attach_database` is the only write that
 creates; no guard needed beyond the CHECK(singleton=1) already present.
 
-**Trigger-shape guard (anti no-op shell):** `Database.__init__` after
-executescript reads `sqlite_master.sql` for the three trigger names,
-normalises whitespace, and compares against the expected literal bodies
-(or their sha256); mismatch or missing → `RuntimeError` refusing to
-construct. Pre-creating a same-named no-op trigger therefore fails
-startup closed.
+**Trigger-shape guard (anti no-op shell):** `Database.__init__` runs the
+canonical `CREATE TRIGGER IF NOT EXISTS` bodies FIRST, then reads
+`sqlite_master.sql` for the three names and compares
+per-line-normalised sha256 digests (whitespace and ONE optional
+trailing semicolon only; NO textual token stripping anywhere — a global
+`IF NOT EXISTS` regex once collided two bodies that differed only
+inside a RAISE string). Honest final semantics (1.0.1-#1):
+- a defence trigger MISSING BEFORE LAUNCH (pre-G4 resume file) is NOT
+  rejected — `IF NOT EXISTS` installs the canonical body and the open
+  proceeds (self-heal; rejecting that would brick honest upgrades, and
+  the guard could never observe the pre-install state anyway);
+- a SAME-NAME, DIFFERENT-BODY trigger (hollow pre-plant, or a trigger
+  whose body SQLite rewrote under DDL) makes the stored fingerprint
+  diverge => `RuntimeError` refusing construction;
+- an out-of-band raw file editor dropping trigger AND rows is a known
+  privileged limitation (that privilege already owns the file); reopen
+  reinstalls the canonical defence.
+Pre-creating a same-named no-op trigger therefore fails startup closed,
+and `ALTER TABLE ... RENAME COLUMN` on clock_session — DDL that BEFORE
+triggers never see — fails closed at the NEXT open, because SQLite
+rewrites the stored trigger SQL and the digest stops matching (pinned
+by tests; the refused open releases its handle so the file is
+immediately rename-/deletable even on Windows).
 
 **A3 tamper matrix (live DB, raw SQL, bypassing nothing):**
-- DELETE row → OperationalError (trigger 1).
-- UPDATE scenario_anchor / real_wall_started_at → OperationalError
+(RAISE(ABORT) surfaces through python sqlite3 as `IntegrityError` —
+empirically pinned, NOT `OperationalError`.)
+- DELETE row => IntegrityError (trigger 1).
+- UPDATE scenario_anchor / real_wall_started_at => IntegrityError
   (trigger 2).
-- UPDATE last_issued backwards → OperationalError (trigger 3);
+- UPDATE last_issued backwards => IntegrityError (trigger 3);
   forward UPDATE succeeds (regression pin for the legit `_persist`).
 - Existing cross-restart invariants from G1.0.2 (anchor mismatch →
   ValueError; monotonic resume) re-run unchanged.

@@ -1,11 +1,14 @@
 """G4 A4 sentinel: the clock_session defence must be observably load-bearing.
 
-Two disposable-copy mutations (never in the normal suite — an intentional
-red-main would lie about CI):
+THREE disposable-copy mutations (never in the normal suite — an
+intentional red-main would lie about CI):
   1. strip the three CREATE TRIGGER clock_session blocks from
      persistence.py => the tamper tests must fail (defence gone).
   2. revert clock._persist's fail-closed raise to the old
      return-stamp fail-open => the row-missing test must fail.
+  3. (G4 1.0.1-#3) neuter the shape-guard comparison to pass-through
+     => the hollow-pre-plant digest test must fail (a no-op shell
+     would open happily).
 Each mutation runs a socket-free focused subset in a sandbox subprocess;
 must-fail sets are pinned non-empty. The real tree is byte-restored and
 hash-checked afterwards, exactly like the security-audit negctl file.
@@ -57,6 +60,11 @@ MUTATIONS = (
 """,
      """            if row is None:
                 return stamp
+"""),
+    ("shape guard neutered to pass-through", "src/planpilot/persistence.py",
+     """            if stored is None or _sql_fingerprint(stored[0]) != _sql_fingerprint(canonical_sql):
+""",
+     """            if False:  # NEGCTL MUTATION: digest check bypassed
 """),
 )
 

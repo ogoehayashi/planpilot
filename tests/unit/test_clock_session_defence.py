@@ -12,12 +12,13 @@ A2' shape guard: Database.__init__ compares the STORED sqlite_master body
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 
 import pytest
 
 from planpilot.clock import ScenarioClock
-from planpilot.persistence import Database
+from planpilot.persistence import Database, _sql_fingerprint
 
 ANCHOR = "2026-09-14T08:00:00+08:00"
 
@@ -161,3 +162,64 @@ def test_clean_resume_still_passes_guard(tmp_path):
     assert db2.conn.execute(
         "SELECT COUNT(*) AS n FROM clock_session").fetchone()["n"] == 1
     db2.close()
+
+
+# ---------------- G4 1.0.1 pins (reviewer Batch-A gaps) -------------------
+
+def test_rename_column_is_not_aborted_but_next_open_fails_closed(tmp_path):
+    # Honest semantics pin (1.0.1-#2): ALTER ... RENAME COLUMN is DDL —
+    # the BEFORE triggers NEVER fire on it, and SQLite rewrites the
+    # stored trigger SQL to follow the column. What fails closed is the
+    # NEXT construction: the canonical shape digest no longer matches
+    # the rewritten body. (The old tasks wording claimed rename itself
+    # aborts — that was false; this test pins the truth.)
+    p = tmp_path / "rz.db"
+    db = Database(p, clock=ScenarioClock(ANCHOR))
+    db.close()
+    raw = sqlite3.connect(str(p))
+    raw.execute("ALTER TABLE clock_session RENAME COLUMN"
+                " scenario_anchor TO scenario_anchor_changed")
+    raw.commit()
+    stored = raw.execute(
+        "SELECT sql FROM sqlite_master"
+        " WHERE name='clock_session_anchor_immutable'").fetchone()[0]
+    raw.close()
+    assert "scenario_anchor_changed" in stored  # SQLite rewrote the body
+    with pytest.raises(RuntimeError, match="missing or tampered"):
+        Database(p, clock=ScenarioClock(ANCHOR))
+
+
+def test_failed_open_releases_handle_no_gc(tmp_path):
+    # 1.0.1-#4: after ANY refused construction the sqlite handle must be
+    # closed BY the wrapper, not left to CPython refcounting — on Windows
+    # a leaked handle makes the file undeletable/unrenameable forever.
+    # Rename immediately after the RuntimeError: must succeed.
+    p = tmp_path / "leak.db"
+    db = Database(p, clock=ScenarioClock(ANCHOR))
+    db.close()
+    raw = sqlite3.connect(str(p))
+    raw.execute("ALTER TABLE clock_session RENAME COLUMN"
+                " scenario_anchor TO scenario_anchor_changed")
+    raw.commit()
+    raw.close()
+    with pytest.raises(RuntimeError):
+        Database(p, clock=ScenarioClock(ANCHOR))
+    moved = tmp_path / "leak.db.moved"
+    os.rename(str(p), str(moved))  # no gc.collect(): handle is gone
+    assert moved.exists()
+
+
+def test_fingerprint_does_not_strip_text_inside_strings():
+    # 1.0.1-#5: the fingerprint must not regex-delete "IF NOT EXISTS"
+    # anywhere — two bodies differing ONLY inside a RAISE error STRING
+    # must stay distinct. (sqlite_master never stores the structural
+    # IF NOT EXISTS, so no token strip is needed at all; layout drift
+    # and one optional trailing semicolon remain forgiven.)
+    plain = ("CREATE TRIGGER t BEFORE DELETE ON x BEGIN"
+             " SELECT RAISE(ABORT, 'plain'); END")
+    tricky = ("CREATE TRIGGER t BEFORE DELETE ON x BEGIN"
+              " SELECT RAISE(ABORT, 'plain IF NOT EXISTS'); END")
+    assert _sql_fingerprint(plain) != _sql_fingerprint(tricky)
+    layout = ("CREATE TRIGGER t\n    BEFORE DELETE ON x BEGIN\n"
+              "        SELECT RAISE(ABORT, 'plain');\n    END;")
+    assert _sql_fingerprint(layout) == _sql_fingerprint(plain)
