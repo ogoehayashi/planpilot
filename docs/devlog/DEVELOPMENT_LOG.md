@@ -1272,3 +1272,24 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   unit 750→753 passed；negctl 9 passed（clock_defence 文件内
   caught=3/0/0）；词表 PASS；git diff --check 0；合同 SHA
   b92e53f4ff054105… 不变。tasks 无新勾（1.1-1.4 本已勾，语义已改对）。
+
+## 2026-09-25 — G4 Batch A 收口：Phase 2 startup config + Phase 3 health split + ready 探针只读文件假绿实证
+
+- Phase 2（design §3）：新 `src/planpilot/startup_config.py`。frozen `StartupConfig`，secret 持真值但
+  `field(repr=False, compare=False)`；`PLANPILOT_ENV` 闭集 ENVS=("development","production")；默认
+  host 127.0.0.1 / port 8080 / ready_timeout_ms 1500 / clock wall；backup 默认 ROOT/backups（无
+  Path(home) 幽灵变量）。`parse_startup_env` 纯函数（dict 进，不读 os.environ 不触 fs），preflight 独揽
+  I/O；`startup_or_die` 组装；`config_provenance()` 只输出布尔/计数/路径，main() 在 Database 构造前记录一次。
+  `api_server.main()` 只 `dict(os.environ)` 一次，Server 从 cfg 构造；Bedrock 六变量保持 per-call 重读
+  （测试双向钉死：字段不冻结 + 轮换即时生效）。定向 21 passed。
+- Phase 3（design §4）：/health 逐字不变（含 db.lock 下 SELECT 1，消费者测试零改动）；/health/live 零 DB
+  零时钟；/health/ready 每请求独立 plain connect（默认 RW）+ 单一预算 ready_timeout_ms + BEGIN IMMEDIATE
+  + ROLLBACK，无 checked_at；/health/deep `_auth("plan")`→403 仓库惯例，恒 200 + overall_ok，backup 年龄
+  只认 last_verified_backup.json（缺→no_verified_manifest，绝不猜 mtime）；automation 结构测试证明无人
+  把 deep 当门禁。探针钉住勾账两处失实并改正：(1) tasks 3.3 的 X-PlanPilot-Token 头在本仓库不存在
+  （grep 全仓零命中，design §4 本来就是 _auth）；(2) 只读文件上 BEGIN IMMEDIATE 竟然被接受、只有写被拒
+  （Windows 探针，delete journal 与 WAL 双模式实证）——reservation-only 探针会在 chmod-444 库上假绿，
+  故探针补一条 in-txn `CREATE TABLE _pp_ready_probe`（ROLLBACK 零残留，测试对账 sqlite_master 集合），
+  design §4 同步 [IMPL NOTE]。negctl 升至五路（新增 #4 去掉写锁预约 / #5 去掉 in-txn falsifier），
+  caught=5 escaped=0 broken=0，真树前后逐文件 SHA-256 一致。
+- Batch A 冻结验证：见下一条提交注释中的原始数字。

@@ -99,28 +99,30 @@ drift alignment; architecture unchanged)
 
 ## Phase 2 — startup config (design §3)
 
-- [ ] 2.1 `StartupConfig` frozen dataclass, real secret
-      `field(repr=False)` (NOT pydantic SecretStr — no new dep); env as
-      `Literal["development","production"]`; `PLANPILOT_ENV` closed;
+- [x] 2.1 `StartupConfig` frozen dataclass, real secret
+      `field(repr=False, compare=False)` (NOT pydantic SecretStr — no new
+      dep); `PLANPILOT_ENV` closed to the tuple ENVS
+      ("development","production") — a stdlib runtime check, not a
+      `typing.Literal` annotation (same guarantee, no import ceremony);
       defaults host 127.0.0.1 / port 8080 (the REAL live default —
       api_server.py:414, Dockerfile, compose all 8080; rev.4's "8731"
       was a typo) / ready_timeout_ms 1500 (single ms budget for the
       rw probe's busy_timeout AND its connect timeout; rev.4's "0.5s"
-      contradicted design's 1500ms) / clock_source wall /
-      backup_root default: development = `ROOT/backups` (ROOT = repo
+      contradicted design's 1500ms) / clock mode wall /
+      backup_dir default: development = `ROOT/backups` (ROOT = repo
       root derived from module location; matches backup.py:290 — the
       current production default and the compose bind target).
-- [ ] 2.2 `parse_startup_env(dict)->tuple[ParsedConfig|None,list[Issue]]`
+- [x] 2.2 `parse_startup_env(dict)->tuple[ParsedConfig|None,list[Issue]]`
       PURE; `preflight(cfg)->list[Issue]` does all I/O; factory_root is
       a DIRECTORY (is_dir), backup_root a DIR; auth required all envs
       (>=32 chars, hard-reject not bypass, warn only on localhost);
       production non-loopback + backup existence. Return types unified
       tuple across design AND tasks (round-3 P1-5).
-- [ ] 2.3 api_server `main()` one snapshot; `Server.__init__` consumes
+- [x] 2.3 api_server `main()` one snapshot; `Server.__init__` consumes
       cfg; `PLANPILOT_ENV` set (Dockerfile/compose do NOT set it today
       — grep-verified; Phase 5 ADDS `PLANPILOT_ENV=production` to both
       actually read, not just set); `config_provenance()` redacted.
-- [ ] 2.4 unit: parse purity (dict only, no fs); dev with a VALID secret
+- [x] 2.4 unit: parse purity (dict only, no fs); dev with a VALID secret
       boots, dev WITHOUT one still rejects (never claimed to boot);
       prod localhost/missing-secret => StartupConfigError; repr never
       leaks the secret. Bedrock per-call key re-read is an explicit
@@ -128,26 +130,41 @@ drift alignment; architecture unchanged)
 
 ## Phase 3 — health split (design §4)
 
-- [ ] 3.1 `/health` byte-for-byte unchanged (incl. SELECT 1 under
+- [x] 3.1 `/health` byte-for-byte unchanged (incl. SELECT 1 under
       db.lock; the one consumer test:157 unaffected); add `/health/live`.
-- [ ] 3.2 `/health/ready`: independent **`mode=rw`** connection, short
-      `busy_timeout=READY_TIMEOUT_MS`, `BEGIN IMMEDIATE` -> `ROLLBACK`
-      -> 200 `{status,service,db,ready:true}`; **NO clock.now() write,
-      NO checked_at**; locked/read-only dir/ro-open => 503. Honest
+- [x] 3.2 `/health/ready`: independent per-call connection opened with
+      PLAIN `sqlite3.connect(db.path)` — default mode IS read-write.
+      (Empirically pinned at this batch: a `?mode=rw` URI also works on
+      an existing file but fails on a new one; plain connect is chosen
+      because it works in both states and negctl mutation #4 pins that
+      it is NOT downgraded to ro/SELECT.) ONE budget
+      `ready_timeout_ms` for connect timeout AND
+      `PRAGMA busy_timeout`, `BEGIN IMMEDIATE` -> `ROLLBACK`
+      -> 200 `{status,service,probe:"ready",db:"ok"}` (body per design
+      §4; the tasks' old `ready:true` shorthand never matched the
+      design); **NO clock.now() write, NO checked_at**;
+      locked/read-only/ro-open/corrupt => 503. Honest
       claim (round-4): opens-RW + writer-reservation only, NOT a
       durability/free-space proof.
       Falsifier test: an ro connection that wins a reserved lock but is
       denied INSERT must NOT be accepted as ready.
-- [ ] 3.3 `/health/deep` `X-PlanPilot-Token`: plan scope else 403 (repo
-      convention, no invented 401); clock `kind/now/scenario/
-      uptime_seconds(+session)` + audit ok + head + idempotency
-      `SELECT COUNT(*)` + backup age from `last_verified_backup.json`
-      manifest (absent => `no_verified_manifest`, NOT latest-file
-      mtime); any check fail => 200 with ok:false (never a readiness
-      target).
-- [ ] 3.4 unit: /health body unchanged; three probes distinct; external
-      write-lock (real subprocess conn) -> ready 503 -> release 200;
-      ro-opened probe falsifier; read-only dir/files -> 503.
+- [x] 3.3 `/health/deep` auth via `self._auth("plan")` — the repo Bearer
+      convention (rev.5b fact-check: an `X-PlanPilot-Token` header does not
+      exist anywhere in this codebase; design §4 names `_auth`), so
+      unauthenticated/weak token => 403 (no invented 401); always 200
+      with `overall_ok: bool`; sub-probes: verify_audit (read-only walk
+      §5), chain head vs recomputed, clock.status() REAL shape
+      (`kind/now/scenario/uptime_seconds` + conditional `session`),
+      agent configured flag, idempotency COUNT, backup age ONLY from
+      `last_verified_backup.json` manifest (absent =>
+      `no_verified_manifest`, NOT latest-file mtime); any check fail =>
+      200 with ok:false (never a readiness target).
+- [x] 3.4 unit: /health body unchanged; three probes distinct; external
+      write-lock (real second conn) -> ready 503 -> release 200;
+      read-only FILE -> 503 falsifier (in-txn CREATE; reservation alone
+      false-greens, empirically pinned on Windows — the read-only-DIR
+      variant is POSIX-chmod-only and NOT claimed here); budget bounded
+      by the snapshot timeout; zero-residue proof after success.
 
 ## Phase 4 — backup verification + recovery (design §5)
 

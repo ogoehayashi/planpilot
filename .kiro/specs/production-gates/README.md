@@ -37,9 +37,11 @@ no `requirements.md` by design.
   compat decision: `/health` stays exactly today's DB-touching
   `{"status":"ok","service":"planpilot"}` body for
   `test_requirement_delivery` and Docker back-compat; new `/health/live`
-  (process-only), `/health/ready` (real `BEGIN IMMEDIATE` on an
-  independent **rw** connection + short busy_timeout, BEGIN IMMEDIATE →
-  ROLLBACK, 200/503, no clock write), `/health/deep` (authed — 403 per
+  (process-only), `/health/ready` (real `BEGIN IMMEDIATE` PLUS an
+  in-transaction write falsifier on an independent per-call RW
+  connection — reservation alone false-greens a read-only file, probed
+  on Windows; one shared busy_timeout/connect budget; ROLLBACK;
+  200/503; no clock write), `/health/deep` (authed — 403 per
   this codebase's convention — fixed-200 diagnostics, never a gate).
 - **Phase 4 / design §5 (D):** `verify_audit_connection` (pure; the
   head-repair `INSERT OR IGNORE` in `Database.__init__` must NOT run on

@@ -125,6 +125,10 @@ class Database:
             raise
 
     def _open(self, path):
+        # G4 Phase 3: the readiness probe needs the file identity to open
+        # its OWN per-call connection; store it at construction time
+        # (frozen from the startup snapshot, never re-read).
+        self.path = str(path)
         # Everything that can fail AFTER the handle is opened lives behind
         # __init__'s single cleanup wrapper (PRAGMAs, schema script, shape
         # guard, head row, clock attach).

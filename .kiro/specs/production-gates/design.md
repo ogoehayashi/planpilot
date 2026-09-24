@@ -342,10 +342,17 @@ stays green unchanged). New paths:
   [REV.3→4 P0-1] rev.3's `mode=ro` connection was falsified by the
   reviewer: an ro connection can win a reserved lock yet still cannot
   write (`attempt to write a readonly database`). Correct protocol:
-  independent PER-CALL connection opened `file:<db>` in default RW mode
-  (no mode=ro, no immutable) with a short `busy_timeout`
-  (= `ready_timeout_ms`, default 1500) → `BEGIN IMMEDIATE` →
-  `ROLLBACK`, zero business writes. Success → 200
+  independent PER-CALL connection in default RW mode (plain
+  `sqlite3.connect(path)`; `?mode=rw` was probed and is equivalent on an
+  existing file but fails on a fresh one) with a short `busy_timeout`
+  (= `ready_timeout_ms`, default 1500, ALSO the connect timeout) →
+  `BEGIN IMMEDIATE` → in-transaction `CREATE TABLE _pp_ready_probe(x)`
+  → `ROLLBACK`, zero business writes. [IMPL NOTE, this batch, probed on
+  Windows under BOTH journals] reservation alone is NOT the falsifier:
+  sqlite ACCEPTS `BEGIN IMMEDIATE` on a chmod-444 database and only
+  denies the write — so the probe performs one in-txn DDL (rolled back,
+  zero residue, pinned by test) and a read-only file therefore maps to
+  503, not false-green 200. Success → 200
   `{status, service, probe:"ready", db:"ok"}`. REVOKED: `checked_at` —
   the server's ScenarioClock.now() PERSISTS to clock_session, making
   readiness itself a write path (and it could stall behind the very

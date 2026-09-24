@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import socket
+import sqlite3
+import time
 from pathlib import Path
 import threading
 from urllib.parse import urlparse, parse_qs
@@ -16,6 +18,8 @@ from planpilot.approval import ApprovalError
 from planpilot.clock import Clock, WallClock, clock_from_env
 from planpilot.persistence import Database
 from planpilot.publisher import PublisherService
+from planpilot.startup_config import (StartupConfigError, config_provenance,
+                                      startup_or_die)
 from planpilot.runtime_planning import generate_authoritative_plans_from_state
 from planpilot.security import authenticate
 from planpilot.store import StoreError
@@ -70,10 +74,17 @@ class Server(ThreadingHTTPServer):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
 
-    def __init__(self, address, db, secret, factory_root, clock: Clock | None = None):
+    def __init__(self, address, db, secret, factory_root, clock: Clock | None = None,
+                 ready_timeout_ms: int = 1500, backup_root=None):
         if not secret or len(secret) < 32:
             raise ValueError("PLANPILOT_AUTH_SECRET must contain at least 32 characters")
         self.db, self.secret = db, secret
+        # G4 Phase 3 (design §4): the readiness budget is ONE value from
+        # the startup snapshot (ready_timeout_ms; connect timeout AND
+        # busy_timeout share it — see _probe_ready). backup_root feeds
+        # /health/deep's manifest lookup ONLY (never mtime guessing).
+        self.ready_timeout_ms = int(ready_timeout_ms)
+        self.backup_root = Path(backup_root) if backup_root else None
         # Server-owned clock — the ONE time source for lifecycle, approval,
         # audit chain, decision trace, security events and factory state.
         # G1.0.2: injection goes through db.bind_clock(), which is read-only
@@ -129,6 +140,126 @@ class Handler(BaseHTTPRequestHandler):
             raise PermissionError("Bearer token required")
         return authenticate(header[7:], self.server.secret, permission)
 
+    # ---------------- G4 Phase 3 probes (design §4) ----------------------
+
+    def _probe_ready(self):
+        """The honest readiness protocol, AS AN ISOLATED FUNCTION so the
+        negctl can mutate ONLY this seam: per-call independent connection
+        on the SAME file path in DEFAULT RW mode (never mode=ro — an ro
+        handle can win a lock yet cannot write, rev.3->4 P0-1), ONE
+        shared budget ready_timeout_ms for connect AND busy_timeout,
+        BEGIN IMMEDIATE (writer reservation) then ROLLBACK. Zero
+        business writes, zero clock.now() (ScenarioClock.now() PERSISTS
+        to clock_session — readiness could stall behind the very lock
+        probed). Claim kept honest: RW-opens + writer reservation
+        acquirable/releasable — NOT durability, NOT free space.
+        Returns (ok, detail)."""
+        budget = self.server.ready_timeout_ms / 1000.0
+        path = str(self.server.db.path)
+        conn = None
+        try:
+            conn = sqlite3.connect(path, timeout=budget)
+            conn.execute(f"PRAGMA busy_timeout={self.server.ready_timeout_ms}")
+            conn.execute("BEGIN IMMEDIATE")
+            # [implementation note, design §4 test-(b)] BEGIN IMMEDIATE
+            # alone is NOT enough: empirically (Windows probe, this batch)
+            # sqlite ACCEPTS the reservation on a read-only file and only
+            # denies the WRITE — the exact rev.3 false-green shape. The
+            # in-transaction CREATE is the writability falsifier; DDL on
+            # a probe-only table inside an uncommitted txn leaves zero
+            # residue after ROLLBACK (pinned by unit test), and it is
+            # neither an INSERT nor an UPDATE (§4(c)).
+            conn.execute("CREATE TABLE _pp_ready_probe(x)")
+            conn.execute("ROLLBACK")
+            return True, "ok"
+        except Exception as exc:
+            # Diagnosis carries the sqlite reason ("database is locked",
+            # "attempt to write a readonly database", "file is not a
+            # database") truncated and path-redacted — operators get a
+            # real cause, tokens/paths never leak through this surface.
+            reason = str(exc).replace(path, "<db>")[:120]
+            return False, f"error:{type(exc).__name__}: {reason}"
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def _handle_ready(self):
+        ok, detail = self._probe_ready()
+        if ok:
+            self._json({"status": "ok", "service": "planpilot",
+                        "probe": "ready", "db": detail})
+        else:
+            self._json({"status": "not_ready", "service": "planpilot",
+                        "probe": "ready", "db": detail}, 503)
+
+    def _handle_deep(self):
+        # Repo convention: missing/weak token => PermissionError => 403
+        # (same seam every protected route uses; no invented 401).
+        self._auth("plan")
+        server = self.server
+        checks = {}
+        try:
+            checks["audit_chain_ok"] = bool(server.db.verify_audit())
+        except Exception as exc:
+            checks["audit_chain_ok"] = False
+            checks["audit_error"] = type(exc).__name__
+        try:
+            with server.db.lock:
+                head = server.db.conn.execute(
+                    "SELECT entry_count,event_hash FROM audit_chain_head "
+                    "WHERE singleton=1").fetchone()
+                idem = server.db.conn.execute(
+                    "SELECT COUNT(*) AS n FROM idempotency_registry").fetchone()
+            checks["audit_head"] = {
+                "entry_count": head["entry_count"] if head else 0,
+                "head_hash": head["event_hash"] if head else "0" * 64}
+            checks["idempotency_rows"] = idem["n"] if idem else 0
+        except Exception as exc:
+            checks["audit_head"] = None
+            checks["idempotency_error"] = type(exc).__name__
+        try:
+            checks["clock"] = server.clock.status()
+        except Exception as exc:
+            checks["clock"] = {"error": type(exc).__name__}
+        try:
+            checks["agent_configured"] = bool(server.inference.status().get(
+                "configured", False))
+        except Exception as exc:
+            checks["agent_configured"] = False
+            checks["agent_error"] = type(exc).__name__
+        # Backup age comes from the V3 manifest ONLY — NEVER a newest-file
+        # mtime guess (P1-4). Phase 4 has not run yet, so in practice this
+        # branch answers no_verified_manifest; the lookup shape is here so
+        # Phase 4 only has to PRODUCE the manifest, not rewire deep.
+        manifest = None
+        if server.backup_root is not None:
+            try:
+                mf = server.backup_root / "last_verified_backup.json"
+                if mf.is_file():
+                    manifest = json.loads(mf.read_text(encoding="utf-8"))
+            except Exception:
+                manifest = None
+        if isinstance(manifest, dict) and manifest.get("path"):
+            checks["backup"] = {"state": "manifest",
+                                "age_seconds": round(
+                                    max(0.0, time.time() - float(
+                                        manifest.get("verified_at_epoch",
+                                                     manifest.get("mtime_epoch",
+                                                                  time.time())))), 3),
+                                "sha256": manifest.get("sha256")}
+        else:
+            checks["backup"] = {"state": "no_verified_manifest"}
+        core = (checks.get("audit_chain_ok") is True
+                and checks.get("audit_head") is not None)
+        body = {"overall_ok": bool(core), "service": "planpilot",
+                "probe": "deep", "checks": checks}
+        # Deep is DIAGNOSTICS: HTTP stays 200 even when overall_ok is
+        # False; it must never be a container/gate probe target (§4).
+        self._json(body)
+
     def _handle_publish(self, body):
         # p2-5 (design §4, §6.2): auth stays in the route — a
         # missing/insufficient token is a transport 403, never a
@@ -171,6 +302,15 @@ class Handler(BaseHTTPRequestHandler):
                     with self.server.db.lock:
                         self.server.db.conn.execute("SELECT 1").fetchone()
                     self._json({"status": "ok", "service": "planpilot"})
+                elif route.path == "/health/live":
+                    # G4 3.1 (design §4): process-level liveness ONLY —
+                    # zero DB, zero clock.now(). Alive = HTTP answers.
+                    self._json({"status": "ok", "service": "planpilot",
+                                "probe": "live"})
+                elif route.path == "/health/ready":
+                    self._handle_ready()
+                elif route.path == "/health/deep":
+                    self._handle_deep()
                 elif route.path == "/clock":
                     # Read-only, server-owned. The UI must show scenario time
                     # as scenario time; expiry never trusts a client stamp.
@@ -397,23 +537,35 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    # G1.0.1 fail-safe: unset/invalid PLANPILOT_CLOCK_MODE means REAL wall
-    # time. A deployment that forgets env config must never run on the fixed
-    # 2026-09-14 scenario clock and bless stale plans. Local demo:
-    # PLANPILOT_CLOCK_MODE=scenario (explicit; refuses public binds).
-    host = os.environ.get("PLANPILOT_HOST", "127.0.0.1")
+    # G4 Phase 2 (design §3): read the environment exactly ONCE; every
+    # startup field comes from that snapshot via the pure parser + the
+    # I/O preflight. A refusal means ZERO Database/Clock construction and
+    # ZERO sockets — same shape the Phase 4 lock gate will use.
+    # (Bedrock's six PLANPILOT_BEDROCK_* vars deliberately keep per-call
+    # reads inside bedrock_client for credential rotation.)
+    snapshot = dict(os.environ)
     try:
-        clock = clock_from_env(os.environ, host)
-    except ValueError as exc:
-        raise SystemExit(f"clock policy refused startup: {exc}") from exc
-    db = Database(os.environ.get("PLANPILOT_DB", "planpilot.db"), clock=clock)
+        cfg, warnings = startup_or_die(snapshot)
+    except StartupConfigError as exc:
+        raise SystemExit(f"startup config refused: {exc}") from exc
+    # G4 2.3: log WHERE config came from, once, redacted (booleans and
+    # counts only — the secret value never enters this record).
+    LOGGER.info("startup config provenance: %s", json.dumps(
+        config_provenance(cfg), sort_keys=True))
+    for w in warnings:
+        print(f"WARNING: {w}", flush=True)
+    # G1.0.1 fail-safe preserved: unset/invalid PLANPILOT_CLOCK_MODE means
+    # REAL wall time; scenario on a public bind was already refused in
+    # parse. Local demo: PLANPILOT_CLOCK_MODE=scenario (explicit).
+    clock = clock_from_env(snapshot, cfg.host)
+    db = Database(cfg.db_path, clock=clock)
     if clock.kind == "scenario":
         print(f"WARNING: scenario clock active ({clock.now()}) — demo data "
               "only, NOT production time. Audit and approval stamps share it.",
               flush=True)
-    server = Server((host, int(os.environ.get("PLANPILOT_PORT", "8080"))),
-                    db, os.environ.get("PLANPILOT_AUTH_SECRET"), os.environ.get("PLANPILOT_FACTORY_ROOT", ROOT / "data"),
-                    clock=clock)
+    server = Server((cfg.host, cfg.port), db, cfg.auth_secret, cfg.factory_root,
+                    clock=clock, ready_timeout_ms=cfg.ready_timeout_ms,
+                    backup_root=cfg.backup_root)
     try:
         server.serve_forever()
     finally:
