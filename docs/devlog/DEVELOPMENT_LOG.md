@@ -1210,3 +1210,9 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   points=17。19/21 已按 round-4 要求降级为对比基线。
 - tasks.md 勾 0.1-0.4（35→31 未勾）。六 kill 点矩阵探针属 Phase 4 交付
   物，不在 Phase 0 空跑（诚实登记）。
+
+- 复跑事故登记：probeB 让 runner 重写了已封口的
+  tests/evidence/runtime-eval/EVIDENCE.json（仅 generated_at 字段变化，
+  其余 SHA 内容一致），已 `git checkout` 复原——封口证据不因复跑刷新；
+  Phase 0 探针证据一律以仓外 staging 日志为准。后续复跑 run_evals 的
+  任务（如 Phase 6）须先确认是否允许刷新该文件。
