@@ -1044,3 +1044,140 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
 - **勾账**：4.2、4.4 现按上述实证勾选，Phase 0–4 合计 **23/23**。
   本 attestation commit 自身完成后另出一支交付 bundle 做
   `bundle verify`（覆盖含本条目的最终历史），结果记入收口报告。
+
+## 2026-09-23 — G4 Design-First：production-gates spec 起草（纯文档，待评审）
+
+- 类型：设计 / 评审门禁前
+- 证据：`.kiro/specs/production-gates/` 四文件（README / design / tasks /
+  START_PROMPT）；未 commit，等评审修订批准后按 G2 先例入库。
+- G2/G3 封口事实：HEAD `855a5c0`，交付 bundle（`959,264 bytes`，
+  SHA `91d90657…29692c`）+ `#` 注释前缀 `.sha256` 旁证（卫生项落盘，
+  `sha256sum -c` 输出仅 OK）。
+- 侦察实测（写进 design §1 事实表，Phase 0.3 复核）：
+  `_persist` 行缺失静默回退（clock.py:205-206）；`clock_session` 零
+  触发器；`main()` 先开 `Database()` 才在 `Server.__init__` 撞 ≥32
+  secret 检查；**restore 工具不存在**（只有 backup）；`/health` 无
+  version/contract 字段；`run_evals.py` fail-closed inventory 已就位。
+- 范围五工作流 A–E（clock 防御纵深 / startup 一次性校验 / 健康面分层 /
+  恢复闭环 / 部署边界+EVAL 姿态钉死），非目标显式含"不跑 AWS、不解锁
+  EVAL、不碰 G2/G3 冻结核心"。
+
+## 2026-09-23 — G4 spec rev.2：评审 round-1 Changes-Requested 全量吸收（仍未提交）
+
+- P0-1 验证者不得修复被验证物：`verify_audit_connection` 纯只读抽入
+  audit.py，`verify_backup.py` 走 `mode=ro&immutable=1`+`query_only=ON`、
+  有 sidecar 即拒；live `verify_audit()` 的 head INSERT OR IGNORE 只保留
+  在线上库路径。负测矩阵含"验证前后备份 SHA-256 逐字节相等"。
+- P0-2 健康面三分：`/health` 纯 liveness 不碰库；`/health/ready` 独立
+  连接 `BEGIN IMMEDIATE→ROLLBACK`、busy_timeout=PLANPILOT_READY_TIMEOUT_MS
+  （默认 1500，config 一次性读取），失败/未 ack receipt 返回 503；
+  `/health/deep` 仅诊断（可 200+overall_ok:false），grep 锁测试保证其
+  永不进 Dockerfile/compose/gate。外部持写锁→ready 503→释放→200 真实
+  测试入 tasks 3.2。
+- P0-3 restore 状态机：仅服务器停止（pidfile 门）可 restore；marker→
+  verify→旧 main/WAL/SHM 重命名隔离（.restore-prev-<ts>，先隔离后让新库
+  可见，顺序修正）→staged copy+fsync→os.replace→receipt→清 marker；
+  receipt 存在且 ack SHA 不匹配时生产启动 fail-closed、dev ready=503
+  （time-travel 的旧审批/幂等集不得被静默 serving）。publisher 核心不动，
+  纯 startup gate。§8 崩溃矩阵含 mid-restore hard-kill 各边界。
+- P1-4 config 两层：`parse_startup_env` 纯 resolver（零 FS，secret 本体
+  repr=False，summary 仅布尔）+ `preflight` FS 层；`PLANPILOT_ENV` 封闭
+  集合 development|production，未知值拒启；factory_root 需自身是目录；
+  环境变量一次性快照（post-snapshot 变更不得影响行为，有测试）。
+- P1-5 部署边界进范围：design §9 + tasks 5.1–5.3（wheelhouse 离线装、
+  compose production+只读备份卷+HEALTHCHECK→ready、容器验收；Docker 不
+  可用记 BLOCKED 不算 PASS）。
+- P1-6 EVAL 按正文方案：`run_evals.py` 零改动，30 BLOCKED/0 PASS 由测试
+  钉死；smoke 独立脚本 `tools/agent_smoke.py` 只写 results/smoke/、行带
+  kind:smoke+not_eval_backed；AWS 实跑后仓内留脱敏 manifest（含 SHA 与
+  evidence 指针），raw dump 仓外。我 G3 聊天报告里的 exit 77/local-fake
+  /ACK 放行措辞正式撤回——设计从未有过。
+- P1-7 gate 凭据与纯度：evaluate_env(env,flags) 纯逻辑；key-file 或
+  PLANPILOT_BEDROCK_API_KEY 两式皆合法（合同允许）；Git tracked scan、
+  符号链接/权限检查归 I/O probes；--profile 与 PLANPILOT_ENV 不一致=FAIL。
+- P1-8 防同名空壳 trigger：Database 启动比对 sqlite_master 规范化 SQL
+  摘要，缺失或摘要不符拒启；哨兵测试双向（drop 后 bypass 必红；plant
+  no-op 必拒启）。
+- P1-9 negctl §13 增列 ready 吞错 200 / restore 跳 verify / receipt 绕过
+  / secret 门删除 / hollow trigger 接受 等 must-fail 变异，收口时锁精确
+  计数（基线 58=56+2 起算）。
+- A 部分按批准保留：A1 fail-closed _persist / A2 三触发器（DELETE、锚点
+  UPDATE、version 回拨；UPDATE 放行合法高水位）/ A3 五腿篡改矩阵。
+- tasks 现为 27 项全未勾（评审门禁）；README/design/tasks/START_PROMPT
+  四件套措辞已对齐同一方案（无 /api/v1/health、无 exit-77 残留）。
+
+## 2026-09-23 — G4 spec rev.3：§0 事实底座在 855a5c0 上整体重建（round-2 谱系串污退回；仍未提交）
+
+- P0-1 承认：rev.2 §0 大面积来自另一套数据模型（host/pid/txn_id/boot_id/version
+  列、db.clock/clock_history/clock_service_session、digest_history 与
+  approval_records_source_key_check、静默匿名 _auth、只读 /health、
+  verify_audit 修 head、backup 返回 dict、status.json、eval exit 2、
+  docker-compose.yml、Sonnet 4.6、results/agent_eval——全部不存在或不成立）。
+- 修法：评审员逐文件重读工作树（clock.py 277 行 / persistence.py 231 行 /
+  api_server.py 425 行 / security.py / backup.py / audit.py / 两部署工具 /
+  Dockerfile / compose.yaml / 合同 runtime 段），并跑两个实时探针：
+  clean-close 后 -wal 仍在；run_evals 实测 cases=30 passed=0 blocked=30
+  EXIT=1。design §0 重写为 F1-F7 fact table，§11 建撤回词表，四件套
+  （design/tasks/README/START_PROMPT）全部按 rev.3 对齐；tasks 计数实测
+  44 项（README 同步；上轮"36"口头数字错误，当时实际 27，再认一次）。
+- 结构修订：A 触发器改在真实 4 列上（no_delete / anchor 两列禁 UPDATE /
+  last_issued 禁回拨；正常 forward-UPDATE 保留为回归钉）；A1 明示必改
+  clock.py；"删守卫必红"哨兵只进 negctl 沙箱。health：/health 语义原样
+  保留（显式兼容决定，test_requirement_delivery:157 不红），三分只加新
+  路径；deep 认证失败=403（本仓库惯例），clock.status 形状写实。restore：
+  OS 级互斥锁（msvcrt/fcntl 分支）取代 pidfile、marker 带 phase
+  （PREPARED→QUARANTINED→REPLACED→RECEIPTED）逐相幂等 resume/rollback、
+  quarantine 保留原文件名、receipt 原子写并绑 backup SHA+audit head+
+  generation、未 ack 全环境拒静默启动、diagnostics-only 结构性摘除写路由、
+  hard-kill 后重跑必须收敛。deploy/EVAL 落回真实文件（compose.yaml、
+  Dockerfile /health→/health/ready、30/0/exit1 按实测钉死、smoke 隔离
+  目标 tests/evidence/runtime-eval、wheelhouse 只提交 manifest+生成器、
+  二进制不进 Git）。大写合同状状态码全部收回为内部类型+小写报告值。
+- 验证：撤回词全库 grep 仅存于 §11 撤回登记表本身；标题编号交叉引用修正
+  （§3 config/§4 health/§5 restore/§6 eval 行、§11 互指）；封闭词表 PASS；
+  git diff --check 0；HEAD=855a5c0 未动；合同 SHA 未动；纯文档零测试。
+  清理杂散 NUL 文件（上轮探针重定向误建）。
+- 边界：等 round-3 复审后再做 spec commit；Phase 1 之前零代码。
+
+## 2026-09-23 — G4 spec rev.4：round-3 三个 P0 全部按评审实测重建（纯文档，仍未提交）
+
+- P0-1（ready 证不了可写）：接受评审 mode=ro 实测（BEGIN 可过、INSERT 被拒）。`/health/ready` 改独立 **rw** 连接 + 短 busy_timeout + BEGIN IMMEDIATE→ROLLBACK；`checked_at=clock.now()` 撤销（readiness 探针不得含写路径，外部锁下还可能超预算）。补 falsifier：ro-open BEGIN-ok 连接不得判 ready；只读目录/文件 → 503。
+- P0-2（diagnostics-only 污染未确认库）：整模式删除。`Database()` 构造本身执行 DDL/head 修复/trigger 安装，ScenarioClock attach 写 clock_session——"未 ack 库上做在线诊断"在本代码库是矛盾。R4 改 zero-HTTP：未 ack 全环境 socket 根本不 bind；诊断走既有离线 CLI（verify_backup / restore --status / --show-receipt），不新建 recovery_status.py。
+- P0-3（四相 marker 盖不住 op↔marker 更新间隙）：marker 升级为 intent ledger——每笔文件操作带源/目标 SHA 记 pending/done，phase 仅当全部 op done 才推进（marker=下一步意图，ledger=已完成事实）；重跑先 reconcile（文件系统+SHA 推导实况，不信标签）；kill 矩阵扩到 6 点（K 后 staged 前 / stage 后 / main 移后 / WAL 部分移后 / replace 后 phase 更新前 / receipt 后清 marker 前），每例二次 restore 必须收敛。
+- P1：[LP-1] 撤回（评审与我的复验一致：干净 close 无 -wal 残留；开放写事务不 close 才出现 wal/shm）→ 改为条件性表述，restore 仍无条件处理三件套，Phase 0 验收删"必残留"要求；audit hash 规则按 persistence.py:224 逐字改 `sha256((prev+row["record"]).encode())` 验存储串、禁 re-canonicalize（空白篡改负例）；verify_backup_file 补 integrity_check/WAL-sibling 拒绝/9 核心表/链走/SHA 不变；scheduled_backup 真接 verifier + last_verified_backup.json manifest + deep age 读 manifest（新增 task 4.3）；SecretStr→field(repr=False)；返回类型统一 tuple；"dev boots"改"dev with valid secret boots"；Bedrock 按调用重读列为快照制例外；env inventory 改 rg 生成器（实测 19 vars/21 points，PLANPILOT_HEALTH/AUTHORITATIVE_RUNTIME 零读取点确证）。
+- 流程：spec commit 从 task 0.6 提出为"评审批准后的独立前置提交"（含四件套+devlog），Phase 0 验 855a5c0 为祖先而非相等；Phase 0 探针日志先落仓外 staging，evidence 目录 Phase 6 才建；Docker 缺位=G4 整体 BLOCKED（不许勾 5.3 继续宣称完成），仅 AWS/EVAL 允许 BLOCKED 非目标。design §11 增 rev.4 撤回登记 12 条；README/START_PROMPT/tasks 全同步；tasks rev.4 checkbox 实测 35 项（grep -c 于写入时计数，禁跨版本沿用）。
+- 守卫：词表 PASS；git diff --check 0；HEAD 855a5c0 未动；合同 b92e53f4…fe639 未动；本轮零测试执行（评审指示：只重跑事实探针+词表+文档卫生）。
+
+## 2026-09-23 — G4 spec rev.5：round-4 的 2 个 P0 + 6 项漂移对齐（小型修订，架构未动）
+
+- P0-1（ACK 语义）：按评审建议定死。PLANPILOT_RECOVERY_ACK 环境变量彻底撤销；唯一路径 restore_database.py --ack 原子写 sidecar，绑定 receipt_sha256（receipt 文件自身哈希→任意字节改动即 void）+ generation + backup_sha256 + target_db + operator/ts + restored_db_sha256_at_ack（仅确认时证据，绝不做启动恒等比较）；每次新 restore 在首个文件写入前以 ledger op 形式原子失效旧 ACK（kill 安全）→ 同备份第二次恢复必须重新确认。四条回归进 4.7。
+- P0-2（锁顺序）：钉死启动顺序 env→parse/non-DB preflight→OS lock→marker/receipt/ACK gate→Clock→Database→services→bind；关序 HTTP→DB close→lock 最后释放。依据：现 main() Database@:409 先于 Server@:414，锁放 Server 内 = 先污染后上锁。测试：lock/gate 拒绝时 Database.__init__ spy 零调用、socket 未 bind、恢复库 SHA 不变、启动中途 restore 抢不到同一把锁。
+- P1 六项：8731/0.5s→8080（api_server.py:414+Dockerfile+compose 实测）/ready_timeout_ms=1500；"Dockerfile/compose 已设 PLANPILOT_ENV"改"Phase 5 将新增"（grep 证实两者均无）；env inventory 改 AST 扫描（regex 版确漏 clock.py:231 mapping 读取与 publisher FAULT_ENV_VAR 常量间接 :337/:363），19/21 降为基线快照、G4 落地后重生成，禁写死；EVAL 验收删幻影 BLOCKED: 行、按 run_evals.py:72-73 真实两行+exit 1；smoke 输出改回其真实默认 tests/evidence/compact-smoke（rev.4 误写成正式 EVAL 目录，脚本本就禁写 runtime-eval）；wheelhouse 统一 deploy/wheelhouse/MANIFEST.json + tools/build_wheelhouse.py + 仓外 wheel 目录三件套、manifest 跟踪 .whl 不跟踪；design §10 "×3 phases" 残留改 six kill points × {resume, rollback}。
+- 非阻塞建议全部吸收：ready 措辞收紧为 opens-RW+writer-reservation（非 durability/free-space 证明）；九表=有意的 full-runtime-only 政策，verdict 输出缺失表名、Phase 4 fixture 走完整 runtime 路径；backup_database() 保持 -> None，manifest 由 scheduled_backup 工具层组装，不动公共 API。
+- 版本头 rev.3→rev.5 同步（自查发现的标题漂移）；§11 增 REV.5 撤回登记（ACK env、锁序、8731、BLOCKED: 幻影、smoke 目录、三套 wheelhouse 名、PLANPILOT_ENV 现状误报、regex inventory）。README/START_PROMPT/tasks 同步。checkboxes 35 不变（grep 现测）。
+- 守卫：词表 PASS；git diff --check 0；HEAD 855a5c0、合同 b92e53f4…fe639 未动；零测试执行（评审：一轮小修即可进 Phase 0/1）。
+
+## 2026-09-23 — G4 spec rev.5b：round-5 五处提交前修正（文档级，架构未动）
+
+- #1 backup_database() 矛盾清除：tasks 4.3 旧文"returns a real result +
+  clock stamp"删除，与 design V3 统一为保持 -> None、scheduled_backup
+  自行推导确定性文件名+算 SHA+调 V1 验证+写 manifest。
+- #2 START_PROMPT/README 快照措辞：改为"启动配置字段只快照一次；
+  Bedrock 六变量保留 per-call 重读以支持凭据轮换（唯一例外）"。
+- #3 ACK 篡改声明收窄（采纳评审推荐项）：安全绑定字段=receipt SHA/
+  generation/backup SHA/target_db 四项，门禁=格式非法/缺失/过期代际/
+  四字段不匹配；operator/timestamp 明示仅溯源、同格式编辑不承诺可检测。
+  design R4、§10 矩阵行、tasks 4.6/4.7、START_PROMPT 同步；§11 增补
+  REV.5 撤回登记一条（首次写入时曾误重复两份+两处 V3 段落重影，已去重
+  并 grep 复核单份）。
+- #4 backup_root 未定义修正：tasks 2.1 改为 development=ROOT/backups
+  （与 backup.py 现默认一致）、production 必须显式配置、compose 容器内
+  /backups。
+- #5 EVAL 验收路径化：design [LP-2] 与 tasks 0.3 改为 line1 断言
+  ROOT 前缀+runtime-eval 后缀（run_evals.py:17 拼绝对路径），line2 精确
+  匹配 cases=30 行+exit 1。
+- 自查追加：START_PROMPT Phase-0 条目仍残留 rev.3 的"[LP] clean-close
+  -wal 残留"旧说法与旧四步流程，重写为 rev.5b 探针四件套（WAL 条件形态/
+  ro-rw/EVAL 两行/六 kill 点），并补"日志先落仓外 staging"。
+- 复核：tasks 35 checkbox；词表 PASS；git diff --check 0；HEAD 855a5c0、
+  合同 b92e53f4…fe639 未动。纯文档，未跑测试。
