@@ -186,39 +186,39 @@ def probe_tracked_secrets() -> Finding:
 
 
 def probe_key_file(env: dict) -> Finding:
-    """Bedrock credential: API_KEY env OR managed key file (both legal)."""
+    """Bedrock credential: env var OR managed key file (both legal)."""
     api_key = env.get("PLANPILOT_BEDROCK_API_KEY", "") or ""
     kf_raw = env.get("PLANPILOT_BEDROCK_KEY_FILE", "") or ""
     if api_key and kf_raw:
         return Finding("bedrock_credential", FAIL,
-                       "API_KEY env AND KEY_FILE both set — pick one channel", 2)
+                       "PLANPILOT_BEDROCK_API_KEY env AND PLANPILOT_BEDROCK_KEY_FILE both set — pick one channel", 2)
     if api_key:
         return Finding("bedrock_credential", PASS,
-                       f"API_KEY env present (length {len(api_key)}, value not shown)", 2)
+                       f"PLANPILOT_BEDROCK_API_KEY env present (length {len(api_key)}, value not shown)", 2)
     if not kf_raw:
         return Finding("bedrock_credential", BLOCKED,
-                       "no API_KEY env and no PLANPILOT_BEDROCK_KEY_FILE — inference probes cannot run (never reported as pass)", 2)
+                       "no PLANPILOT_BEDROCK_API_KEY env and no PLANPILOT_BEDROCK_KEY_FILE — inference probes cannot run (never reported as pass)", 2)
     kf = Path(kf_raw)
     if not kf.is_absolute():
         return Finding("bedrock_credential", FAIL,
-                       f"KEY_FILE {kf_raw!r} is not an absolute path", 2)
+                       f"PLANPILOT_BEDROCK_KEY_FILE {kf_raw!r} is not an absolute path", 2)
     try:
         rp = kf.resolve()
     except OSError:
-        return Finding("bedrock_credential", FAIL, f"KEY_FILE {kf_raw!r} unresolvable", 2)
+        return Finding("bedrock_credential", FAIL, f"PLANPILOT_BEDROCK_KEY_FILE {kf_raw!r} unresolvable", 2)
     if ROOT in rp.parents or rp == ROOT:
         return Finding("bedrock_credential", FAIL,
-                       "KEY_FILE lives inside the repo — the managed key must be OUTSIDE any checkout", 2)
+                       "PLANPILOT_BEDROCK_KEY_FILE lives inside the repo — the managed key must be OUTSIDE any checkout", 2)
     if kf.is_symlink():
         return Finding("bedrock_credential", FAIL,
-                       "KEY_FILE is a symlink — refuse (redir/swap risk)", 2)
+                       "PLANPILOT_BEDROCK_KEY_FILE is a symlink — refuse (redir/swap risk)", 2)
     if not kf.exists():
-        return Finding("bedrock_credential", FAIL, f"KEY_FILE {kf_raw!r} does not exist", 2)
+        return Finding("bedrock_credential", FAIL, f"PLANPILOT_BEDROCK_KEY_FILE {kf_raw!r} does not exist", 2)
     if os.name == "posix":
         mode = statmod.S_IMODE(kf.stat().st_mode)
         if mode & 0o077:
             return Finding("bedrock_credential", FAIL,
-                           f"KEY_FILE mode {mode:04o} is group/other-readable (need <=0600)", 2)
+                           f"PLANPILOT_BEDROCK_KEY_FILE mode {mode:04o} is group/other-readable (need <=0600)", 2)
         return Finding("bedrock_credential", PASS,
                        f"managed key file outside repo, mode {mode:04o}", 2)
     # Windows has no POSIX modes — record the substitution honestly

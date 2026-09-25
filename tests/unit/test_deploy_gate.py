@@ -126,6 +126,9 @@ def test_tracked_secrets_probe_green_on_this_repo():
     # are excluded BY NAME — if either is renamed the probe re-hits
     # them and this test surfaces the drift.
     f = G.probe_tracked_secrets()
+    if f.status == G.BLOCKED:
+        pytest.skip("git ls-files unavailable (e.g. no-.git negctl "
+                    "sandbox) — BLOCKED is the honest outcome there")
     assert f.status == G.PASS, f.detail
 
 

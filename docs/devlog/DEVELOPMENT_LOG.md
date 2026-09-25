@@ -1433,3 +1433,30 @@ Batch A 封口 `123a21d`（reviewer 独立复核 60 targeted passed）后，按�
 **如实边界（不变）**：5.3 未勾；Docker 缺席⇒G4 整体 BLOCKED；正式 EVAL
 保持 0 PASS / 30 BLOCKED；未在真实容器跑过 /health/ready 前，任何
 "deploy-ready" 声称都不成立。
+
+## 2026-09-25 — G4 Phase 5 首轮验证链红 → 根因修复（词表守卫 / negctl 沙箱）
+
+Phase 5 提交后首条验证链三处失败，逐一根因定位后修复（无一是
+被测逻辑错误，全是我新增代码触碰了仓库级不变量）：
+
+1. **词表守卫 FAIL（unit 2 项 + negctl guard 项 + ERROR）**：
+   deploy_gate.py 的 key-file 探针消息里写了裸片段 `API_KEY` /
+   `KEY_FILE`——守卫按最大段拆分识别词表形状 token，判定
+   not_in_any_vocabulary。修复＝把全部消息拼写为完整
+   `PLANPILOT_BEDROCK_API_KEY` / `PLANPILOT_BEDROCK_KEY_FILE`
+   （10 处），守卫恢复 PASS。没有动 ALLOWED_LOCAL。
+2. **negctl 沙箱 baseline 红**：test_deploy_gate.py 的
+   tracked_secrets 测试在 no-.git 沙箱里拿到 BLOCKED（git ls-files
+   不可用）却断言 PASS。该 BLOCKED 恰是设计要求的诚实输出——修
+   测试期望（BLOCKED → skip），没放宽 probe。
+3. **deploy_gate 首跑 worktree_dirty FAIL**：属真实输出（当时
+   MANIFEST 等未提交），提交后自动转 PASS；auth_secret 在无
+   secret 的开发 shell 里保持 FAIL 是正确行为（gate 不粉饰）。
+
+修复后二验（原始日志 g4-probe-staging/phase5-{unit2,negctl2,
+full2}.log）：unit **826 passed**、negctl **9 passed**、
+full **835 passed**，全部 EXITCODE=0；词表守卫 PASS
+（27 sets/165 members）；合同 SHA 不变（run_evals.py 哈希锁
+测试在链内为绿）。算术对账：首轮 unit 为 2 failed + 824 passed
+（共 826 项），修复后 826 全绿，总数不变；full 835 = 826 + 9。Phase 5 离线三件至此验证闭环；
+5.3 仍未勾，G4 整体保持 BLOCKED（docker/AWS 之外无新增声称）。
