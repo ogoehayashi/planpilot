@@ -1,6 +1,6 @@
 """G4 A4 sentinel: the clock/health defences must be observably load-bearing.
 
-FIVE disposable-copy mutations (never in the normal suite — an
+SIX disposable-copy mutations (never in the normal suite — an
 intentional red-main would lie about CI):
   1. strip the three CREATE TRIGGER clock_session blocks from
      persistence.py => the tamper tests must fail (defence gone).
@@ -17,6 +17,10 @@ intentional red-main would lie about CI):
      FILE test must fail: empirically sqlite accepts BEGIN IMMEDIATE
      on a chmod-444 db and denies only the write (rev.3 P0-1 shape,
      pinned probed on Windows this batch).
+  6. (Batch A P1-1) revert the ready probe to plain sqlite3.connect
+     => the missing-file test must fail: plain connect CREATES a
+     zero-byte phantom DB and false-greens readiness for a database
+     that never existed (reviewer-reproduced).
 Each mutation runs its pinned focused subset in a sandbox subprocess;
 the sentinel additionally requires a REAL test-failure line in stdout
 (a collection/import error is `broken`, not `caught` — no wrong-reason
@@ -92,6 +96,15 @@ MUTATIONS = (
 """,
      ("tests/unit/test_health_split.py::"
       "test_ready_503_on_readonly_file_never_false_green",)),
+    ("ready probe reverts to plain connect (phantom-DB false green)",
+     "tools/api_server.py",
+     """            uri = Path(path).resolve().as_uri() + "?mode=rw"
+            conn = sqlite3.connect(uri, uri=True, timeout=budget)
+""",
+     """            conn = sqlite3.connect(path, timeout=budget)  # NEGCTL MUTATION
+""",
+     ("tests/unit/test_health_split.py::"
+      "test_ready_503_when_db_file_missing_and_never_creates_it",)),
 )
 
 

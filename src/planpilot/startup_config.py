@@ -10,12 +10,17 @@ race a mid-boot environment change.
 Secrets: the FULL value is held on the dataclass (no external SecretStr
 type — this repo stays stdlib), marked `repr=False, compare=False` so
 `repr()`, `str()` and `__eq__` comparisons cannot echo it, plus an
-explicit `summary()` that exposes only booleans and counts.
+explicit `summary()` that exposes the non-sensitive config (host, port,
+paths, mode) and reports the secret only as present/length.
 
-Intentional exception to the one-shot rule (design §3): the six
-`PLANPILOT_BEDROCK_*` variables stay PER-CALL reads inside
-bedrock_client so credential rotation does not require a restart. They
-are deliberately NOT fields of StartupConfig.
+Intentional exception to the one-shot rule (design §3, claim scoped by
+the Batch-A review): the Bedrock CREDENTIAL
+(`PLANPILOT_BEDROCK_API_KEY` / `PLANPILOT_BEDROCK_KEY_FILE`, read inside
+`_credential()`) and the network switch (`PLANPILOT_FORBID_LLM_NETWORK`)
+are PER-CALL reads inside bedrock_client, so credential rotation does
+not require a restart. `PLANPILOT_BEDROCK_REGION` / `MODEL` /
+`DAILY_TOKENS` are read at BedrockClient CONSTRUCTION — equally not
+StartupConfig fields, but no per-call re-read is claimed for them.
 """
 from __future__ import annotations
 
@@ -34,6 +39,11 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
 DEFAULT_READY_TIMEOUT_MS = 1500
 DEFAULT_CLOCK_MODE = "wall"  # G1.0.1 fail-safe: unset means REAL wall time
+
+# [BATCH-A P1-2] tasks 2.4 promised "prod localhost => refusal"; the
+# same loopback spellings clock.py uses for its bind policy. production
+# MUST bind non-loopback (Phase 5 compose sets 0.0.0.0 explicitly).
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 
 @dataclass(frozen=True)
@@ -73,7 +83,12 @@ class StartupConfig:
     auth_secret: str = field(repr=False, compare=False, default="")
 
     def summary(self) -> dict:
-        """Loggable view: booleans/counts only, never the secret value."""
+        """Loggable view: non-sensitive config VALUES and paths
+        (env/host/port/db/factory_root/backup_dir/clock_mode/timeout)
+        plus booleans/counts for the secret — the secret string itself
+        never appears [BATCH-A P2: wording made honest; the earlier
+        'booleans/counts only' understated what this record carries].
+        """
         return {
             "env": self.env,
             "host": self.host,
@@ -113,6 +128,15 @@ def parse_startup_env(snapshot: dict, *, root: Path | None = None
                            f"must be one of {list(ENVS)}, got {env!r}"))
 
     host = get("PLANPILOT_HOST", DEFAULT_HOST)
+    # [BATCH-A P1-2, reviewer-reproduced] tasks 2.4 promised production
+    # non-loopback; the old parse accepted `production + 127.0.0.1`.
+    # Phase 5 compose binds 0.0.0.0 explicitly, so refuse here instead
+    # of revoking the requirement.
+    if env == "production" and host in LOOPBACK_HOSTS:
+        issues.append(_err("PLANPILOT_HOST",
+                           f"production must bind a NON-loopback host "
+                           f"(one of {list(LOOPBACK_HOSTS)} refused), "
+                           f"got {host!r}"))
     port_raw = get("PLANPILOT_PORT", str(DEFAULT_PORT))
     try:
         port = int(str(port_raw))
@@ -260,8 +284,10 @@ def _port_checks(cfg: StartupConfig) -> list[Issue]:
 
 def config_provenance(cfg: StartupConfig) -> dict:
     """G4 2.3: the loggable, REDACTED record of what the boot snapshot
-    resolved to. Booleans/counts/paths only — the secret value never
-    appears here (its LENGTH does, which is metadata, not the secret).
+    resolved to. It carries the NON-SENSITIVE config (host, port, the
+    three paths, env, clock mode, timeout) plus secret PRESENCE and
+    LENGTH only — the secret value never appears (length is metadata,
+    not the secret) [BATCH-A P2: honest scope, was 'booleans/counts'].
     Provenance means "one snapshot, read at boot, shown honestly"; the
     source field states that contract in the record itself."""
     return {"source": "startup_snapshot_once", **cfg.summary()}

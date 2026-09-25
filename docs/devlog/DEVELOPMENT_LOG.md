@@ -1293,3 +1293,54 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   design §4 同步 [IMPL NOTE]。negctl 升至五路（新增 #4 去掉写锁预约 / #5 去掉 in-txn falsifier），
   caught=5 escaped=0 broken=0，真树前后逐文件 SHA-256 一致。
 - Batch A 冻结验证：见下一条提交注释中的原始数字。
+
+## 2026-09-25 — G4 Batch A 硬化（评审 P0 + 4×P1 + P2 落修）
+
+评审结论「Batch A 暂不批准进入 Phase 5」逐条现场核实后全部修复：
+
+- **P0 合法启动崩溃**：`tools/api_server.py` main() 传 `backup_root=cfg.backup_root`
+  ——StartupConfig 字段实名 `backup_dir`（startup_config.py），AttributeError 在
+  Database 已构造、try/finally 之前抛出。改为 `cfg.backup_dir`；新增
+  `test_main_with_valid_env_assembles_and_closes_cleanly`：合法快照驱动真实
+  main()（ServerSpy 替换 serve_forever，捕获接线后 handle_request 服务一次真实
+  /health/live 再返回），证明 (1) Database 在快照路径真实构造 (2) Server 收到
+  cfg.backup_dir (3) main() finally 关闭 server（socket 再连必拒）与 DB (4) 全程
+  零 AttributeError。此前 main() 测试全部走非法配置提前退出，合法路径从未被装配
+  测试覆盖——评审属实。
+- **P1-1 readiness 假绿幽灵库**：普通 `sqlite3.connect(path)` 在文件丢失时创建
+  零字节 DB 并让 BEGIN/CREATE/ROLLBACK 全成功 → 503 变 200。改
+  `file:<resolved>?mode=rw` URI（本批复测：missing→CANTOPEN 且**不创建文件**；
+  既有文件等价默认 RW；chmod-444 仍可开、in-txn CREATE falsifier 独立兜底）。
+  新增 `test_ready_503_when_db_file_missing_and_never_creates_it`（含 -wal/-shm
+  零副产物）；negctl 升至**六路**（#6 回退 plain connect → 缺文件测试必须红），
+  caught=6 escaped=0 broken=0。
+- **P1-2 production 不拒 loopback**：tasks 2.4 承诺未兑现，parse 现在
+  LOOPBACK_HOSTS=(127.0.0.1/localhost/::1/::ffff:127.0.0.1) + production = error
+  （与 clock.py 同一拼写族）；dev 默认不动。参数化测试 3 拼写全拒 +
+  0.0.0.0 通过 + dev 保留 loopback；既有 2 个 production 用例改为显式非回环主机。
+- **P1-3 deep overall_ok 未按任务聚合**：改为唯一公式 `not gate_failures`：
+  audit 断链/head 异常、clock.status() 抛异常、idempotency 查询异常 = 任何环境
+  皆 false；agent 未配置 / manifest 缺失 = production false、development warning
+  （本地兜底是设计意图）；响应带 `gate_failures` 列表；HTTP 恒 200 不变。新增
+  `test_deep_overall_ok_aggregates_every_gate`（含 DROP idempotency_registry
+  真变异、_BoomClock 桩、server.env 生产翻转三段）。
+- **P1-3 尾：manifest 年龄 RFC3339**：deep 只读 `verified_at_epoch/mtime_epoch`，
+  真实 Phase 4 `verified_at` RFC3339 字段会被算成 age≈0 假绿。新增
+  `_manifest_verified_epoch`：RFC3339 优先（Z→+00:00 兼容 3.11），显式 `*_epoch`
+  浮点兼容，缺失/不可解析 = manifest_unreadable + gate failure，绝不 age 0。
+  `test_deep_reads_rfc3339_verified_at_not_epoch_guess` 用 26h 前戳钉死
+  （旧代码此处必 0）。
+- **P1-4 Bedrock 六变量声明不实**：现场核实 credential(:109)/network switch
+  (:124/:127) 真 per-call，region/model/daily(:78-90) 仅 __init__ 读。不重构
+  Bedrock；startup_config 模块头、design §3 F2、README、START_PROMPT 全部收紧为
+  「凭据与网络开关支持运行时轮换；region/model/daily 构造时读取」。测试从
+  「源码含 os.environ」grep 改为真实行为：`test_bedrock_credential_rotation_is_a
+  _real_per_call_reread`（真构造 Client→翻 env→_credential() 返回新 key）+
+  `test_bedrock_runtime_reads_are_scoped_behaviourally`（FORBID 开关 per-call 翻
+  转生效、converse 拒绝路径、region/daily 构造时读且**新构造**才见新值）。
+- **P2 provenance 措辞**：实际记录含 host/port/三路径，「只输出布尔/计数」不实。
+  摘要/文档统一改为「非敏感配置值与路径 + secret 仅 present/length」。
+- 文档同步：design §3（loopback/F2/summary）§4（mode=rw 协议、deep 聚合语义、
+  测试 (d)）、tasks 2.3/2.4/3.2/3.3、README、START_PROMPT 同步；negctl docstring
+  五路→六路。Server 增加 `env` 参数（默认 development，fixture 兼容），deep 据此
+  区分 dev/prod 语义。

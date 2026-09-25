@@ -28,21 +28,29 @@ no `requirements.md` by design.
   trigger-shape digest guard, A3 raw-SQL tamper matrix; the
   drop-triggers sentinel test lives only in the negctl sandbox.
 - **Phase 2 / design §3 (B):** one-shot env snapshot for startup-config
-  fields (the Bedrock six stay per-call re-read for key rotation —
-  design §3 F2's documented exception); pure
+  fields (the documented exception, scoped by the Batch-A review: the
+  Bedrock CREDENTIAL and network switch stay per-call re-read for key
+  rotation, while region/model/daily limit belong to
+  `BedrockClient.__init__`); pure
   `parse_startup_env` + separate filesystem `preflight`; closed
-  `PLANPILOT_ENV` set; full secret held (`repr=False`), summary booleans
-  only. (No invented `CONFIG_REFUSING_START` code — §7 naming hygiene.)
+  `PLANPILOT_ENV` set (production refuses loopback binds — P1-2);
+  full secret held (`repr=False`), summary logs non-sensitive config +
+  paths, secret as present/length only (P2 wording).
+  (No invented `CONFIG_REFUSING_START` code — §7 naming hygiene.)
 - **Phase 3 / design §4 (C):** health three-way split with an EXPLICIT
   compat decision: `/health` stays exactly today's DB-touching
   `{"status":"ok","service":"planpilot"}` body for
   `test_requirement_delivery` and Docker back-compat; new `/health/live`
-  (process-only), `/health/ready` (real `BEGIN IMMEDIATE` PLUS an
-  in-transaction write falsifier on an independent per-call RW
-  connection — reservation alone false-greens a read-only file, probed
+  (process-only), `/health/ready` (independent per-call connection on a
+  `file:...?mode=rw` URI — a MISSING path is refused with zero phantom
+  creation, Batch-A P1-1 — plus real `BEGIN IMMEDIATE` and an
+  in-transaction write falsifier — reservation alone false-greens a
+  read-only file, probed
   on Windows; one shared busy_timeout/connect budget; ROLLBACK;
   200/503; no clock write), `/health/deep` (authed — 403 per
-  this codebase's convention — fixed-200 diagnostics, never a gate).
+  this codebase's convention — fixed-200 diagnostics that aggregate
+  EVERY gate into `overall_ok` with dev/prod split, never a gate
+  target itself).
 - **Phase 4 / design §5 (D):** `verify_audit_connection` (pure; the
   head-repair `INSERT OR IGNORE` in `Database.__init__` must NOT run on
   backups) + `tools/verify_backup.py` (`mode=ro&immutable=1`, SHA

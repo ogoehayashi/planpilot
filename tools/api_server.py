@@ -1,5 +1,6 @@
 """Authenticated API for independently validated V1.8 planning."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import datetime
 import json
 import logging
 import os
@@ -75,10 +76,15 @@ class Server(ThreadingHTTPServer):
         super().server_bind()
 
     def __init__(self, address, db, secret, factory_root, clock: Clock | None = None,
-                 ready_timeout_ms: int = 1500, backup_root=None):
+                 ready_timeout_ms: int = 1500, backup_root=None, env: str = "development"):
         if not secret or len(secret) < 32:
             raise ValueError("PLANPILOT_AUTH_SECRET must contain at least 32 characters")
         self.db, self.secret = db, secret
+        # [BATCH-A P1-3] env picks the deep overall_ok policy (§4):
+        # missing backup manifest and an unconfigured agent are hard
+        # failures only in production; the Server stores what main()
+        # resolved from the startup snapshot — no second env read here.
+        self.env = env
         # G4 Phase 3 (design §4): the readiness budget is ONE value from
         # the startup snapshot (ready_timeout_ms; connect timeout AND
         # busy_timeout share it — see _probe_ready). backup_root feeds
@@ -144,21 +150,33 @@ class Handler(BaseHTTPRequestHandler):
 
     def _probe_ready(self):
         """The honest readiness protocol, AS AN ISOLATED FUNCTION so the
-        negctl can mutate ONLY this seam: per-call independent connection
-        on the SAME file path in DEFAULT RW mode (never mode=ro — an ro
-        handle can win a lock yet cannot write, rev.3->4 P0-1), ONE
-        shared budget ready_timeout_ms for connect AND busy_timeout,
-        BEGIN IMMEDIATE (writer reservation) then ROLLBACK. Zero
-        business writes, zero clock.now() (ScenarioClock.now() PERSISTS
-        to clock_session — readiness could stall behind the very lock
-        probed). Claim kept honest: RW-opens + writer reservation
-        acquirable/releasable — NOT durability, NOT free space.
-        Returns (ok, detail)."""
+        negctl can mutate ONLY this seam. Three claims, all probed:
+        (1) the file EXISTS and opens RW — a file: URI with mode=rw
+        refuses to create a missing path (Batch A P1-1: plain
+        sqlite3.connect once false-greened a zero-byte phantom DB);
+        (2) the WRITER reservation is acquirable and releasable — BEGIN
+        IMMEDIATE then ROLLBACK, one shared budget ready_timeout_ms for
+        connect AND busy_timeout; (3) writes are actually POSSIBLE — an
+        in-transaction CREATE falsifier, because sqlite empirically
+        ACCEPTS the reservation on a read-only file and only denies the
+        write (rev.3->4 P0-1). Zero business writes, zero clock.now()
+        (ScenarioClock.now() PERSISTS to clock_session — readiness could
+        stall behind the very lock probed). Claim kept honest: exists +
+        RW + writer reservation + write-capable — NOT durability, NOT
+        free space. Returns (ok, detail)."""
         budget = self.server.ready_timeout_ms / 1000.0
         path = str(self.server.db.path)
         conn = None
         try:
-            conn = sqlite3.connect(path, timeout=budget)
+            # [BATCH-A P1-1 fix, reviewer-probed + re-probed this batch]
+            # plain sqlite3.connect CREATES a missing file — readiness
+            # once false-greened a zero-byte phantom DB. Open the
+            # EXISTING file only: file: URI with mode=rw refuses to
+            # create AND refuses a vanished path (OperationalError ->
+            # 503), while staying equivalent to the default RW open on
+            # an existing file.
+            uri = Path(path).resolve().as_uri() + "?mode=rw"
+            conn = sqlite3.connect(uri, uri=True, timeout=budget)
             conn.execute(f"PRAGMA busy_timeout={self.server.ready_timeout_ms}")
             conn.execute("BEGIN IMMEDIATE")
             # [implementation note, design §4 test-(b)] BEGIN IMMEDIATE
@@ -200,12 +218,18 @@ class Handler(BaseHTTPRequestHandler):
         # (same seam every protected route uses; no invented 401).
         self._auth("plan")
         server = self.server
+        is_prod = getattr(server, "env", "development") == "production"
         checks = {}
+        gate_failures = []  # the ONE overall_ok source — every check lands here
         try:
-            checks["audit_chain_ok"] = bool(server.db.verify_audit())
+            ok = bool(server.db.verify_audit())
+            checks["audit_chain_ok"] = ok
+            if not ok:
+                gate_failures.append("audit_chain")
         except Exception as exc:
             checks["audit_chain_ok"] = False
             checks["audit_error"] = type(exc).__name__
+            gate_failures.append("audit_chain")
         try:
             with server.db.lock:
                 head = server.db.conn.execute(
@@ -216,24 +240,44 @@ class Handler(BaseHTTPRequestHandler):
             checks["audit_head"] = {
                 "entry_count": head["entry_count"] if head else 0,
                 "head_hash": head["event_hash"] if head else "0" * 64}
-            checks["idempotency_rows"] = idem["n"] if idem else 0
+            if idem is None:
+                checks["idempotency_error"] = "missing_row"
+                gate_failures.append("idempotency")
+            else:
+                checks["idempotency_rows"] = idem["n"]
         except Exception as exc:
             checks["audit_head"] = None
             checks["idempotency_error"] = type(exc).__name__
+            gate_failures.append("idempotency")
         try:
             checks["clock"] = server.clock.status()
+            # clock.status() carries no ok/fatal field by shape (wall and
+            # scenario both render fine or RAISE — e.g. the G4 A1
+            # anchor-missing RuntimeError); a raise is the abnormal case
+            # and lands in gate_failures via the except below.
         except Exception as exc:
             checks["clock"] = {"error": type(exc).__name__}
+            gate_failures.append("clock")
         try:
-            checks["agent_configured"] = bool(server.inference.status().get(
+            configured = bool(server.inference.status().get(
                 "configured", False))
+            checks["agent_configured"] = configured
+            # [BATCH-A P1-3 semantics] NOT configured is a real failure in
+            # production; in development the local fallback is expected,
+            # so it warns without flipping overall_ok. A status() that
+            # RAISES is different — always a failure, any env (except
+            # below).
+            if not configured and is_prod:
+                gate_failures.append("agent")
         except Exception as exc:
             checks["agent_configured"] = False
             checks["agent_error"] = type(exc).__name__
+            gate_failures.append("agent")
         # Backup age comes from the V3 manifest ONLY — NEVER a newest-file
-        # mtime guess (P1-4). Phase 4 has not run yet, so in practice this
-        # branch answers no_verified_manifest; the lookup shape is here so
-        # Phase 4 only has to PRODUCE the manifest, not rewire deep.
+        # mtime guess (P1-4). The stamp is the Phase 4 field `verified_at`
+        # (RFC3339; epoch floats accepted only with an explicit _epoch
+        # suffix) — reading a non-existent key would clock every backup at
+        # ~age 0, the false green this seam exists to avoid (Batch A P1-3).
         manifest = None
         if server.backup_root is not None:
             try:
@@ -242,23 +286,48 @@ class Handler(BaseHTTPRequestHandler):
                     manifest = json.loads(mf.read_text(encoding="utf-8"))
             except Exception:
                 manifest = None
-        if isinstance(manifest, dict) and manifest.get("path"):
-            checks["backup"] = {"state": "manifest",
-                                "age_seconds": round(
-                                    max(0.0, time.time() - float(
-                                        manifest.get("verified_at_epoch",
-                                                     manifest.get("mtime_epoch",
-                                                                  time.time())))), 3),
-                                "sha256": manifest.get("sha256")}
-        else:
+        if not isinstance(manifest, dict) or not manifest.get("path"):
             checks["backup"] = {"state": "no_verified_manifest"}
-        core = (checks.get("audit_chain_ok") is True
-                and checks.get("audit_head") is not None)
-        body = {"overall_ok": bool(core), "service": "planpilot",
-                "probe": "deep", "checks": checks}
-        # Deep is DIAGNOSTICS: HTTP stays 200 even when overall_ok is
-        # False; it must never be a container/gate probe target (§4).
+            if is_prod:
+                gate_failures.append("backup")
+        elif self._manifest_verified_epoch(manifest) is None:
+            checks["backup"] = {"state": "manifest_unreadable",
+                                "verified_at": manifest.get("verified_at")}
+            gate_failures.append("backup")
+        else:
+            age = max(0.0, time.time() - self._manifest_verified_epoch(manifest))
+            checks["backup"] = {"state": "manifest",
+                                "age_seconds": round(age, 3),
+                                "sha256": manifest.get("sha256")}
+        # [BATCH-A P1-3] ONE semantic: every gate check above appends to
+        # gate_failures; there is no second core formula. HTTP stays 200
+        # in EVERY case — deep is DIAGNOSTICS and must never be a
+        # container/gate probe target (§4).
+        body = {"overall_ok": not gate_failures, "service": "planpilot",
+                "probe": "deep", "checks": checks,
+                "gate_failures": gate_failures}
         self._json(body)
+
+    @staticmethod
+    def _manifest_verified_epoch(manifest):
+        """RFC3339 `verified_at` (the Phase 4 §5.1 field) -> unix seconds.
+        An explicit *_epoch float is accepted for callers that store one;
+        a missing/unparsable stamp returns None — NEVER age 0. Z suffix
+        is swapped before fromisoformat because this venv is Python 3.11
+        (bare 'Z' only parses from 3.11+ onward; the swap is belt and
+        braces)."""
+        raw = manifest.get("verified_at")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                return datetime.datetime.fromisoformat(
+                    raw.strip().replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return None
+        for key in ("verified_at_epoch", "mtime_epoch"):
+            val = manifest.get(key)
+            if isinstance(val, (int, float)) and val > 0:
+                return float(val)
+        return None
 
     def _handle_publish(self, body):
         # p2-5 (design §4, §6.2): auth stays in the route — a
@@ -541,15 +610,19 @@ def main():
     # startup field comes from that snapshot via the pure parser + the
     # I/O preflight. A refusal means ZERO Database/Clock construction and
     # ZERO sockets — same shape the Phase 4 lock gate will use.
-    # (Bedrock's six PLANPILOT_BEDROCK_* vars deliberately keep per-call
-    # reads inside bedrock_client for credential rotation.)
+    # (Per the Batch-A review the exception is exactly TWO runtime reads:
+    # the Bedrock credential and the LLM-network switch, both re-read per
+    # call inside bedrock_client for rotation; region/model/daily limit
+    # are read once when BedrockClient is constructed. None of them
+    # enters StartupConfig.)
     snapshot = dict(os.environ)
     try:
         cfg, warnings = startup_or_die(snapshot)
     except StartupConfigError as exc:
         raise SystemExit(f"startup config refused: {exc}") from exc
-    # G4 2.3: log WHERE config came from, once, redacted (booleans and
-    # counts only — the secret value never enters this record).
+    # G4 2.3: log WHERE config came from, once, redacted — non-sensitive
+    # config values and paths are fine to show; the secret itself only
+    # ever appears as present/length, never its value.
     LOGGER.info("startup config provenance: %s", json.dumps(
         config_provenance(cfg), sort_keys=True))
     for w in warnings:
@@ -565,7 +638,7 @@ def main():
               flush=True)
     server = Server((cfg.host, cfg.port), db, cfg.auth_secret, cfg.factory_root,
                     clock=clock, ready_timeout_ms=cfg.ready_timeout_ms,
-                    backup_root=cfg.backup_root)
+                    backup_root=cfg.backup_dir, env=cfg.env)
     try:
         server.serve_forever()
     finally:

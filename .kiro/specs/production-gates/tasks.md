@@ -119,12 +119,22 @@ drift alignment; architecture unchanged)
       production non-loopback + backup existence. Return types unified
       tuple across design AND tasks (round-3 P1-5).
 - [x] 2.3 api_server `main()` one snapshot; `Server.__init__` consumes
-      cfg; `PLANPILOT_ENV` set (Dockerfile/compose do NOT set it today
+      cfg (Batch-A P0 fix: the legal path passed `cfg.backup_root` —
+      a field that does not exist on StartupConfig; the real name is
+      `backup_dir`, now pinned by a main()-assembly test that runs the
+      VALID config end to end); `PLANPILOT_ENV` set (Dockerfile/compose
+      do NOT set it today
       — grep-verified; Phase 5 ADDS `PLANPILOT_ENV=production` to both
-      actually read, not just set); `config_provenance()` redacted.
+      actually read, not just set); `config_provenance()` redacted
+      (P2 wording: non-sensitive values + paths are logged; the secret
+      only as present/length — never booleans/counts-only, which
+      understated what the record carries).
 - [x] 2.4 unit: parse purity (dict only, no fs); dev with a VALID secret
       boots, dev WITHOUT one still rejects (never claimed to boot);
-      prod localhost/missing-secret => StartupConfigError; repr never
+      prod localhost/missing-secret => StartupConfigError (Batch-A
+      P1-2: the loopback REFUSAL is now implemented in parse —
+      127.0.0.1/::1/localhost + production = error; Phase 5 compose
+      binds 0.0.0.0); repr never
       leaks the secret. Bedrock per-call key re-read is an explicit
       documented exception (rotation), not folded into the boot snapshot.
 
@@ -132,22 +142,26 @@ drift alignment; architecture unchanged)
 
 - [x] 3.1 `/health` byte-for-byte unchanged (incl. SELECT 1 under
       db.lock; the one consumer test:157 unaffected); add `/health/live`.
-- [x] 3.2 `/health/ready`: independent per-call connection opened with
-      PLAIN `sqlite3.connect(db.path)` — default mode IS read-write.
-      (Empirically pinned at this batch: a `?mode=rw` URI also works on
-      an existing file but fails on a new one; plain connect is chosen
-      because it works in both states and negctl mutation #4 pins that
-      it is NOT downgraded to ro/SELECT.) ONE budget
+- [x] 3.2 `/health/ready`: independent per-call connection opened as a
+      `file:<resolved-path>?mode=rw` URI (`uri=True`) — Batch-A P1-1
+      review falsified the previous PLAIN `sqlite3.connect(path)`: it
+      silently CREATES a zero-byte phantom DB when the file vanished
+      and readiness then false-greens it. `mode=rw` refuses a missing
+      path (CANTOPEN => 503, file still absent after the probe — test
+      (d) + negctl mutation #6) and on an existing file is exactly the
+      default RW open the probe needs. ONE budget
       `ready_timeout_ms` for connect timeout AND
-      `PRAGMA busy_timeout`, `BEGIN IMMEDIATE` -> `ROLLBACK`
+      `PRAGMA busy_timeout`, `BEGIN IMMEDIATE` -> in-txn CREATE
+      falsifier -> `ROLLBACK`
       -> 200 `{status,service,probe:"ready",db:"ok"}` (body per design
       §4; the tasks' old `ready:true` shorthand never matched the
       design); **NO clock.now() write, NO checked_at**;
-      locked/read-only/ro-open/corrupt => 503. Honest
-      claim (round-4): opens-RW + writer-reservation only, NOT a
-      durability/free-space proof.
-      Falsifier test: an ro connection that wins a reserved lock but is
-      denied INSERT must NOT be accepted as ready.
+      missing/locked/read-only/ro-open/corrupt => 503. Honest
+      claim (round-4 + P1-1): exists + opens-RW + writer-reservation +
+      write-capable — NOT a durability/free-space proof.
+      Falsifier tests: an ro connection that wins a reserved lock but is
+      denied the write must NOT be accepted as ready; a missing path
+      must NOT be created by the probe.
 - [x] 3.3 `/health/deep` auth via `self._auth("plan")` — the repo Bearer
       convention (rev.5b fact-check: an `X-PlanPilot-Token` header does not
       exist anywhere in this codebase; design §4 names `_auth`), so
@@ -157,8 +171,15 @@ drift alignment; architecture unchanged)
       (`kind/now/scenario/uptime_seconds` + conditional `session`),
       agent configured flag, idempotency COUNT, backup age ONLY from
       `last_verified_backup.json` manifest (absent =>
-      `no_verified_manifest`, NOT latest-file mtime); any check fail =>
-      200 with ok:false (never a readiness target).
+      `no_verified_manifest`, NOT latest-file mtime; RFC3339
+      `verified_at` parsed via `datetime.fromisoformat`, Batch-A P1-3 —
+      the old epoch-keys-only reader false-greened real Phase-4
+      manifests at age~0). [P1-3 ONE semantic] `overall_ok` aggregates
+      EVERY gate: audit/clock-raise/idempotency-raise are failures in
+      any env; unconfigured agent + missing manifest fail in
+      PRODUCTION, warn in development (dev runs the local fallback by
+      design). HTTP stays 200 with `gate_failures` listing names
+      (never a readiness target).
 - [x] 3.4 unit: /health body unchanged; three probes distinct; external
       write-lock (real second conn) -> ready 503 -> release 200;
       read-only FILE -> 503 falsifier (in-txn CREATE; reservation alone

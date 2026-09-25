@@ -89,9 +89,13 @@ PlanPilot repository.
      诊断一律走离线只读 CLI（不 import Server/Database 类）；hard-kill 测试必须包含"重跑 restore 收敛"。
    - **startup 一次性解析**：`parse_startup_env` 纯（不触文件系统）与
      `preflight` I/O 两层分离；`PLANPILOT_ENV` 封闭 `development|production`
-     未知即拒；secret 全值入 config 对象但 `repr=False`，summary 只输出
-     布尔；启动配置字段只在进程启动时快照一次；Bedrock 六个变量保留
-     per-call 重读以支持凭据轮换（design §3 F2，唯一例外）。
+     未知即拒，production 另拒 loopback 绑定（127.0.0.1/::1/localhost，
+     Batch-A P1-2；Phase 5 compose 显式 0.0.0.0）；secret 全值入 config
+     对象但 `repr=False`，summary 输出非敏感配置与路径、secret 仅
+     present/length（Batch-A P2 措辞修正）；启动配置字段只在进程启动时
+     快照一次；例外按 Batch-A 评审收紧：Bedrock **凭据与网络开关**
+     per-call 重读以支持轮换，region/model/daily limit 在
+     BedrockClient 构造时读取（design §3 F2，非 StartupConfig 字段）。
    - **不发明合同状状态码**：`RECOVERY_PENDING`/`CONFIG_REFUSING_START`
      禁用；内部类型 `RecoveryGateState.PENDING` / `StartupConfigError`，
      报告值小写 `recovery_pending`；并加测试锁死合同 error_code 枚举与

@@ -53,7 +53,8 @@ def live_server(tmp_path):
     api = _api_module()
     fixed = clock()
     db = Database(tmp_path / "state.db", clock=fixed)
-    server = api.Server(("127.0.0.1", 0), db, SECRET, ROOT / "data", clock=fixed)
+    server = api.Server(("127.0.0.1", 0), db, SECRET, ROOT / "data", clock=fixed,
+                        backup_root=tmp_path / "bk")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield api, server, db
@@ -240,6 +241,41 @@ def test_ready_refuses_corrupt_file_not_false_green(tmp_path):
         db.close()
 
 
+def test_ready_503_when_db_file_missing_and_never_creates_it(tmp_path):
+    """[BATCH-A P1-1] The reviewer's exact repro: plain sqlite3.connect
+    CREATED a zero-byte DB when the file vanished, BEGIN/CREATE/ROLLBACK
+    all succeeded on the phantom, and readiness returned 200 for a
+    database that never existed. mode=rw must refuse; the file must
+    STILL be absent after the probe."""
+    api = _api_module()
+    ghost = tmp_path / "vanished.db"
+    fixed = clock()
+    db = Database(tmp_path / "real.db", clock=fixed)
+    server = api.Server(("127.0.0.1", 0), db, SECRET, ROOT / "data",
+                        clock=fixed)
+    original_path = server.db.path
+    server.db.path = str(ghost)          # readiness now aims at nothing
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert not ghost.exists()
+        status, body = _get(server, "/health/ready")
+        assert status == 503
+        # the probe must not have conjured the file into existence
+        assert not ghost.exists(), "readiness created a phantom DB!"
+        assert "error" in body["db"].lower() or "unable" in body["db"].lower()
+        # no -wal/-shm sidecars either (URI open failed before journaling)
+        assert not (tmp_path / "vanished.db-wal").exists()
+        assert not (tmp_path / "vanished.db-shm").exists()
+    finally:
+        server.db.path = original_path
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        db.close()
+        ghost.unlink(missing_ok=True)    # if a regression EVER creates it
+
+
 # -------------------------------------------------------------- 3.3 deep --
 
 def test_deep_requires_plan_scope_403_convention(live_server):
@@ -292,6 +328,106 @@ def test_deep_200_always_even_when_checks_fail(live_server):
 
 
 # ---------------------------------------------------- C4 assembly for Ph4 --
+
+def test_deep_overall_ok_aggregates_every_gate(live_server):
+    """[BATCH-A P1-3] overall_ok must be the conjunction of ALL gates,
+    not the audit-chain pair the old code used. Development semantics:
+    unconfigured agent and a missing manifest WARN but do not flip
+    overall_ok (local fallback is the expected dev mode); production
+    semantics flip BOTH. A broken idempotency table and a clock that
+    RAISES are failures in ANY env. HTTP stays 200 throughout."""
+    _, server, db = live_server
+    token = issue_token("auditor", "planner", SECRET)
+    db.audit("PLAN-AGG-1", "tester", "g4.agg.seed", {"probe": "seed"})
+
+    def deep():
+        status, body = _get(server, "/health/deep", token)
+        assert status == 200
+        return body
+
+    # dev, no manifest, no Bedrock key: warnings, still green
+    body = deep()
+    assert body["overall_ok"] is True, body["gate_failures"]
+    assert body["checks"]["agent_configured"] is False
+    assert body["checks"]["backup"] == {"state": "no_verified_manifest"}
+    assert body["gate_failures"] == []
+
+    # idempotency table destroyed -> NOT ok in any env
+    with db.lock:
+        db.conn.execute("DROP TABLE idempotency_registry")
+        db.conn.commit()
+    body = deep()
+    assert body["overall_ok"] is False
+    assert "idempotency" in body["gate_failures"]
+    with db.lock:
+        db.conn.execute(
+            "CREATE TABLE idempotency_registry (scope TEXT NOT NULL,"
+            " idem_key TEXT NOT NULL, run_id TEXT NOT NULL,"
+            " PRIMARY KEY (scope, idem_key))")
+        db.conn.commit()
+    assert deep()["overall_ok"] is True   # repaired -> green again
+
+    # clock that RAISES -> NOT ok (the G4 A1 anchor-missing shape is a
+    # RuntimeError out of status(); pinned here with a minimal stand-in
+    # — the except branch of _handle_deep is the seam under test)
+    class _BoomClock:
+        kind = "scenario"
+
+        def status(self):
+            raise RuntimeError("scenario clock: anchor row missing")
+    original = server.clock
+    server.clock = _BoomClock()
+    try:
+        body = deep()
+        assert body["overall_ok"] is False
+        assert "clock" in body["gate_failures"]
+        assert "RuntimeError" in body["checks"]["clock"]["error"]
+    finally:
+        server.clock = original
+
+    # PRODUCTION env flip: same unconfigured agent + missing manifest
+    # now DO flip overall_ok, and the failure names appear
+    server.env = "production"
+    try:
+        body = deep()
+        assert body["overall_ok"] is False
+        assert "agent" in body["gate_failures"]
+        assert "backup" in body["gate_failures"]
+    finally:
+        server.env = "development"
+
+
+def test_deep_reads_rfc3339_verified_at_not_epoch_guess(live_server):
+    """[BATCH-A P1-3 tail] The Phase 4 §5.1 manifest carries RFC3339
+    `verified_at`; the old reader looked for verified_at_epoch/mtime_epoch
+    only and clocked EVERY real manifest at age ~0 — a false green.
+    RFC3339 must win; an absent/unparsable stamp is NOT age 0."""
+    _, server, _ = live_server
+    token = issue_token("auditor", "planner", SECRET)
+    server.backup_root.mkdir(parents=True, exist_ok=True)
+    mf = server.backup_root / "last_verified_backup.json"
+    from datetime import datetime, timedelta, timezone
+    stamp = (datetime.now(timezone.utc) - timedelta(hours=26)).isoformat()
+    mf.write_text(json.dumps({"path": "planpilot-verify.sqlite",
+                              "sha256": "a" * 64, "verified_at": stamp}),
+                  encoding="utf-8")
+    status, body = _get(server, "/health/deep", token)
+    assert status == 200
+    backup = body["checks"]["backup"]
+    assert backup["state"] == "manifest"
+    age = backup["age_seconds"]
+    # ~26h: the OLD key lookup would have returned ~0 here
+    assert 25 * 3600 < age < 27 * 3600, age
+    # garbage stamp -> manifest_unreadable + gate failure, never age 0
+    mf.write_text(json.dumps({"path": "p.sqlite", "verified_at": "not-a-date"}),
+                  encoding="utf-8")
+    status, body = _get(server, "/health/deep", token)
+    assert status == 200
+    assert body["checks"]["backup"]["state"] == "manifest_unreadable"
+    assert body["overall_ok"] is False
+    assert "backup" in body["gate_failures"]
+    mf.unlink()
+
 
 def test_probe_is_isolated_function_for_os_lock_insertion():
     """Phase 4 must be able to slot the OS lock/recovery gate between

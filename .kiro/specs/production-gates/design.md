@@ -301,23 +301,37 @@ feeds the snapshot to both, then constructs only from the parsed object
 
 - `PLANPILOT_ENV` closed to `development|production` — unknown value
   refuses (StartupConfigError, internal class, never a contract code).
+  production additionally REFUSES loopback binds (127.0.0.1/::1/
+  localhost, same spellings clock.py uses) — Batch-A P1-2: tasks 2.4
+  promised it and the old parse accepted it; Phase 5 compose binds
+  0.0.0.0 explicitly. development keeps the loopback default.
 - secret: FULL VALUE held on the dataclass via
   `field(repr=False, compare=False)` — stdlib dataclasses only, NO
   pydantic `SecretStr` (no new deps; rev.3's SecretStr wording was
   wrong for this repo). ≥32 chars enforced in parse; `summary()`
-  exposes only booleans/counts.
+  exposes NON-SENSITIVE config values and paths (env/host/port/the
+  three paths/clock mode/timeout) plus present/length for the secret —
+  the secret VALUE never appears (Batch-A P2 review: the old
+  "booleans/counts only" claim was false; host/port/paths were logged).
 - port/host/db/factory_root/backup_dir string fields;
   `ready_timeout_ms` default 1500; clock mode passthrough.
 - preflight: factory_root itself must be a directory (not just parent);
   db dir creatable/writable; backup dir creatable if configured;
   port bindable.
-- **Bedrock exception (intentional, documented):**
-  `PLANPILOT_BEDROCK_*` (API_KEY / KEY_FILE / REGION / MODEL /
-  DAILY_TOKENS / FORBID_LLM_NETWORK) stay PER-CALL env reads
-  (bedrock_client.py:78-127) so credential rotation does not require a
-  restart. The one-shot snapshot rule applies to STARTUP config only;
-  a test pins that bedrock_client still re-reads (guards against a
-  well-meaning future "snapshot" refactor).
+- **Bedrock exception (intentional, documented; claim SCOPED by the
+  Batch-A review — rev.5b's blanket "six vars stay PER-CALL" was not
+  what the code does):** the CREDENTIAL (`PLANPILOT_BEDROCK_API_KEY` /
+    `PLANPILOT_BEDROCK_KEY_FILE`, resolved inside `_credential()`,
+  bedrock_client.py:109) and the NETWORK SWITCH
+  (`PLANPILOT_FORBID_LLM_NETWORK`, read in `status()`/`converse()`,
+  :124/:127) ARE per-call — key rotation needs no restart. `REGION` /
+  `MODEL` / `DAILY_TOKENS` are read ONCE in `BedrockClient.__init__`
+  (bedrock_client.py:78-90): runtime rotation of THOSE requires a
+  process restart, which is fine because they are not StartupConfig
+  fields and the snapshot rule does not cover them. The rotation test
+  constructs a REAL client and flips the env (test_startup_config),
+  never a source-text grep (guards remain against a well-meaning
+  future "snapshot everything" refactor).
 - `Server.__init__` secret check (api_server.py:72-73) stays byte-for-byte:
   in EVERY environment a missing/short secret is refused — that behavior
   is what dev relies on too ("dev with a valid secret boots"; rev.3's
@@ -342,17 +356,21 @@ stays green unchanged). New paths:
   [REV.3→4 P0-1] rev.3's `mode=ro` connection was falsified by the
   reviewer: an ro connection can win a reserved lock yet still cannot
   write (`attempt to write a readonly database`). Correct protocol:
-  independent PER-CALL connection in default RW mode (plain
-  `sqlite3.connect(path)`; `?mode=rw` was probed and is equivalent on an
-  existing file but fails on a fresh one) with a short `busy_timeout`
-  (= `ready_timeout_ms`, default 1500, ALSO the connect timeout) →
+  independent PER-CALL connection opened `file:<resolved>?mode=rw` via
+  URI — Batch-A P1-1 review falsified plain `sqlite3.connect(path)`:
+  it silently CREATES a zero-byte file when the path vanished, the
+  probe then succeeds and readiness false-greens a phantom DB.
+  `mode=rw` refuses a missing path (SQLITE_CANTOPEN → 503, zero file
+  created — pinned by test and by negctl mutation #6) and behaves like
+  the default RW open on an existing file. Single budget
+  (`ready_timeout_ms`, default 1500, ALSO the connect timeout) →
   `BEGIN IMMEDIATE` → in-transaction `CREATE TABLE _pp_ready_probe(x)`
   → `ROLLBACK`, zero business writes. [IMPL NOTE, this batch, probed on
   Windows under BOTH journals] reservation alone is NOT the falsifier:
-  sqlite ACCEPTS `BEGIN IMMEDIATE` on a chmod-444 database and only
-  denies the write — so the probe performs one in-txn DDL (rolled back,
-  zero residue, pinned by test) and a read-only file therefore maps to
-  503, not false-green 200. Success → 200
+  sqlite ACCEPTS `BEGIN IMMEDIATE` on a chmod-444 database (mode=rw
+  opens it too) and only denies the write — so the probe performs one
+  in-txn DDL (rolled back, zero residue, pinned by test) and a
+  read-only file therefore maps to 503, not false-green 200. Success → 200
   `{status, service, probe:"ready", db:"ok"}`. REVOKED: `checked_at` —
   the server's ScenarioClock.now() PERSISTS to clock_session, making
   readiness itself a write path (and it could stall behind the very
@@ -364,14 +382,26 @@ stays green unchanged). New paths:
   200; (b) DB file/chmod or directory made unwritable (POSIX) or the
   path opened read-only → ready MUST NOT report 200 — the probe itself
   gets SQLITE_READONLY/CANTOPEN and maps to 503;
-  (c) probe performs no INSERT/UPDATE (instrumented: rollback-only).
+  (c) probe performs no INSERT/UPDATE (instrumented: rollback-only);
+  (d) Batch-A P1-1: target path MISSING → 503 AND the file still does
+  not exist after the probe (no phantom creation, no sidecars).
 - `GET /health/deep` — authenticated (`self._auth("plan")`, so
   unauthenticated → **403**, this codebase's convention), always 200
   with `overall_ok: bool`; sub-probes: verify_audit (read-only walk
   §5), chain head vs recomputed, clock.status() REAL shape
   (`kind/now/scenario/uptime_seconds` + conditional `session` sub-dict), agent status
-  configured flag. Deep is diagnostics; it is structurally never a
-  probe target.
+  configured flag, backup age from the §5 V3 manifest. [BATCH-A P1-3]
+  ONE aggregation semantic — `overall_ok` is the conjunction of every
+  gate, no second core formula: audit-chain/head break, a clock or
+  idempotency query that RAISES, and (production) an unconfigured agent
+  or a missing/unreadable manifest each append to `gate_failures`;
+  in DEVELOPMENT an unconfigured agent and a missing manifest are
+  expected (local fallback) and do NOT flip overall_ok. Manifest age
+  parses the RFC3339 `verified_at` field (an explicit `*_epoch` float
+  is honoured only with that suffix; a missing/unparsable stamp is a
+  gate failure, NEVER age 0 — the old epoch-only lookup false-greened
+  every real Phase-4 manifest at ~0). HTTP stays 200 in every case.
+  Deep is diagnostics; it is structurally never a probe target.
 - Dockerfile HEALTHCHECK and deploy-gate probes MUST target
   `/health/ready`; compose api service additionally mounts backups
   read-only because deep exposes backup age — age comes from the
