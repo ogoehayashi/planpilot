@@ -25,3 +25,9 @@ tests/evidence/_scratch/
 .vscode/
 .idea/
 .DS_Store
+
+# [G4 5.1] binary wheels are a build artifact and live OUTSIDE the repo
+# (tools/build_wheelhouse.py default); this backstop stops anyone
+# sneaking a wheel INTO the tree where the manifest would go stale.
+*.whl
+.wheelhouse/

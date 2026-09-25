@@ -1376,3 +1376,60 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   关闭、不得在任何汇总里记 COMPLETE。
 - 数字（提交前）：定向 startup+health+clock 53+7（param 扩容后）passed；
   unit / negctl / full 见提交报告。合同 SHA 不变；devlog append-only。
+
+## 2026-09-25 — G4 Phase 5 离线三件（5.1 wheelhouse / 5.2 deploy gate / 5.4 EVAL 冻结锁）
+
+Batch A 封口 `123a21d`（reviewer 独立复核 60 targeted passed）后，按批准
+范围推进 Phase 5 的 5.1/5.2/5.4；5.3（Docker）按 spec 保持未勾，G4 整体
+保持 BLOCKED 直至有 Docker 环境跑通容器 + /health/ready。
+
+**5.1 wheelhouse（单一布局，round-4 P1-5）**
+- `tools/build_wheelhouse.py`（tracked）：download（pin
+  manylinux2014_x86_64 / cp311 / only-binary，两本 requirements pin 集
+  为唯一事实源）+ verify（manifest↔磁盘双射：sha256、字节数、requirements
+  漂移检查、.gitignore *.whl 反污染检查）。
+- `deploy/wheelhouse/MANIFEST.json`（tracked，5,639 bytes）：27 个 wheels、
+  59,929,033 bytes、逐包 sha256/size + 生成 recipe。
+- wheels 本体在仓库外 `E:/PlanPilot-Hackathon/planpilot-wheelhouse/`
+  （27 files 实测），`.gitignore` 加 `*.whl` + `.wheelhouse/` 兜底。
+- 真实验证：`verify` 退出 0，`wheelhouse OK: 27 wheels` 输出在
+  g4-probe-staging 日志。
+
+**5.2 deploy gate（`tools/deploy_gate.py`，342 行，三层）**
+- L1 纯逻辑 `evaluate_env(env, profile)`：env 合法性、profile↔PLANPILOT_
+  ENV 一致性（production profile + unset env = FAIL，因 startup 默认
+  development）、secret ≥32、production 拒 loopback（复用 startup 的
+  结构性 is_loopback_host，零复制）。
+- L2 文件系统探针：tracked 秘密扫描（regex 保持严格，两个对抗性 fixture
+  文件按名排除并在代码注释+测试注释中登记理由）、Bedrock 凭据 =
+  API_KEY env XOR managed key file（两通道同设=FAIL；key file 必须在
+  仓库外、非 symlink、posix 下 mode≤0600，Windows 平台局限如实写进
+  finding 文案）、wheelhouse verify、git 工作树干净。
+- L3 外部：docker binary（缺失=BLOCKED 且文案点名 G4 不得据此关闭）、
+  可选 HTTP 探针（不可达=BLOCKED）。
+- 退出码 0=PASS / 1=FAIL / 2=BLOCKED（FAIL 优先），CLI 无 --gate 时
+  全层。实测本机：`--gate all` L3 docker=BLOCKED、bedrock=BLOCKED
+  （无凭据，never pass），exit 1 由未冻结工作树 FAIL 触发（提交后复跑
+  见下方 attestation）。
+- 测试：tests/unit/test_deploy_gate.py 14 项（含 profile 双向、loopback、
+  key-file 四形态、docker BLOCKED、exit 优先级、全 CLI monkeypatch
+  shim PATH 实测 exit 2）。
+
+**5.4 EVAL 冻结锁（`tools/run_evals.py` 零字节改动）**
+- `git status` 证实 run_evals.py/run_smoke_harness.py 相对 HEAD 无改动；
+  run_evals sha256=6285b782…，run_smoke sha256=47da9ba9…（后者以
+  sha256sum 实测取回，我最初手写的 f18d573a 是错的——按实现事实修正）。
+- tests/unit/test_eval_freeze_54.py 10 项：双 SHA 字节锁；真实 summary
+  形状 cases=30 passed=0 failed=0 blocked=30 + exit 1 + EVIDENCE.json
+  (0,0,30)；smoke 默认 OUT=compact-smoke ≠ runtime-eval 且 run() 对
+  runtime-eval raise ValueError；argparse 面只允许 --output（防旁路开关
+  悄悄长出）；exit 规则行逐字锁。
+
+**验收（原始日志 g4-probe-staging/phase5-*.log / r3-full.log）**
+- 定向两块 24 passed；合同 SHA 不变 b92e53f4…；wheelhouse verify 0；
+  deploy_gate 本机如实 BLOCKED/FAIL（未粉饰）。
+- unit/negctl/full 冻结树数字见下一条 attestation 提交报告。
+
+**如实边界（不变）**：5.3 未勾；Docker 缺席⇒G4 整体 BLOCKED；正式 EVAL
+保持 0 PASS / 30 BLOCKED；未在真实容器跑过 /health/ready 前，任何
+"deploy-ready" 声称都不成立。

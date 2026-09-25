@@ -257,26 +257,37 @@ drift alignment; architecture unchanged)
 
 ## Phase 5 — deployment boundary (design §6)
 
-- [ ] 5.1 `deploy/wheelhouse/MANIFEST.json` (tracked) + SHA +
+- [x] 5.1 `deploy/wheelhouse/MANIFEST.json` (tracked) + SHA +
       `tools/build_wheelhouse.py` (tracked) + out-of-repo wheel dir
       (single layout, round-4 P1-5 — old three-name drift retired)
       committed; binary wheels NOT in Git (build-artifact, out-of-repo).
-- [ ] 5.2 `tools/deploy_gate.py`: pure logic (env, secret, path, lock
+      DELIVERED 2026-09-25: MANIFEST.json (27 linux wheels, sha256+sizes)
+      + tools/build_wheelhouse.py; verify green against
+      E:/PlanPilot-Hackathon/planpilot-wheelhouse (repo-external).
+- [x] 5.2 `tools/deploy_gate.py`: pure logic (env, secret, path, lock
       rules) + I/O probes (docker, aws, bedrock, wheelhouse); Bedrock
       credential = API_KEY env OR a managed key file (both allowed);
       a check with no runnable target => BLOCKED (never a false PASS).
+      DELIVERED 2026-09-25: layers env/fs/external; docker absent on
+      this host => probe reports BLOCKED and CLI exits 2;
+      tests/unit/test_deploy_gate.py.
 - [ ] 5.3 Docker: Dockerfile HEALTHCHECK switches to `/health/ready`;
       compose api mounts backups read-only (deep age). **Docker is a G4
       acceptance item: docker absent => G4 stays BLOCKED; do NOT tick
       5.3 as G4-complete.** Only AWS/formal-EVAL are permitted non-goal
       BLOCKED edges.
-- [ ] 5.4 EVAL: `run_evals.py` byte-unchanged (hash-locked);
+- [x] 5.4 EVAL: `run_evals.py` byte-unchanged (hash-locked);
       30 BLOCKED / 0 PASS / exit 1 stays (acceptance = the REAL
       summary lines, no `BLOCKED:` token exists); smoke harness output
       stays in ITS OWN default `tests/evidence/compact-smoke`
       (run_smoke_harness.py:22 — rev.4 wrongly wrote runtime-eval; the
       script already FORBIDS writing under runtime-eval, keep + test
       that guard); no new bypass switch.
+      DELIVERED 2026-09-25: tests/unit/test_eval_freeze_54.py pins
+      both tool SHAs (run_evals 6285b782…, smoke 47da9ba9… — file
+      confirmed byte-clean vs HEAD adbeb48), real 30-blocked summary
+      shape, compact-smoke≠runtime-eval default + write-forbid guard,
+      and an exact `--output`-only argparse surface (no bypass flag).
 
 ## Phase 6 — evidence, negctl, closure
 
