@@ -1460,3 +1460,35 @@ full **835 passed**，全部 EXITCODE=0；词表守卫 PASS
 测试在链内为绿）。算术对账：首轮 unit 为 2 failed + 824 passed
 （共 826 项），修复后 826 全绿，总数不变；full 835 = 826 + 9。Phase 5 离线三件至此验证闭环；
 5.3 仍未勾，G4 整体保持 BLOCKED（docker/AWS 之外无新增声称）。
+
+
+## 2026-09-25 — G4 Phase 5.2.1 硬化提交（评审三 P1 假判定 + 两 P2）
+
+评审对 5.2 提出三个可复现假判定，全部按最小验收矩阵修复
+（tests/unit/test_deploy_gate.py 从 24 项定向扩至验收全覆盖）：
+
+1. **Docker 探针假 PASS**：旧实现只跑 `docker info`，daemon 活着但
+   compose.yaml 损坏也回 PASS。现按 design §6 补第二子检查
+   `docker compose -f compose.yaml config --quiet`：binary/daemon
+   缺席⇒BLOCKED；daemon 活但 compose 被拒⇒FAIL；两者皆绿才 PASS。
+2. **HTTP 503 误判 BLOCKED**：HTTPError 是 URLError 子类，旧 except
+   合并捕获把"活着但不健康"错报成"没有目标"。现在 HTTPError 先捕获
+   ⇒FAIL（detail 带状态码）；仅连接失败/DNS/超时⇒BLOCKED；
+   200+db==ok⇒PASS。503 与 200 两条用真实本地 http.server 验证
+   （非 mock），connect-refused 沿用 127.0.0.1:9。
+3. **目录冒充 key 文件**：`exists()` 接受目录。改为 `is_file()` +
+   镜像 BedrockClient._credential() 的真实使用规则（utf-8-sig、
+   cap 16385、strip 后非空、≤16384、纯 ASCII、无内部空白），
+   违规⇒FAIL 且 detail 绝不回显内容。
+4. **P2 wheelhouse 洗白**：`download` 现在拒绝含 .whl 的目标目录
+   （exit 3，先于任何 pip 调用），旧/无关 wheel 不再被自动写进新
+   manifest。
+5. **P2 文档对齐**：tasks 5.2 措辞去掉不存在的 aws probe（真实 AWS
+   属正式 EVAL 边界，不为对齐文字新增耗资源探针）；模块说明删除
+   虚构的 `--skip-probe` 提法。
+
+验证：定向 test_deploy_gate+test_eval_freeze **28 passed**（本轮
+冻结树前复跑）；冻结树后按评审要求 unit / negctl / full 各只跑一
+轮，日志 g4-probe-staging/phase521-{unit,negctl,full}.log。Docker
+缺席⇒本机 gate 如实 BLOCKED/exit 2 的事实不变；5.3 不勾；G4 整体
+与正式 EVAL 继续 BLOCKED；合同 SHA 不变。

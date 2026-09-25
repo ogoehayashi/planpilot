@@ -1,4 +1,5 @@
 """G4 5.2 — deploy gate: pure env logic + honest BLOCKED semantics."""
+import argparse
 import importlib.util
 import sys
 from pathlib import Path
@@ -165,3 +166,141 @@ def test_docker_absent_caps_whole_run_at_exit_two(monkeypatch):
     assert report.worst == G.BLOCKED
     assert report.exit_code == 2
     assert {f.check: f.status for f in report.findings} == {"docker": G.BLOCKED}
+
+
+# ---------- 5.2.1 reviewer acceptance matrix ----------
+class _R:
+    def __init__(self, rc=0, out="", err=""):
+        self.returncode, self.stdout, self.stderr = rc, out, err
+
+
+def test_docker_live_daemon_broken_compose_is_fail(monkeypatch):
+    # Reviewer #1: daemon reachable but `compose config` rejects the
+    # file must be FAIL — the old probe returned PASS on `docker info`
+    # alone.
+    monkeypatch.setattr("shutil.which", lambda name: "docker")
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "info":
+            return _R(0, "27.1.1\n")
+        if cmd[1:] == ["compose", "-f", str(G.COMPOSE_FILE), "config", "--quiet"]:
+            return _R(1, "", "yaml: line 3: mapping values are not allowed")
+        raise AssertionError(f"unexpected docker subcommand: {cmd}")
+    monkeypatch.setattr(G.subprocess, "run", fake_run)
+    f = G.probe_docker()
+    assert f.status == G.FAIL
+    assert "compose.yaml REJECTED" in f.detail
+
+
+def test_docker_live_daemon_valid_compose_is_pass(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: "docker")
+
+    def fake_run(cmd, **kw):
+        return _R(0, "27.1.1\n") if cmd[1] == "info" else _R(0, "")
+    monkeypatch.setattr(G.subprocess, "run", fake_run)
+    f = G.probe_docker()
+    assert f.status == G.PASS
+    assert "compose config valid" in f.detail
+
+
+def test_http_live_503_target_is_fail_not_blocked():
+    # Reviewer #2 with a REAL server: HTTPError subclasses URLError,
+    # so the old code reported a live-but-unready 503 as BLOCKED.
+    import http.server
+    import threading
+
+    class FiftyThree(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(503)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"db":"error"}')
+
+        def log_message(self, *a):
+            pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), FiftyThree)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        f = G.probe_http_ready(f"http://127.0.0.1:{srv.server_address[1]}")
+        assert f.status == G.FAIL, f.detail
+        assert "HTTP 503" in f.detail
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_http_200_db_ok_is_pass():
+    import http.server
+    import threading
+
+    class Green(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"db":"ok"}')
+
+        def log_message(self, *a):
+            pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Green)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        f = G.probe_http_ready(f"http://127.0.0.1:{srv.server_address[1]}")
+        assert f.status == G.PASS, f.detail
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+# connection refused stays BLOCKED (already covered by
+# test_http_unreachable_target_is_BLOCKED above).
+
+def test_key_path_directory_is_fail(tmp_path):
+    # Reviewer #3: a directory used to PASS the exists() check.
+    d = tmp_path / "fakekeydir"
+    d.mkdir()
+    f = G.probe_key_file({"PLANPILOT_BEDROCK_KEY_FILE": str(d)})
+    assert f.status == G.FAIL
+    assert "not a regular file" in f.detail
+
+
+@pytest.mark.parametrize("content,why", [
+    ("", "empty"),
+    ("   \n", "empty"),
+    ("line1\nline2\n", "single-line"),
+    ("key\u00e9key", "non-ASCII"),
+    ("A" * 20000, "16384"),
+])
+def test_key_content_violations_are_fail(tmp_path, content, why):
+    kf = tmp_path / "pp.key"
+    kf.write_text(content, encoding="utf-8")
+    f = G.probe_key_file({"PLANPILOT_BEDROCK_KEY_FILE": str(kf)})
+    assert f.status == G.FAIL, f.detail
+    assert why in f.detail
+    stripped = content.strip()
+    if stripped:
+        # first line of the (invalid) key must never appear in detail
+        assert stripped.splitlines()[0][:10] not in f.detail
+
+
+def test_key_content_valid_passes(tmp_path):
+    kf = tmp_path / "pp.key"
+    kf.write_text("sk-valid-single-line-ascii-key", encoding="utf-8")
+    f = G.probe_key_file({"PLANPILOT_BEDROCK_KEY_FILE": str(kf)})
+    assert f.status == G.PASS, f.detail
+
+
+# ---------- 5.2.1 wheelhouse download guard (reviewer P2) ----------
+def test_download_refuses_dir_with_existing_wheels(tmp_path):
+    spec = importlib.util.spec_from_file_location(
+        "build_wheelhouse", ROOT / "tools" / "build_wheelhouse.py")
+    bw = importlib.util.module_from_spec(spec)
+    sys.modules["build_wheelhouse"] = bw
+    spec.loader.exec_module(bw)
+    (tmp_path / "unrelated_stale-1.0-py3-none-any.whl").write_bytes(b"PK\x03\x04junk")
+    rc = bw.cmd_download(argparse.Namespace(wheel_dir=tmp_path, python=sys.executable))
+    assert rc == 3
+    # and it refused BEFORE touching pip: the stale wheel is untouched
+    assert (tmp_path / "unrelated_stale-1.0-py3-none-any.whl").exists()

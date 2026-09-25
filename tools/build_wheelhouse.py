@@ -89,6 +89,17 @@ def build_manifest(wheel_dir: Path) -> dict:
 
 def cmd_download(args) -> int:
     wheel_dir = Path(args.wheel_dir)
+    # 5.2.1 (reviewer P2): `download` used to write into a directory
+    # that already contained wheels, and build_manifest() would then
+    # bless every stale/unrelated .whl into the new tracked manifest.
+    # The destination must be EMPTY of wheels (fresh dir, or one whose
+    # content we provably produced) or the run refuses.
+    preexisting = sorted(wheel_dir.glob("*.whl")) if wheel_dir.exists() else []
+    if preexisting:
+        print(f"REFUSING download into non-empty wheel dir: {wheel_dir} "
+              f"already holds {len(preexisting)} .whl file(s). "
+              "Empty the dir or pass a fresh --wheel-dir.", file=sys.stderr)
+        return 3
     wheel_dir.mkdir(parents=True, exist_ok=True)
     cmd = [args.python, "-m", "pip", "download", *PLATFORM_ARGS,
            "-d", str(wheel_dir), *requirement_pins()]

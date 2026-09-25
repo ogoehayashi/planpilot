@@ -265,12 +265,18 @@ drift alignment; architecture unchanged)
       + tools/build_wheelhouse.py; verify green against
       E:/PlanPilot-Hackathon/planpilot-wheelhouse (repo-external).
 - [x] 5.2 `tools/deploy_gate.py`: pure logic (env, secret, path, lock
-      rules) + I/O probes (docker, aws, bedrock, wheelhouse); Bedrock
-      credential = API_KEY env OR a managed key file (both allowed);
+      rules) + I/O probes (docker gate incl. `compose config`, HTTP
+      /health/ready, Bedrock credential, wheelhouse) per design §6 —
+      Bedrock credential = API_KEY env OR a managed key file (both allowed);
       a check with no runnable target => BLOCKED (never a false PASS).
-      DELIVERED 2026-09-25: layers env/fs/external; docker absent on
-      this host => probe reports BLOCKED and CLI exits 2;
-      tests/unit/test_deploy_gate.py.
+      DELIVERED 2026-09-25; 5.2.1 hardened same day: docker gate =
+      daemon + `compose config` (live daemon + broken compose => FAIL,
+      not PASS); HTTP /health/ready classifies a live non-green target
+      (incl. 503) as FAIL, only unreachable => BLOCKED; key file must
+      be a regular file passing BedrockClient content rules (a
+      directory can no longer masquerade); build_wheelhouse `download`
+      refuses a non-empty wheel dir. No AWS probe (real AWS = formal
+      EVAL boundary). tests/unit/test_deploy_gate.py.
 - [ ] 5.3 Docker: Dockerfile HEALTHCHECK switches to `/health/ready`;
       compose api mounts backups read-only (deep age). **Docker is a G4
       acceptance item: docker absent => G4 stays BLOCKED; do NOT tick

@@ -9,18 +9,23 @@ LAYER 2  probe_filesystem(...)  — I/O: tracked-file secret scan (git
          key FILE — contract allows the emailed key from env; both are
          legitimate), wheelhouse manifest integrity via
          build_wheelhouse.verify.
-LAYER 3  probe_targets(...)  — I/O against EXTERNAL targets: docker
-         presence, HTTP /health/ready (--gate=http). A check with NO
-         runnable target returns status BLOCKED, NEVER PASS — and
-         BLOCKED caps the run's exit at 2. Docker absent => the
-         container acceptance is unresolved => exit 2 => G4 stays
-         honestly BLOCKED (tasks 5.3).
+LAYER 3  probe_targets(...)  — I/O against EXTERNAL targets: the docker
+         gate (5.2.1) is daemon reachability (`docker info`) PLUS
+         `docker compose config` on the tracked compose.yaml — a live
+         daemon whose compose file is broken is FAIL, not PASS; docker
+         absent => BLOCKED. HTTP /health/ready (--gate=http) classifies
+         by what actually happened: connection/DNS/timeout => BLOCKED
+         (no live target); any HTTP response (incl. 503) => FAIL unless
+         200 with db=="ok" => PASS. A check with NO runnable target
+         returns status BLOCKED, NEVER PASS — and BLOCKED caps the
+         run's exit at 2. Docker gate not green => container acceptance
+         unresolved => exit 2 => G4 stays honestly BLOCKED (tasks 5.3).
 
 Exit codes: 0 = every executed check PASS (no BLOCKED), 1 = at least
-one FAIL, 2 = findings-free but one or more BLOCKED checks. FAIL beats
-BLOCKED beats PASS. No bypass switch exists: --skip-probe simply does
-not run that probe (it is not in the report at all), while the default
-run has no way to pretend a blocked check passed.
+one FAIL, 2 = no FAIL but one or more BLOCKED checks. FAIL beats
+BLOCKED beats PASS. No bypass switch exists (any flag that would skip
+a probe does not exist), while the default run has no way to pretend a
+blocked check passed.
 
 Machine-readable: --json emits one findings object on stdout.
 """
@@ -185,6 +190,28 @@ def probe_tracked_secrets() -> Finding:
                    f"{len(scan_targets)} tracked files scanned, 0 matches", 2)
 
 
+def _validate_key_content(kf: Path):
+    """Mirror BedrockClient._credential() exactly (bedrock_client.py
+    ~line 105-112): read utf-8-sig capped at 16385, strip, then the
+    token must be non-empty, <=16384 chars, pure ASCII, and contain no
+    whitespace anywhere (single-line). Returns None when valid, else a
+    violation description that NEVER contains the content."""
+    try:
+        with kf.open("r", encoding="utf-8-sig") as stream:
+            token = stream.read(16385).strip()
+    except (OSError, UnicodeError) as exc:
+        return f"unreadable as text ({type(exc).__name__})"
+    if not token:
+        return "empty or whitespace-only"
+    if len(token) > 16384:
+        return "longer than 16384 characters"
+    if not token.isascii():
+        return "contains non-ASCII characters"
+    if any(c.isspace() for c in token):
+        return "not single-line (whitespace inside the key)"
+    return None
+
+
 def probe_key_file(env: dict) -> Finding:
     """Bedrock credential: env var OR managed key file (both legal)."""
     api_key = env.get("PLANPILOT_BEDROCK_API_KEY", "") or ""
@@ -212,8 +239,17 @@ def probe_key_file(env: dict) -> Finding:
     if kf.is_symlink():
         return Finding("bedrock_credential", FAIL,
                        "PLANPILOT_BEDROCK_KEY_FILE is a symlink — refuse (redir/swap risk)", 2)
-    if not kf.exists():
-        return Finding("bedrock_credential", FAIL, f"PLANPILOT_BEDROCK_KEY_FILE {kf_raw!r} does not exist", 2)
+    # 5.2.1 (reviewer #3): exists() let a DIRECTORY masquerade as the
+    # key file. Require a regular file, then enforce the SAME content
+    # rules BedrockClient._credential() applies at use-time — a gate
+    # PASS must never promise a file the client would then reject.
+    if not kf.is_file():
+        return Finding("bedrock_credential", FAIL,
+                       f"PLANPILOT_BEDROCK_KEY_FILE {kf_raw!r} does not exist or is not a regular file", 2)
+    problem = _validate_key_content(kf)
+    if problem:
+        return Finding("bedrock_credential", FAIL,
+                       f"PLANPILOT_BEDROCK_KEY_FILE fails BedrockClient rules: {problem} (content not echoed)", 2)
     if os.name == "posix":
         mode = statmod.S_IMODE(kf.stat().st_mode)
         if mode & 0o077:
@@ -262,31 +298,69 @@ def probe_git_state() -> Finding:
                        f"{len(dirty)} uncommitted paths — freeze the tree before deploying", 2)
     return Finding("worktree_clean", PASS, "working tree clean", 2)
 # --- LAYER 3: external targets (absent target => BLOCKED, never PASS) --
+COMPOSE_FILE = ROOT / "compose.yaml"
+
+
 def probe_docker() -> Finding:
-    """`docker` binary presence ONLY. Running compose is tasks 5.3 work
-    on a machine that HAS docker; here we report what we can see."""
+    """Docker gate = daemon reachability AND compose-config validity.
+
+    Reviewer 5.2.1 #1: `docker info` alone PASSed while a broken
+    compose.yaml would fail the actual `docker compose up`. The gate
+    checks in order — binary, daemon, then `docker compose config` on
+    the tracked compose.yaml — and the first failing stage decides the
+    status. Absent binary/daemon => BLOCKED (nothing was actually
+    verified); daemon live but compose config broken => FAIL (a real
+    defect, not a missing target).
+    """
     from shutil import which
     if which("docker") is None:
         return Finding("docker", BLOCKED,
                        "docker binary absent on this host — container acceptance UNRESOLVED (tasks 5.3); G4 must not close on this run", 3)
     try:
-        res = subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"],
-                             capture_output=True, text=True, timeout=30)
+        info = subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"],
+                              capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return Finding("docker", BLOCKED, "docker present but `docker info` failed/timed out", 3)
-    if res.returncode != 0:
+    if info.returncode != 0:
         return Finding("docker", BLOCKED,
-                       f"docker present but daemon not answering: {res.stderr.strip()[:120]}", 3)
-    return Finding("docker", PASS, f"daemon reachable, server {res.stdout.strip()}", 3)
+                       f"docker present but daemon not answering: {info.stderr.strip()[:120]}", 3)
+    # daemon live — the design's second sub-check: compose config
+    if not COMPOSE_FILE.exists():
+        return Finding("docker", FAIL,
+                       "daemon live but tracked compose.yaml is missing on disk", 3)
+    try:
+        cfg = subprocess.run(
+            ["docker", "compose", "-f", str(COMPOSE_FILE), "config", "--quiet"],
+            capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return Finding("docker", FAIL,
+                       f"daemon live (server {info.stdout.strip()}) but `docker compose config` timed out/failed to launch", 3)
+    if cfg.returncode != 0:
+        return Finding("docker", FAIL,
+                       "daemon live but compose.yaml REJECTED: " + cfg.stderr.strip()[:200], 3)
+    return Finding("docker", PASS,
+                   f"daemon reachable (server {info.stdout.strip()}) AND compose config valid", 3)
 
 
 def probe_http_ready(base_url: str) -> Finding:
+    """Classify by what ACTUALLY happened (reviewer 5.2.1 #2).
+
+    urllib.HTTPError subclasses URLError, so a blanket
+    `except (URLError, ...)` turned a live-but-unready 503 into
+    BLOCKED — the opposite of the truth (a target IS deployed).
+    Rule: never reached the server (connection refused / DNS /
+    timeout) => BLOCKED; an HTTP response arrived => the target is
+    live, and any status other than 200-with-db-ok is FAIL.
+    """
     import urllib.request
     import urllib.error
     url = base_url.rstrip("/") + "/health/ready"
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:
             body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return Finding("http_ready", FAIL,
+                       f"live target at {url} answered HTTP {exc.code} — /health/ready NOT green", 3)
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         return Finding("http_ready", BLOCKED,
                        f"no live /health/ready at {url}: {type(exc).__name__}", 3)
