@@ -1487,8 +1487,13 @@ full **835 passed**，全部 EXITCODE=0；词表守卫 PASS
    属正式 EVAL 边界，不为对齐文字新增耗资源探针）；模块说明删除
    虚构的 `--skip-probe` 提法。
 
-验证：定向 test_deploy_gate+test_eval_freeze **28 passed**（本轮
-冻结树前复跑）；冻结树后按评审要求 unit / negctl / full 各只跑一
-轮，日志 g4-probe-staging/phase521-{unit,negctl,full}.log。Docker
-缺席⇒本机 gate 如实 BLOCKED/exit 2 的事实不变；5.3 不勾；G4 整体
-与正式 EVAL 继续 BLOCKED；合同 SHA 不变。
+验证：定向 test_deploy_gate **28 passed** + test_eval_freeze_54
+**8 passed** = 合并 **36 passed**（本轮冻结树前复跑；初稿把合并数
+误记为 28，本行即更正——评审 precedent：claim 必须逐字对齐真实
+输出）。冻结树 2f0d56c 之后按评审要求各只跑一轮：unit
+**838 passed**、negctl **9 passed**、full **847 passed**（算术
+838+9=847 吻合；上一提交基线 826+12 新增定向=838），日志
+g4-probe-staging/phase521-{unit,negctl,full}.log，EXIT 均 0。
+Docker 缺席⇒本机 gate 如实 BLOCKED/exit 2（worktree 冻结后复跑
+仅余 auth-secret 未设的 FAIL 与 bedrock/docker 的 BLOCKED）；
+5.3 不勾；G4 整体与正式 EVAL 继续 BLOCKED；合同 SHA 不变。
