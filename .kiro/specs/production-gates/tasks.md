@@ -132,8 +132,9 @@ drift alignment; architecture unchanged)
 - [x] 2.4 unit: parse purity (dict only, no fs); dev with a VALID secret
       boots, dev WITHOUT one still rejects (never claimed to boot);
       prod localhost/missing-secret => StartupConfigError (Batch-A
-      P1-2: the loopback REFUSAL is now implemented in parse —
-      127.0.0.1/::1/localhost + production = error; Phase 5 compose
+      P1-2: the loopback REFUSAL is now implemented in parse as a
+      STRUCTURAL check — ipaddress is_loopback incl. IPv4-mapped, plus
+      casefolded/trailing-dot localhost (review-3 #2); Phase 5 compose
       binds 0.0.0.0); repr never
       leaks the secret. Bedrock per-call key re-read is an explicit
       documented exception (rotation), not folded into the boot snapshot.

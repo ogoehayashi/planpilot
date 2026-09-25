@@ -631,19 +631,27 @@ def main():
     # REAL wall time; scenario on a public bind was already refused in
     # parse. Local demo: PLANPILOT_CLOCK_MODE=scenario (explicit).
     clock = clock_from_env(snapshot, cfg.host)
-    db = Database(cfg.db_path, clock=clock)
-    if clock.kind == "scenario":
-        print(f"WARNING: scenario clock active ({clock.now()}) — demo data "
-              "only, NOT production time. Audit and approval stamps share it.",
-              flush=True)
-    server = Server((cfg.host, cfg.port), db, cfg.auth_secret, cfg.factory_root,
-                    clock=clock, ready_timeout_ms=cfg.ready_timeout_ms,
-                    backup_root=cfg.backup_dir, env=cfg.env)
+    # [BATCH-A review-3 #1] BOTH constructors live inside the try: if
+    # Server(...) raises (a bind error, say), the already-open Database
+    # handle still closes in the finally — previously it leaked.
+    db = None
+    server = None
     try:
+        db = Database(cfg.db_path, clock=clock)
+        if clock.kind == "scenario":
+            print(f"WARNING: scenario clock active ({clock.now()}) — demo "
+                  "data only, NOT production time. Audit and approval "
+                  "stamps share it.", flush=True)
+        server = Server((cfg.host, cfg.port), db, cfg.auth_secret,
+                        cfg.factory_root, clock=clock,
+                        ready_timeout_ms=cfg.ready_timeout_ms,
+                        backup_root=cfg.backup_dir, env=cfg.env)
         server.serve_forever()
     finally:
-        server.server_close()
-        db.close()
+        if server is not None:
+            server.server_close()
+        if db is not None:
+            db.close()
 
 
 if __name__ == "__main__":

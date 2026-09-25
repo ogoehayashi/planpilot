@@ -95,7 +95,15 @@ def test_secret_min_32_both_envs(tmp_path):
 # [BATCH-A P1-2] production must REFUSE loopback binds (tasks 2.4
 # promised it; the reviewer reproduced that the old parse accepted it).
 # Phase 5 compose binds 0.0.0.0 explicitly, so implement the refusal.
-@pytest.mark.parametrize("bad_host", ["127.0.0.1", "localhost", "::1"])
+# [review-3 #2] the classification is STRUCTURAL (ipaddress.is_loopback,
+# ipv4_mapped, casefolded trailing-dot-stripped localhost) — the old
+# exact-tuple set let `LOCALHOST` / `localhost.` / `::ffff:127.0.0.1`
+# through, which are pinned HERE as refusals.
+@pytest.mark.parametrize("bad_host", [
+    "127.0.0.1", "localhost", "::1",
+    "LOCALHOST", "LocalHost", "localhost.", "localhost..",
+    "::ffff:127.0.0.1", "[::1]", "127.5.5.5",  # whole 127/8 is loopback
+])
 def test_production_refuses_loopback(tmp_path, bad_host):
     cfg, issues = parse_startup_env(
         base_env(tmp_path, PLANPILOT_ENV="production", PLANPILOT_HOST=bad_host,
@@ -442,6 +450,7 @@ def test_main_with_valid_env_assembles_and_closes_cleanly(tmp_path, monkeypatch,
             # watchdog's /health/live) and return — main()'s finally then
             # runs the real shutdown (server_close + db.close), which is
             # the wiring the reviewer demands we prove.
+            seen["db_obj"] = self.db
             seen["db_path"] = str(self.db.path)
             seen["backup_root"] = str(self.backup_root)
             seen["addr"] = self.server_address
@@ -488,10 +497,51 @@ def test_main_with_valid_env_assembles_and_closes_cleanly(tmp_path, monkeypatch,
     # (3) /health/live answered while it was up
     assert seen["live"][0] == 200
     # (4) both closed after serve_forever: main()'s finally must have
-    # called server_close + db.close — probe the socket is dead and the
-    # DB handle refuses further use
+    # called server_close + db.close. [review-3 #1] The DB proof is the
+    # REVIEWER's shape: keep the live Database object and show its
+    # connection refuses use — any SQL raises sqlite3.ProgrammingError.
+    import sqlite3
     with pytest.raises(OSError):
         socket.create_connection(("127.0.0.1", seen["addr"][1]), timeout=1)
+    with pytest.raises(sqlite3.ProgrammingError):
+        seen["db_obj"].conn.execute("SELECT 1")
+
+
+def test_main_closes_database_even_if_server_construction_fails(tmp_path, monkeypatch):
+    """[review-3 #1] Both constructors must live INSIDE the try: when
+    Server(...) itself raises, the already-open Database must still be
+    closed. Old code constructed outside the try/finally and leaked."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+    import api_server
+
+    db_path = tmp_path / "planpilot.db"
+    legal = {
+        "PLANPILOT_ENV": "development",
+        "PLANPILOT_AUTH_SECRET": GOOD_SECRET,
+        "PLANPILOT_DB": str(db_path),
+        "PLANPILOT_FACTORY_ROOT": str(tmp_path),
+        "PLANPILOT_BACKUP_DIR": str(tmp_path / "bk"),
+        "PLANPILOT_PORT": "0",
+    }
+    monkeypatch.setattr(api_server.os, "environ", dict(legal))
+
+    captured = {}
+
+    class ExplodingServer(api_server.Server):
+        def __init__(self, *a, **k):
+            captured["db"] = a[1]          # the positional db arg
+            raise OSError("simulated bind failure after Database()")
+
+    monkeypatch.setattr(api_server, "Server", ExplodingServer)
+    with pytest.raises(OSError, match="simulated bind failure"):
+        api_server.main()
+
+    # the leaked-handle bug dies here: the DB opened before the failure
+    # must be closed anyway (reviewer's exact proof shape)
+    import sqlite3
+    with pytest.raises(sqlite3.ProgrammingError):
+        captured["db"].conn.execute("SELECT 1")
 
 
 def test_config_provenance_is_redacted(tmp_path):

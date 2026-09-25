@@ -24,6 +24,7 @@ StartupConfig fields, but no per-call re-read is claimed for them.
 """
 from __future__ import annotations
 
+import ipaddress
 import socket
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -40,10 +41,24 @@ DEFAULT_PORT = 8080
 DEFAULT_READY_TIMEOUT_MS = 1500
 DEFAULT_CLOCK_MODE = "wall"  # G1.0.1 fail-safe: unset means REAL wall time
 
-# [BATCH-A P1-2] tasks 2.4 promised "prod localhost => refusal"; the
-# same loopback spellings clock.py uses for its bind policy. production
-# MUST bind non-loopback (Phase 5 compose sets 0.0.0.0 explicitly).
-LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+# [BATCH-A P1-2, normalised in review-3 #2] tasks 2.4 promised "prod
+# localhost => refusal"; production MUST bind non-loopback (Phase 5
+# compose sets 0.0.0.0 explicitly). The old exact-tuple match was
+# bypassable (`LOCALHOST`, `localhost.`, `::ffff:127.0.0.1`); classify
+# structurally instead: ipaddress is_loopback (IPv4-mapped IPv6 too)
+# plus a casefolded, trailing-dot-stripped localhost hostname test.
+def is_loopback_host(host: str) -> bool:
+    h = str(host).strip()
+    if h.endswith("]"):            # bracketed IPv6 literal `[::1]`
+        h = h[1:-1]
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return h.rstrip(".").casefold() == "localhost"
+    if ip.is_loopback:
+        return True
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return bool(mapped and mapped.is_loopback)
 
 
 @dataclass(frozen=True)
@@ -130,13 +145,15 @@ def parse_startup_env(snapshot: dict, *, root: Path | None = None
     host = get("PLANPILOT_HOST", DEFAULT_HOST)
     # [BATCH-A P1-2, reviewer-reproduced] tasks 2.4 promised production
     # non-loopback; the old parse accepted `production + 127.0.0.1`.
-    # Phase 5 compose binds 0.0.0.0 explicitly, so refuse here instead
-    # of revoking the requirement.
-    if env == "production" and host in LOOPBACK_HOSTS:
+    # Review-3 #2: classification is STRUCTURAL now (is_loopback_host) —
+    # the exact-tuple set missed `::ffff:127.0.0.1`, `LOCALHOST`,
+    # `localhost.`. Phase 5 compose binds 0.0.0.0 explicitly.
+    if env == "production" and is_loopback_host(host):
         issues.append(_err("PLANPILOT_HOST",
                            f"production must bind a NON-loopback host "
-                           f"(one of {list(LOOPBACK_HOSTS)} refused), "
-                           f"got {host!r}"))
+                           f"(IP is_loopback, IPv4-mapped IPv6, or the "
+                           f"localhost hostname in any case/trailing-dot "
+                           f"spelling refused), got {host!r}"))
     port_raw = get("PLANPILOT_PORT", str(DEFAULT_PORT))
     try:
         port = int(str(port_raw))

@@ -89,7 +89,8 @@ PlanPilot repository.
      诊断一律走离线只读 CLI（不 import Server/Database 类）；hard-kill 测试必须包含"重跑 restore 收敛"。
    - **startup 一次性解析**：`parse_startup_env` 纯（不触文件系统）与
      `preflight` I/O 两层分离；`PLANPILOT_ENV` 封闭 `development|production`
-     未知即拒，production 另拒 loopback 绑定（127.0.0.1/::1/localhost，
+     未知即拒，production 另拒 loopback 绑定——结构性判定（ipaddress
+     is_loopback 含 IPv4-mapped + localhost 大小写/尾点归一，review-3 #2；
      Batch-A P1-2；Phase 5 compose 显式 0.0.0.0）；secret 全值入 config
      对象但 `repr=False`，summary 输出非敏感配置与路径、secret 仅
      present/length（Batch-A P2 措辞修正）；启动配置字段只在进程启动时

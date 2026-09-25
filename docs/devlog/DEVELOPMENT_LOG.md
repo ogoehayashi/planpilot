@@ -1344,3 +1344,35 @@ Changes Requested**。三个探针全部复现成立，本轮按最小范围修�
   测试 (d)）、tasks 2.3/2.4/3.2/3.3、README、START_PROMPT 同步；negctl docstring
   五路→六路。Server 增加 `env` 参数（默认 development，fixture 兼容），deep 据此
   区分 dev/prod 语义。
+
+## 2026-09-25 — G4 Batch A 评审第三轮硬化（close 保证 / loopback 归一 / Docker 定性更正）
+
+评审对 `8734454` 有条件通过并点名三个残留，逐条现场核实属实后修复：
+
+- **#1 main() 数据库关闭保证**：`api_server.py` main() 原来先构造
+  `Database`/`Server` 再进 try/finally——`Server(...)` 抛异常则已打开的
+  DB 句柄泄漏。现在两个构造移入同一 try（db/server 先行 None，finally
+  各自判空关闭）。测试补到评审指定形状：合法装配测试保留 live Database
+  对象，main() 返回后 `db.conn.execute("SELECT 1")` 必须抛
+  `sqlite3.ProgrammingError`（上轮报告"DB 已关"证据不足，现按实补）；
+  新增 `test_main_closes_database_even_if_server_construction_fails`
+  ——注入 Server 构造失败，断言 DB 仍被关闭。
+- **#2 loopback 声明与实现不符**：上轮 devlog 写 `LOOPBACK_HOSTS` 含
+  `::ffff:127.0.0.1`——不实，撤回。代码当时只有 3 项精确匹配。现在
+  按评审建议改结构性 `is_loopback_host()`：ipaddress.ip_address →
+  is_loopback；IPv4-mapped 检查 ipv4_mapped.is_loopback（拒
+  `::ffff:127.0.0.1`）；主机名 rstrip(".").casefold()=="localhost"
+  （拒 LOCALHOST/LocalHost/localhost.）；括号 IPv6 `[::1]` 剥壳；整段
+  127/8 由 is_loopback 天然覆盖（127.5.5.5 已钉）。参数化测试 3→10 拼写。
+  design/tasks/START_PROMPT 三处措辞同步。clock.py:242 的场景时钟公开
+  绑定守卫用同类旧拼写——它是反向用途（允许列表非拒绝列表），绕过后果
+  由 PLANPILOT_ALLOW_PUBLIC_SCENARIO 显式确认门兜底，不在本硬化范围，
+  登记为 Phase 5 复查项。
+- **#3 Docker 缺席定性更正**：上轮报告写"Docker 缺席=允许的非目标
+  BLOCKED 边缘"——写反了，撤回。按 G4 spec 的正确语义：Docker 缺席 ⇒
+  5.3 保持未勾 ⇒ **G4 整体保持 BLOCKED**；允许留在边界外的是 AWS/正式
+  EVAL 与 Docker/compose 运行验证本身（5.1-5.2、5.4 为离线可完成项）。
+  在另一台有 Docker 的机器跑通容器启动 + /health/ready 之前，G4 不得
+  关闭、不得在任何汇总里记 COMPLETE。
+- 数字（提交前）：定向 startup+health+clock 53+7（param 扩容后）passed；
+  unit / negctl / full 见提交报告。合同 SHA 不变；devlog append-only。

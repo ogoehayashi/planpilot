@@ -301,8 +301,10 @@ feeds the snapshot to both, then constructs only from the parsed object
 
 - `PLANPILOT_ENV` closed to `development|production` — unknown value
   refuses (StartupConfigError, internal class, never a contract code).
-  production additionally REFUSES loopback binds (127.0.0.1/::1/
-  localhost, same spellings clock.py uses) — Batch-A P1-2: tasks 2.4
+  production additionally REFUSES loopback binds — STRUCTURAL check
+  (review-3 #2: `ipaddress.is_loopback` incl. IPv4-mapped forms, plus
+  a casefolded trailing-dot-stripped `localhost` hostname test; the
+  old exact-tuple match was bypassable) — Batch-A P1-2: tasks 2.4
   promised it and the old parse accepted it; Phase 5 compose binds
   0.0.0.0 explicitly. development keeps the loopback default.
 - secret: FULL VALUE held on the dataclass via
