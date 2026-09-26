@@ -232,13 +232,26 @@ drift alignment; architecture unchanged)
       algorithm the battery used for its before/after invariant
       (BackupVerification.sha256 == sha_after), so the two agree by
       construction. tests/unit/test_scheduled_verified_set.py 5 passed.
-- [ ] 4.4 OS lock helper (msvcrt/flock) acquired by the ENTRY POINT
+- [x] 4.4 OS lock helper (msvcrt/flock) acquired by the ENTRY POINT
       BEFORE any Database/Clock construction (round-4 P0-2 boot order:
       env -> parse+non-DB preflight -> LOCK -> marker/receipt/ACK gate
       -> Clock -> Database -> services -> bind; shutdown: HTTP -> DB
       close -> release lock LAST), held for life; restore takes it
       NON-blocking (fail immediately = "server still holds it");
       pidfile advisory only.
+      DELIVERED: `src/planpilot/db_lock.py` (msvcrt LK_NBLCK / flock
+      LOCK_EX|LOCK_NB, non-blocking, OS-released-on-death, `.pid` hint
+      written only while held and printed on refusal — never the
+      mechanism). `api_server.main()` takes the lock after env parse +
+      startup_or_die and BEFORE Clock/Database/Server; DbLockHeld ->
+      SystemExit, zero construction, zero DDL side (dir-listing
+      invariant). Shutdown mirror asserted on the OBSERVED event list
+      [lock, clock, database, serve, http-stop, db-close,
+      lock-release]. The marker/receipt/ACK gate slot (task 4.6)
+      mounts between LOCK and Clock — position proven by the
+      lock<clock ordering test; restore's non-blocking take uses the
+      same helper when wired in 4.5.
+      tests/unit/test_db_lock_boot.py 6 passed; unit 866 passed.
 - [ ] 4.5 Intent-ledger state machine (`<db>.restore-state`): every op
       logged pending/done with per-file SHA; a phase advances ONLY when
       all its ops are done; on reopen `reconcile_ledger()` re-derives

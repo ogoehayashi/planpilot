@@ -17,6 +17,7 @@ from planpilot.observability import METRICS, Timer
 from planpilot.authority import RuntimeAuthority
 from planpilot.approval import ApprovalError
 from planpilot.clock import Clock, WallClock, clock_from_env
+from planpilot.db_lock import DbLockHeld, acquire_server_lock
 from planpilot.persistence import Database
 from planpilot.publisher import PublisherService
 from planpilot.startup_config import (StartupConfigError, config_provenance,
@@ -630,13 +631,30 @@ def main():
     # G1.0.1 fail-safe preserved: unset/invalid PLANPILOT_CLOCK_MODE means
     # REAL wall time; scenario on a public bind was already refused in
     # parse. Local demo: PLANPILOT_CLOCK_MODE=scenario (explicit).
-    clock = clock_from_env(snapshot, cfg.host)
+    db_lock = None
+    # G4 4.4 (design §5 BOOT ORDER, round-4 P0-2): the cross-process OS
+    # DB lock is acquired HERE — after env parse + non-DB preflight,
+    # BEFORE Clock, Database and EVERY other writer. A denied lock means
+    # zero constructions, zero sockets, and a byte-untouched DB file;
+    # restore tools can prove 'server appears to be running' instantly.
+    # Shutdown mirror (finally): stop HTTP -> close DB -> release lock
+    # LAST, so no window opens where a new writer starts while this
+    # process still holds the guard.
+    try:
+        db_lock = acquire_server_lock(cfg.db_path)
+    except DbLockHeld as exc:
+        raise SystemExit(f"startup refused: {exc}") from exc
     # [BATCH-A review-3 #1] BOTH constructors live inside the try: if
     # Server(...) raises (a bind error, say), the already-open Database
     # handle still closes in the finally — previously it leaked.
     db = None
     server = None
     try:
+        # Clock construction sits AFTER the lock in boot order; any
+        # refusal here unwinds to the outer finally, which releases
+        # the just-taken lock (and closes nothing else — nothing else
+        # exists yet).
+        clock = clock_from_env(snapshot, cfg.host)
         db = Database(cfg.db_path, clock=clock)
         if clock.kind == "scenario":
             print(f"WARNING: scenario clock active ({clock.now()}) — demo "
@@ -648,10 +666,16 @@ def main():
                         backup_root=cfg.backup_dir, env=cfg.env)
         server.serve_forever()
     finally:
+        # G4 4.4 shutdown order (design §5 BOOT ORDER mirror): stop
+        # HTTP -> close Database -> release the OS lock LAST. Nothing
+        # in this process can write after the lock drops, and nothing
+        # can start writing before another holder takes it.
         if server is not None:
             server.server_close()
         if db is not None:
             db.close()
+        if db_lock is not None:
+            db_lock.release()
 
 
 if __name__ == "__main__":

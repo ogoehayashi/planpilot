@@ -1614,3 +1614,28 @@ required_tables 拒绝 -> quarantine+manifest 字节不变；keep=2 修剪
 g4-probe-staging/phase4-43b-unit.log）。词表守卫 PASS。合同 SHA 未动。
 negctl "verify after create" 翻行按 V3 要求在 4.7 冻结验收一并落
 （与 kill-matrix 同轮）。
+
+
+## 2026-09-26 — G4 Phase 4：4.4 OS DB lock 前置 + boot order 改造
+
+新增 `src/planpilot/db_lock.py`：跨进程 OS 锁即安全机制本身——
+Windows `msvcrt.locking(LK_NBLCK)` 字节范围锁 / POSIX
+`fcntl.flock(LOCK_EX|LOCK_NB)`，非阻塞获取，进程死亡由 OS 自动释放
+（无 stale-cleanup 可信任——取不到=此刻有活进程）。pid hint 文件
+仅错误信息用，绝不做安全机制（design §5 R1 逐字）。
+`tools/api_server.py` main()：env parse + startup_or_die 之后、
+Clock/Database/Server 构造之前 acquire_server_lock(cfg.db_path)；
+DbLockHeld -> SystemExit "startup refused: ..."，零构造（同轮
+assert not db.exists + 目录清单不变 = 零 DDL 副作用）；finally 镜像
+HTTP stop -> db.close -> lock.release LAST。
+
+测试 `tests/unit/test_db_lock_boot.py` 6 passed：roundtrip+hint 生命
+周期；跨进程争用（子进程真持锁）+进程死 OS 自动放锁（stale-free by
+construction）；probe 自由/占用两态；boot order lock<clock<database
+<serve；shutdown 全链事件序 [lock,clock,database,serve,http-stop,
+db-close,lock-release]；拒绝启动零构造+零文件。两处同轮自纠：
+Windows venv python.exe 是 trampoline（hint pid 断言改锁持有者自报
+pid，kill 走 taskkill /F /T 进程树）；DbSpy 缺 bind_clock 代理（加
+__getattr__ 委托）。O_BINARY token 被词表守卫拒（os.open 本就二进制，
+移除）。unit 合并 **866 passed**（860+6，phase444b-unit.log）；
+词表 PASS；合同 SHA 未动。
