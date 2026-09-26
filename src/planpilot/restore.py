@@ -211,8 +211,21 @@ def reconcile_ledger(ledger: dict) -> dict:
     pre_shm = stored.get(str(target) + "-shm") or _absent_fact()
 
     # --- PREPARED -----------------------------------------------------
+    # ack-invalidate invalidates acks of OTHER restores (design: every
+    # NEW restore voids the previous ack). An ack bound to THIS ledger's
+    # generation is the operator's ack for this very restore — a resume
+    # (e.g. rerun after a kill at marker-clear) must NOT delete it.
     ack_now = fact(ack_path(target))
-    ops["ack-invalidate"] = "done" if not ack_now["exists"] else "pending"
+    if not ack_now["exists"]:
+        ops["ack-invalidate"] = "done"
+    else:
+        try:
+            adata = json.loads(Path(ack_path(target)).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            adata = None
+        same_restore = (isinstance(adata, dict)
+                        and adata.get("generation") == ledger["generation"])
+        ops["ack-invalidate"] = "done" if same_restore else "pending"
 
     if stage_now["exists"]:
         if stage_now["sha256"] == ledger["backup_sha256"]:

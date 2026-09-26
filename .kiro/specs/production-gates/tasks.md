@@ -297,7 +297,7 @@ drift alignment; architecture unchanged)
       hits; the only textual occurrence is the api_server comment
       stating the revocation itself). Gate/boot-order
       proofs land in 4.7.
-- [ ] 4.7 unit: kill-point matrix at SIX points (after marker-pre-stage,
+- [x] 4.7 unit: kill-point matrix at SIX points (after marker-pre-stage,
       after stage, after main moved, after partial WAL, after replace-
       pre-phase, after receipt-pre-clear) => every case a SECOND restore
       converges to a consistent state; verifier/backup SHA invariants;
@@ -310,6 +310,26 @@ drift alignment; architecture unchanged)
       boot-order proofs (lock-denied/gate-denied startup:
       Database.__init__ spy never called, socket never bound, file SHA
       unchanged; mid-startup restore cannot take the lock).
+      DELIVERED 2026-09-26: `tests/unit/test_kill_matrix.py` 22 passed —
+      REAL subprocess `os._exit(9)` at each of six ledger seams mapped
+      1:1 to the design points (stage-copy / quarantine-main /
+      quarantine-wal / quarantine-shm / receipt-write / marker-clear);
+      each seam gets (a) zero-conflict reconcile classification, (b)
+      rerun-to-convergence (target==backup SHA, trio under ONE
+      generation dir, marker cleared, receipt bound, gate opens after
+      ack), (c) byte-exact rollback of main/-wal/-shm (siblings FORGED
+      — a closed DB checkpoints WAL away; the ledger treats them as
+      opaque owned bytes). Falsifier: ro+immutable URI open — BEGIN and
+      SELECT succeed, INSERT/UPDATE/DELETE/DROP all driver-denied. The
+      four P0-1 ack regressions are in test_restore_ledger.py (21
+      passed, landed with 4.5/4.6); P0-2 gate-denied proof adds a
+      can-restore-immediately check pinning the refusal's lock release.
+      Matrix surfaced two real implementation bugs, fixed at the source
+      and self-reported in devlog: gate refusal stranded the OS lock on
+      the exception frame for in-process callers; ack-invalidate was
+      deleting the CURRENT restore's own ack on resume (now generation-
+      scoped). Unit merged at **909 passed** (887+22,
+      g4-probe-staging/phase4-47-unit.log).
 
 ## Phase 5 — deployment boundary (design §6)
 

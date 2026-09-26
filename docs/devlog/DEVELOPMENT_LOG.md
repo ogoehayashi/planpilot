@@ -1685,3 +1685,29 @@ CLI 离线双检。api_server boot 顺序测试补 gate 槽位由 4.7 覆盖。
 合并 `tests/unit` **887 passed**（866+21 吻合，
 g4-probe-staging/phase4-4546-unit.log）。词表守卫 PASS；合同 SHA 未动
 (b92e53f4…)。端到端冒烟脚本留在 repo 外（g4-probe-staging）。
+
+## 2026-09-26 — G4 Phase 4：4.7 硬杀矩阵 + gate/lock 两处自曝修复
+
+`tests/unit/test_kill_matrix.py` 22 passed。真子进程在
+PLANPILOT_RESTORE_KILL_AT=<op> 处 os._exit(9)（无 finally 无清理），
+六缝=design 六点（stage-copy / quarantine-main / quarantine-wal /
+quarantine-shm / receipt-write / marker-clear；partial-trio 即
+wal+shm 两缝），每缝三结局：(a) reconcile 零冲突分类 (b) 重跑收敛
+(target==backup SHA、marker 清、receipt 绑定 generation、trio 归一
+个 generation 目录、ack 后门开) (c) 回滚字节复原（main/wal/shm 三
+SHA + sidecar 清 + 门开）。-wal/-shm 为 FORGE（closed DB 会
+checkpoint 掉真 wal，矩阵需要三文件在场；ledger 视作自有 opaque
+字节）。只读伪证：ro URI 下 BEGIN+SELECT 通、INSERT/UPDATE/DELETE/
+DROP 全被驱动拒。P0-2 boot 证明：gate 拒绝启动 = 零构造 spy + 文件
+字节不动 + 拒绝后可立刻 restore（锁未卡死）；server 持锁时 restore
+非阻塞拒绝且零 intent。
+
+两处实现自曝修复（矩阵逼出，非测试迁就）：
+1. api_server gate 拒绝路径此前把刚取的 OS lock 挂在异常 frame 上，
+   in-process 调用会卡锁 —— 拒绝前先 release（CLI 进程退出 OS 本就
+   放，测试暴露的是嵌入路径）。
+2. ack-invalidate 按 reconcile 旧规则会把"本次恢复自己的 ack"在
+   marker-clear 缝杀后重跑时误删 —— 改为按 generation 归属：只作废
+   OTHER restore 的 ack（design 原话 every NEW restore invalidates
+   the PREVIOUS ack），本 ledger 的 ack 保留续跑。
+验证数字：矩阵+伪证+boot 证明合并 `tests/unit` **909 passed**（887+22 吻合，g4-probe-staging/phase4-47-unit.log）；词表 PASS；合同 b92e53f4… 未动。

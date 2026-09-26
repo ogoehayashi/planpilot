@@ -652,8 +652,17 @@ def main():
     # bound and no Database/Clock is constructed — this check is
     # read-only on sidecar files. PLANPILOT_RECOVERY_ACK/…_DIAG are
     # REVOKED: the only ack path is restore_database.py --ack.
-    gate_ok, gate_reasons = evaluate_recovery_gate(cfg.db_path)
+    # The refusal releases the just-taken lock BEFORE raising: an
+    # in-process caller (tests, embedding) must not strand the OS lock
+    # via the exception's traceback frame, and a CLI process exits and
+    # the OS frees it anyway.
+    try:
+        gate_ok, gate_reasons = evaluate_recovery_gate(cfg.db_path)
+    except BaseException:
+        db_lock.release()
+        raise
     if not gate_ok:
+        db_lock.release()
         raise SystemExit(
             "startup refused: an unacked database restore is pending "
             f"({', '.join(gate_reasons)}); run "
