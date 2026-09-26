@@ -1,18 +1,45 @@
+# PlanPilot deployment (G4 5.3, design §6).
+#
+# OFFLINE dependency rule: the image installs from the OUT-OF-REPO wheelhouse
+# (tools/build_wheelhouse.py; tracked manifest deploy/wheelhouse/MANIFEST.json,
+# .whl bytes never in Git). It is handed to the build as the named context
+# `wh` — override the location with PLANPILOT_WHEELHOUSE_DIR. Nothing is
+# fetched from public PyPI at build time.
+#
+# No plaintext secret lives in this file: PLANPILOT_AUTH_SECRET is REQUIRED
+# interpolation (`:?`), so a deployment without it fails closed at compose
+# level instead of booting an unauthenticated service.
+#
+# Profiles: `api` is production-gated (docker compose --profile production up),
+# `backup` stays an operations-profile one-shot.
 services:
   api:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        wh: ${PLANPILOT_WHEELHOUSE_DIR:-../planpilot-wheelhouse}
+    profiles: [production]
     init: true
     restart: unless-stopped
+    # Production refuses a loopback bind (startup_config.is_loopback_host), so
+    # the published address is non-loopback and overridable per host.
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${PLANPILOT_PUBLISH_ADDR:-0.0.0.0}:8080:8080"
     environment:
+      # Explicit: production additionally refuses loopback binds and REQUIRES
+      # an explicit backup directory (tasks 2.3 / 5.3).
+      PLANPILOT_ENV: production
       PLANPILOT_AUTH_SECRET: ${PLANPILOT_AUTH_SECRET:?Set PLANPILOT_AUTH_SECRET in .env}
+      # Read-only mount target: the server only READS last_verified_backup.json
+      # here for deep-health backup age (design §4, P1-4 — never an mtime guess).
+      PLANPILOT_BACKUP_DIR: /backups
       PLANPILOT_BEDROCK_REGION: ${PLANPILOT_BEDROCK_REGION:-ap-southeast-1}
       PLANPILOT_BEDROCK_MODEL: ${PLANPILOT_BEDROCK_MODEL:-global.anthropic.claude-sonnet-4-5-20250929-v1:0}
       PLANPILOT_FORBID_LLM_NETWORK: ${PLANPILOT_FORBID_LLM_NETWORK:-1}
       PLANPILOT_BEDROCK_API_KEY: ${PLANPILOT_BEDROCK_API_KEY:-}
     volumes:
       - data:/data
+      - backups:/backups:ro
     read_only: true
     tmpfs:
       - /tmp
@@ -23,7 +50,10 @@ services:
     mem_limit: 1g
     cpus: 2
   backup:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        wh: ${PLANPILOT_WHEELHOUSE_DIR:-../planpilot-wheelhouse}
     profiles: [operations]
     command: [python, tools/scheduled_backup.py, /data/planpilot.db, /backups, --keep, "14"]
     volumes:

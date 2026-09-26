@@ -1,0 +1,158 @@
+# G4 5.3 Docker LIVE acceptance run — 2026-09-26T21:21:48Z
+# host: LAPTOP-EB7PIJ4C | docker: Docker version 29.8.0, build 88096ef
+# image built OFFLINE from out-of-repo wheelhouse (27 wheels, --no-index)
+# throwaway secret len=48 (never a real credential); container torn down in finally
+# compose-config.yaml render EXCLUDED from this pack on purpose: it echoes the
+# interpolated env VALUES (incl. the throwaway secret); run.log carries the
+# acceptance lines instead, and the render's EXIT code is recorded below.
+# === run.log ===
+SECRET_LENGTH=48
+=== docker compose config (production profile) ===
+COMPOSE_CONFIG_EXIT=0
+=== compose up -d api ===
+ Network planpilot-build_default Creating 
+ Network planpilot-build_default Creating 
+ Volume planpilot-build_data Creating 
+ Volume planpilot-build_backups Creating 
+ Volume planpilot-build_backups Creating 
+ Volume planpilot-build_data Creating 
+ Volume planpilot-build_backups Created 
+ Volume planpilot-build_backups Created 
+ Volume planpilot-build_data Created 
+ Volume planpilot-build_data Created 
+ Network planpilot-build_default Created 
+ Network planpilot-build_default Created 
+ Container planpilot-build-api-1 Creating 
+ Container planpilot-build-api-1 Created 
+ Container planpilot-build-api-1 Starting 
+ Container planpilot-build-api-1 Started 
+UP_EXIT=0
+=== waiting for /health/ready (up to 90s) ===
+READY after 2 polls: 200 {"status": "ok", "service": "planpilot", "probe": "ready", "db": "ok"}
+READY_REACHED=1
+=== container ps ===
+NAME                    IMAGE                 COMMAND                   SERVICE   CREATED         STATUS                            PORTS
+planpilot-build-api-1   planpilot-build-api   "python tools/api_se…"   api       3 seconds ago   Up 3 seconds (health: starting)   0.0.0.0:8080->8080/tcp
+=== /health/live ===
+200 {"status": "ok", "service": "planpilot", "probe": "live"}
+LIVE_EXIT=0
+=== /health/ready ===
+200 {"status": "ok", "service": "planpilot", "probe": "ready", "db": "ok"}
+READY_EXIT=0
+=== /health/deep requires auth (expect 403 without token) ===
+HTTP 403 {"error": "Bearer token required"}
+DEEP_EXIT=0
+=== backup mount read-only check (expect failure to write) ===
+touch: cannot touch '/backups/should-fail': Read-only file system
+READONLY_OK
+RO_EXIT=0
+total 8
+drwxr-xr-x 2 planpilot planpilot 4096 Sep 26 20:05 .
+drwxr-xr-x 1 root      root      4096 Sep 26 21:16 ..
+/dev/sdd on /backups type ext4 (ro,relatime)
+=== data dir contents ===
+total 280
+drwxr-xr-x 2 planpilot planpilot   4096 Sep 26 21:16 .
+drwxr-xr-x 1 root      root        4096 Sep 26 21:16 ..
+-rw-r--r-- 1 planpilot planpilot   4096 Sep 26 21:16 planpilot.db
+-rw-r--r-- 1 planpilot planpilot  32768 Sep 26 21:16 planpilot.db-shm
+-rw-r--r-- 1 planpilot planpilot 234872 Sep 26 21:16 planpilot.db-wal
+-rw------- 1 planpilot planpilot      0 Sep 26 21:16 planpilot.db.server.lock
+-rw-r--r-- 1 planpilot planpilot      1 Sep 26 21:16 planpilot.db.server.lock.pid
+=== HEALTHCHECK status ===
+Status: healthy
+ExitCode: 0 Output: 
+HEALTHCHECK_PARSED=0
+=== restart persistence: /audit/status before vs after, plus db file identity ===
+AUDIT_BEFORE_EXIT=0
+{"entry_count": 0, "head_hash": "0000000000000000000000000000000000000000000000000000000000000000", "verified": true}
+352a9bb23c329c5a9bf235baf56917358b5b64b03f1a11d261fadae9c3cdb721  /data/planpilot.db
+total 280
+drwxr-xr-x 2 planpilot planpilot   4096 Sep 26 21:16 .
+drwxr-xr-x 1 root      root        4096 Sep 26 21:16 ..
+-rw-r--r-- 1 planpilot planpilot   4096 Sep 26 21:16 planpilot.db
+-rw-r--r-- 1 planpilot planpilot  32768 Sep 26 21:16 planpilot.db-shm
+-rw-r--r-- 1 planpilot planpilot 234872 Sep 26 21:16 planpilot.db-wal
+-rw------- 1 planpilot planpilot      0 Sep 26 21:16 planpilot.db.server.lock
+-rw-r--r-- 1 planpilot planpilot      1 Sep 26 21:16 planpilot.db.server.lock.pid
+ Container planpilot-build-api-1 Restarting 
+ Container planpilot-build-api-1 Started 
+RESTART_EXIT=0
+READY after restart, poll 1
+READY_AFTER_RESTART=1
+AUDIT_AFTER_EXIT=0
+{"entry_count": 0, "head_hash": "0000000000000000000000000000000000000000000000000000000000000000", "verified": true}
+352a9bb23c329c5a9bf235baf56917358b5b64b03f1a11d261fadae9c3cdb721  /data/planpilot.db
+PERSIST_AUDIT_IDENTICAL=YES
+=== volume identity (named volume survived the restart) ===
+planpilot-build_data local
+total 280
+drwxr-xr-x 2 planpilot planpilot   4096 Sep 26 21:16 .
+drwxr-xr-x 1 root      root        4096 Sep 26 21:16 ..
+-rw-r--r-- 1 planpilot planpilot   4096 Sep 26 21:16 planpilot.db
+-rw-r--r-- 1 planpilot planpilot  32768 Sep 26 21:16 planpilot.db-shm
+-rw-r--r-- 1 planpilot planpilot 234872 Sep 26 21:16 planpilot.db-wal
+-rw------- 1 planpilot planpilot      0 Sep 26 21:16 planpilot.db.server.lock
+-rw-r--r-- 1 planpilot planpilot      1 Sep 26 21:16 planpilot.db.server.lock.pid
+=== deploy_gate live probes (container is UP) ===
+DEPLOY_GATE_ALL_EXIT=1
+[PASS   ] L1 profile_valid: production
+[PASS   ] L1 profile_matches_env: production
+[PASS   ] L1 auth_secret: present, length 48 (value not shown)
+[PASS   ] L1 bind_host: 0.0.0.0
+[PASS   ] L2 tracked_secrets: 94 tracked files scanned, 0 matches
+[BLOCKED] L2 bedrock_credential: no PLANPILOT_BEDROCK_API_KEY env and no PLANPILOT_BEDROCK_KEY_FILE — inference probes cannot run (never reported as pass)
+[PASS   ] L2 wheelhouse: manifest verified: wheelhouse OK: 27 wheels, 59929033 bytes at E:\PlanPilot-Hackathon\planpilot-wheelhouse
+[FAIL   ] L2 worktree_clean: 8 uncommitted paths — freeze the tree before deploying
+[PASS   ] L3 docker: daemon reachable (server 29.8.0) AND compose config valid (both profiles, placeholder secret)
+overall=fail exit=1
+DEPLOY_GATE_HTTP_EXIT=1
+[PASS   ] L1 profile_valid: production
+[PASS   ] L1 profile_matches_env: production
+[PASS   ] L1 auth_secret: present, length 48 (value not shown)
+[PASS   ] L1 bind_host: 0.0.0.0
+[PASS   ] L2 tracked_secrets: 94 tracked files scanned, 0 matches
+[BLOCKED] L2 bedrock_credential: no PLANPILOT_BEDROCK_API_KEY env and no PLANPILOT_BEDROCK_KEY_FILE — inference probes cannot run (never reported as pass)
+[PASS   ] L2 wheelhouse: manifest verified: wheelhouse OK: 27 wheels, 59929033 bytes at E:\PlanPilot-Hackathon\planpilot-wheelhouse
+[FAIL   ] L2 worktree_clean: 8 uncommitted paths — freeze the tree before deploying
+[PASS   ] L3 docker: daemon reachable (server 29.8.0) AND compose config valid (both profiles, placeholder secret)
+[PASS   ] L3 http_ready: http://127.0.0.1:8080/health/ready
+overall=fail exit=1
+=== teardown ===
+ Container planpilot-build-api-1 Stopping 
+ Container planpilot-build-api-1 Stopped 
+ Container planpilot-build-api-1 Removing 
+ Container planpilot-build-api-1 Removed 
+ Network planpilot-build_default Removing 
+ Volume planpilot-build_data Removing 
+ Volume planpilot-build_backups Removing 
+ Volume planpilot-build_backups Removed 
+ Volume planpilot-build_data Removed 
+ Network planpilot-build_default Removed 
+DOWN_EXIT=0
+ALL_DONE
+
+# === deploy_gate_all.log (container UP) ===
+[PASS   ] L1 profile_valid: production
+[PASS   ] L1 profile_matches_env: production
+[PASS   ] L1 auth_secret: present, length 48 (value not shown)
+[PASS   ] L1 bind_host: 0.0.0.0
+[PASS   ] L2 tracked_secrets: 94 tracked files scanned, 0 matches
+[BLOCKED] L2 bedrock_credential: no PLANPILOT_BEDROCK_API_KEY env and no PLANPILOT_BEDROCK_KEY_FILE — inference probes cannot run (never reported as pass)
+[PASS   ] L2 wheelhouse: manifest verified: wheelhouse OK: 27 wheels, 59929033 bytes at E:\PlanPilot-Hackathon\planpilot-wheelhouse
+[FAIL   ] L2 worktree_clean: 8 uncommitted paths — freeze the tree before deploying
+[PASS   ] L3 docker: daemon reachable (server 29.8.0) AND compose config valid (both profiles, placeholder secret)
+overall=fail exit=1
+
+# === deploy_gate_http.log (container UP) ===
+[PASS   ] L1 profile_valid: production
+[PASS   ] L1 profile_matches_env: production
+[PASS   ] L1 auth_secret: present, length 48 (value not shown)
+[PASS   ] L1 bind_host: 0.0.0.0
+[PASS   ] L2 tracked_secrets: 94 tracked files scanned, 0 matches
+[BLOCKED] L2 bedrock_credential: no PLANPILOT_BEDROCK_API_KEY env and no PLANPILOT_BEDROCK_KEY_FILE — inference probes cannot run (never reported as pass)
+[PASS   ] L2 wheelhouse: manifest verified: wheelhouse OK: 27 wheels, 59929033 bytes at E:\PlanPilot-Hackathon\planpilot-wheelhouse
+[FAIL   ] L2 worktree_clean: 8 uncommitted paths — freeze the tree before deploying
+[PASS   ] L3 docker: daemon reachable (server 29.8.0) AND compose config valid (both profiles, placeholder secret)
+[PASS   ] L3 http_ready: http://127.0.0.1:8080/health/ready
+overall=fail exit=1

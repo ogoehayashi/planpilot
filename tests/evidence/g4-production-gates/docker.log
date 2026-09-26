@@ -1,0 +1,6 @@
+docker --version:
+Docker version 29.8.0, build 88096ef
+docker info ServerVersion:
+29.8.0
+docker compose -f compose.yaml --profile production --profile operations config --quiet:
+COMPOSE_CONFIG_EXIT=0

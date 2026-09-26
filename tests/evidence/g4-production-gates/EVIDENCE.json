@@ -1,0 +1,212 @@
+{
+  "id": "g4-production-gates",
+  "title": "G4 production-gates closeout: 5.3 Docker live acceptance + 6.1 negctl exact counts + frozen-tree serial verification",
+  "date": "2026-09-26",
+  "head": "8265a5b4a4a415499060d82a2ca880b237e2f95d",
+  "branch": "p1-3-hardening",
+  "contract_sha256": "b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639",
+  "baseline_tag_peeled": "5bf299adb1e06c2f061db4086cc3bf183944ff56",
+  "working_tree_clean_at_freeze": false,
+  "working_tree_note": "the tree was DIRTY at freeze (this G4 work is the uncommitted delta); deploy_gate worktree_clean=FAIL in this pack is that honest pre-commit state — re-run clean in the attestation step after the evidence-body commit",
+  "runs": [
+    {
+      "log": "targeted.log",
+      "sha256": "9b14af12a96f6f32208aed3d68e4a2deefa1ada48cc8e95748a5679fcfd271bb",
+      "bytes": 857,
+      "command": "python -m pytest <G4 targeted matrix: startup_config, clock_session_defence, health_split, deploy_gate, deployment_static, backup_verification, scheduled_verified_set, db_lock_boot, restore_ledger, kill_matrix, reviewer_hardening, evidence_integrity> -q --tb=short -p no:cacheprovider",
+      "exit_code": 0,
+      "counts": {
+        "passed": 177,
+        "skipped": 0
+      },
+      "duration_seconds": 44.51,
+      "summary": "177 passed in 44.51s",
+      "expected_exit_code": 0
+    },
+    {
+      "log": "unit.log",
+      "sha256": "b24b8c856d388b5b2dce6b29dae9bb9a3ccf17d81589d9278ebe3cda3c438e86",
+      "bytes": 1242,
+      "command": "python -m pytest tests/unit -q --tb=short -p no:cacheprovider",
+      "exit_code": 0,
+      "counts": {
+        "passed": 926,
+        "skipped": 0
+      },
+      "duration_seconds": 103.07,
+      "summary": "926 passed in 103.07s",
+      "expected_exit_code": 0
+    },
+    {
+      "log": "full.log",
+      "sha256": "6ac53323f6aef2b7e0647397f7be11994a350b399001ae84b6329f51b259d6f9",
+      "bytes": 1321,
+      "command": "python -m pytest tests/ -q --tb=short -p no:cacheprovider",
+      "exit_code": 0,
+      "counts": {
+        "passed": 938,
+        "skipped": 0
+      },
+      "duration_seconds": 438.7,
+      "summary": "938 passed in 438.70s",
+      "expected_exit_code": 0
+    },
+    {
+      "log": "negctl.log",
+      "sha256": "caea8b6ae5352f22516814c28b4ffd8633ab6126c4f7922a0c826405af61495f",
+      "bytes": 1106,
+      "command": "python -m pytest tests/negative_control -q --tb=short -p no:cacheprovider -s",
+      "exit_code": 0,
+      "counts": {
+        "passed": 12,
+        "skipped": 0
+      },
+      "duration_seconds": 338.78,
+      "summary": "12 passed in 338.78s",
+      "expected_exit_code": 0
+    },
+    {
+      "log": "vocabulary.log",
+      "sha256": "89fbbf8f7f78c893bd5038d863a16603d4b4240b1d30a5893889202a9fbc6b26",
+      "bytes": 2912,
+      "command": "python tools/check_closed_vocabularies.py",
+      "exit_code": 0,
+      "expected_exit_code": 0
+    },
+    {
+      "log": "diffcheck.log",
+      "sha256": "6c2533cc1c5a9b2497d68023bd174145991827235d218337d2699b777d1f1c86",
+      "bytes": 135,
+      "command": "git diff --check",
+      "exit_code": 0,
+      "expected_exit_code": 0
+    },
+    {
+      "log": "deploy_gate.log",
+      "sha256": "ab27e890abe3e01b33ec242225cdd5b21a3a7a521b621840e54f5fe070dbeeb0",
+      "bytes": 978,
+      "command": "python tools/deploy_gate.py --profile production  (PLANPILOT_ENV=production PLANPILOT_HOST=0.0.0.0 PLANPILOT_BACKUP_DIR=<staging>/dg-backupdir PLANPILOT_WHEELHOUSE_DIR=<out-of-repo wheelhouse>; NO Bedrock credential supplied — bedrock_credential BLOCKED is the honest finding)",
+      "exit_code": 1,
+      "expected_exit_code": 1
+    },
+    {
+      "log": "formal_eval_blocked.log",
+      "sha256": "d0f2c2774303258c8166178c429fc662931653a584e84a4071635a27194e572f",
+      "bytes": 422,
+      "command": "python tools/run_evals.py --output <staging>/runtime-eval",
+      "exit_code": 1,
+      "expected_exit_code": 1
+    },
+    {
+      "log": "docker.log",
+      "sha256": "ff55ddc87721e1fd247e2c25b6474cf3c02671e3b3ed80b294a7b9b3c9b83664",
+      "bytes": 200,
+      "command": "docker --version; docker info --format {{.ServerVersion}}; docker compose -f compose.yaml --profile production --profile operations config --quiet (throwaway secret from a split-assembled shell literal; never a credential). NOTE: the first Stage-3 pass wrote a misleading COMPOSE_CONFIG_EXIT=1 here because the driver script failed to source the placeholder secret (gen_secret.py path bug); the probe was re-run alone on the IDENTICAL frozen tree (HEAD 8265a5b, same 8 dirty paths) and is the log shipped here. Documented, not papered over.",
+      "exit_code": null
+    },
+    {
+      "log": "docker-live.log",
+      "sha256": "7444e309b13d3d90656f51ae517d5321384eb0a26bac9907b518424230ab18f5",
+      "bytes": 8579,
+      "command": "bash g4-probe-staging/live53.sh — FULL container acceptance: compose build (offline wheelhouse, --no-index) -> up -d -> /health/live 200 -> /health/ready 200 db ok -> /health/deep 403 without token -> /backups mount ro (touch refused, mount ro,relatime) -> HEALTHCHECK healthy ExitCode 0 -> restart -> ready again -> /audit/status + db sha256 byte-identical across restart -> deploy_gate live probes (docker L3 PASS, http_ready PASS) -> down -v (teardown in finally)",
+      "exit_code": null
+    }
+  ],
+  "arithmetic": {
+    "full_passed": 938,
+    "unit_passed": 926,
+    "negctl_passed": 12,
+    "identity": "full == unit + negative_control"
+  },
+  "negctl": {
+    "caught_lines": [
+      "14",
+      "6",
+      "2",
+      "6",
+      "56",
+      "5",
+      "9",
+      "11"
+    ],
+    "escaped_lines": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "broken_lines": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "held_lines": [
+      "2"
+    ],
+    "defence_in_depth_still_held": [
+      "2"
+    ]
+  },
+  "case_map": {
+    "targeted.log": "G4 targeted matrix (12 files): startup config, clock defence, health split, deploy gate, deployment static (5.3), backup verification, scheduled verified set, db lock/boot order, restore ledger, kill matrix, reviewer hardening, evidence integrity",
+    "unit.log": "tests/unit full deterministic suite (no sockets beyond pinned http hold-suites; no live-daemon dependency)",
+    "full.log": "tests/ = unit + negative_control (serial)",
+    "negctl.log": "tests/negative_control: store/approval/model-binding/security-audit/tool-error/clock-defence/recovery/g4-closeout",
+    "vocabulary.log": "tools/check_closed_vocabularies.py",
+    "deploy_gate.log": "tools/deploy_gate.py --profile production (layers 1+2+3)",
+    "docker.log": "daemon + compose-config probe on the frozen tree",
+    "docker-live.log": "FULL 5.3 container acceptance chain (build -> up -> probes -> ro mount -> healthcheck -> restart persistence -> live deploy_gate -> teardown)",
+    "formal_eval_blocked.log": "tools/run_evals.py --output <staging>: formal EVAL readiness inventory"
+  },
+  "docker_status": {
+    "installed": true,
+    "daemon": true,
+    "server_version": "29.8.0",
+    "compose_config": "PASS (both profiles)",
+    "image_build": "PASS (offline wheelhouse, 27 wheels, --no-index; in-image manifest re-verify)",
+    "container_started": true,
+    "health_ready": "200 {status ok, probe ready, db ok}",
+    "health_live": "200",
+    "health_deep_unauth": "403 (auth-protected; never a probe target)",
+    "backup_mount_readonly": true,
+    "healthcheck": "healthy, ExitCode 0, targets /health/ready",
+    "restart_persistence": "/audit/status identical + db sha256 identical across restart",
+    "teardown": "compose down -v (clean)"
+  },
+  "eval_status": {
+    "cases": 30,
+    "passed": 0,
+    "failed": 0,
+    "blocked": 30,
+    "exit_code": 1,
+    "runner_sha256": "6285b78205619876125ede12841fd46a26eb8c79f6b54b3136d5260ca3707932",
+    "note": "formal EVAL remains BLOCKED until a real Lightsail/Bedrock run; smoke results never substitute"
+  },
+  "known_gaps": [
+    "formal EVAL: 0 PASS / 30 BLOCKED (outside local G4 completion claim; only AWS-boundary item)",
+    "deploy_gate bedrock_credential: BLOCKED in this pack — no real AWS key exists on this host and none was faked",
+    "deploy_gate auth_secret: FAIL in the STAGE-3 pack run (length 0) — the frozen-tree probe deliberately supplies NO secret; the gate must record that honestly instead of faking one. The live container run (docker-live.log) supplies a throwaway 48-char secret and shows auth_secret PASS + the full L3 chain.",
+    "deploy_gate worktree_clean: FAIL in this pack BY CONSTRUCTION — the pack records the frozen pre-commit tree; the post-commit attestation run shows PASS",
+    "POSIX mode<=0600 on the Bedrock key file is not enforceable on Windows NTFS (recorded as a platform note in the finding)"
+  ],
+  "failures_and_corrections": [
+    "startup_config.preflight demanded WRITABILITY of PLANPILOT_BACKUP_DIR, contradicting the mandated production mount backups:/backups:ro — the container refused to serve deep-health forever (unbootable in production). Fixed: backup dir is a READ target (exists+readable in production; absent tolerated in development). Pinned by test_preflight_backup_dir_is_read_not_write_target.",
+    "deploy_gate.probe_docker ran `compose config --quiet` WITHOUT profiles (vacuous: services {} — profile-gated api/backup were never validated) and WITHOUT satisfying the required-secret interpolation (a missing PLANPILOT_AUTH_SECRET was misreported as 'compose.yaml REJECTED' = wrong-reason FAIL). Fixed: both profiles selected; constant throwaway placeholder secret injected subprocess-only; pinned by test_docker_live_daemon_broken_compose_is_fail.",
+    "Dockerfile lacked COPY data — production preflight refuses a missing factory root, so the image could never boot. Fixed: COPY data ./data added.",
+    "compose.yaml additional_contexts default was ../../planpilot-wheelhouse (two levels up) but the wheelhouse is a SIBLING of the repo (build_wheelhouse.DEFAULT_WHEEL_DIR). Fixed to ../planpilot-wheelhouse; overridable via PLANPILOT_WHEELHOUSE_DIR.",
+    "First container `up` refused startup with 'AUTH_SECRET shorter than 32' — a tooling redaction filter had mangled the shell export, producing a garbage secret. The refusal itself demonstrates the production secret gate fail-closed inside a real container. Fixed: secret generated into an env file (gen_secret.py) and sourced; final run logged the secret length as 48 (>=32 minimum) with the value never printed.",
+    "An earlier unit-suite draft had a live-`docker compose config` test whose pass/skip depended on ambient daemon state (unit count flapped 927+1skip/928). Removed: unit suite stays deterministic; the live render is covered by docker-live.log and the fake-daemon classification tests.",
+    "compose config RENDER (compose-config.yaml) echoes interpolated env values including the throwaway secret — excluded from the pack and scrubbed; acceptance lines ship in docker-live.log instead."
+  ],
+  "mutation_restore": "all negctl files hash-check the REAL tree before/after (SUBJECTS byte-identical) and restore sandbox sources in finally; g4-closeout asserts caught==2/held==2 exactly",
+  "all_green_definition": "targeted/unit/full/negctl all exit 0; full == unit + negctl; vocabulary PASS; diff --check clean; contract SHA frozen; baseline tag peeled unchanged; docker LIVE acceptance chain fully passed (build/up/ready-200/deep-403/ro-mount/healthcheck/restart-persistence/teardown); deploy_gate docker+http PASS. NOT included: formal EVAL (BLOCKED by design) and bedrock_credential (BLOCKED — no real key)."
+}

@@ -50,6 +50,13 @@ from planpilot.startup_config import (  # noqa: E402
 
 PASS, FAIL, BLOCKED = "pass", "fail", "blocked"
 
+# [G4 5.3] Constant throwaway value used ONLY to satisfy compose.yaml's
+# required-secret interpolation (`PLANPILOT_AUTH_SECRET:?`) while the docker
+# gate validates FILE validity. It is not a credential, is never read from the
+# environment, is never logged, and never reaches a container — the real
+# secret's presence/strength is owned by layer-1 `auth_secret`.
+_COMPOSE_PLACEHOLDER_SECRET = "deploy-gate-compose-syntax-probe-placeholder"
+
 
 @dataclass
 class Finding:
@@ -338,6 +345,21 @@ def probe_docker() -> Finding:
     status. Absent binary/daemon => BLOCKED (nothing was actually
     verified); daemon live but compose config broken => FAIL (a real
     defect, not a missing target).
+
+    [G4 5.3] Two isolations, both empirically pinned on this host:
+    (a) `config` skips profile-gated services unless the profile is
+        selected — so we select BOTH `production` (api) and `operations`
+        (backup), otherwise the check is vacuous (`services: {}`).
+    (b) compose.yaml uses REQUIRED interpolation (`PLANPILOT_AUTH_SECRET:?`)
+        so a host with no secret set would make `config` fail — but that
+        is a SECRET-PRESENCE defect owned by layer-1 `auth_secret`, NOT a
+        broken compose file. Mis-reporting it as "compose.yaml REJECTED"
+        would be a wrong-reason FAIL. We therefore validate FILE validity
+        with a constant throwaway placeholder secret injected into the
+        subprocess env only — the REAL secret is never read, never passed,
+        never logged here. `config` validates schema + interpolation
+        shape; it does NOT resolve build contexts (a missing out-of-repo
+        wheelhouse is caught by the live build, not this syntax gate).
     """
     from shutil import which
     if which("docker") is None:
@@ -355,10 +377,17 @@ def probe_docker() -> Finding:
     if not COMPOSE_FILE.exists():
         return Finding("docker", FAIL,
                        "daemon live but tracked compose.yaml is missing on disk", 3)
+    # Isolate FILE validity from secret presence: validate with both
+    # profiles selected and a constant throwaway secret (never the real
+    # one, never logged).
+    cfg_env = dict(os.environ, PLANPILOT_AUTH_SECRET=_COMPOSE_PLACEHOLDER_SECRET)
+    cfg_env.pop("PYTHONUTF8", None)
     try:
         cfg = subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_FILE), "config", "--quiet"],
-            capture_output=True, text=True, timeout=60)
+            ["docker", "compose", "-f", str(COMPOSE_FILE),
+             "--profile", "production", "--profile", "operations",
+             "config", "--quiet"],
+            capture_output=True, text=True, timeout=60, env=cfg_env)
     except (OSError, subprocess.TimeoutExpired):
         return Finding("docker", FAIL,
                        f"daemon live (server {info.stdout.strip()}) but `docker compose config` timed out/failed to launch", 3)
@@ -366,7 +395,7 @@ def probe_docker() -> Finding:
         return Finding("docker", FAIL,
                        "daemon live but compose.yaml REJECTED: " + cfg.stderr.strip()[:200], 3)
     return Finding("docker", PASS,
-                   f"daemon reachable (server {info.stdout.strip()}) AND compose config valid", 3)
+                   f"daemon reachable (server {info.stdout.strip()}) AND compose config valid (both profiles, placeholder secret)", 3)
 
 
 def probe_http_ready(base_url: str) -> Finding:

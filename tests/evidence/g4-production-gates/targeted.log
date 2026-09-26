@@ -1,0 +1,9 @@
+##### G4 targeted matrix
+##### cmd: PY -m pytest tests/unit/test_startup_config.py tests/unit/test_clock_session_defence.py tests/unit/test_health_split.py tests/unit/test_deploy_gate.py tests/unit/test_deployment_static.py tests/unit/test_backup_verification.py tests/unit/test_scheduled_verified_set.py tests/unit/test_db_lock_boot.py tests/unit/test_restore_ledger.py tests/unit/test_kill_matrix.py tests/unit/test_reviewer_hardening.py tests/unit/test_evidence_integrity.py -q --tb=short -p no:cacheprovider
+##### started: 2026-09-26T21:26:20Z
+........................................................................ [ 40%]
+........................................................................ [ 81%]
+.................................                                        [100%]
+177 passed in 44.51s
+EXITCODE=0
+##### finished: 2026-09-26T21:27:06Z

@@ -202,19 +202,32 @@ class _R:
 def test_docker_live_daemon_broken_compose_is_fail(monkeypatch):
     # Reviewer #1: daemon reachable but `compose config` rejects the
     # file must be FAIL — the old probe returned PASS on `docker info`
-    # alone.
+    # alone. [G4 5.3] The gate now selects BOTH profiles and injects a
+    # throwaway placeholder secret so compose's required-interpolation
+    # (`:?`) cannot be mis-reported as a broken file.
     monkeypatch.setattr("shutil.which", lambda name: "docker")
+    seen = {}
 
     def fake_run(cmd, **kw):
         if cmd[1] == "info":
             return _R(0, "27.1.1\n")
-        if cmd[1:] == ["compose", "-f", str(G.COMPOSE_FILE), "config", "--quiet"]:
+        if cmd[1] == "compose" and cmd[-2:] == ["config", "--quiet"]:
+            # pin the profile selection AND the placeholder-secret env
+            seen["cmd"] = cmd
+            seen["env_secret"] = (kw.get("env") or {}).get(
+                "PLANPILOT_AUTH_SECRET")
             return _R(1, "", "yaml: line 3: mapping values are not allowed")
         raise AssertionError(f"unexpected docker subcommand: {cmd}")
     monkeypatch.setattr(G.subprocess, "run", fake_run)
     f = G.probe_docker()
     assert f.status == G.FAIL
     assert "compose.yaml REJECTED" in f.detail
+    # both profile-gated services are validated, never a vacuous config
+    assert "--profile" in seen["cmd"] and "production" in seen["cmd"] \
+        and "operations" in seen["cmd"]
+    # the real secret is NEVER touched: a constant placeholder only, and
+    # it must not be mistaken for a credential leak
+    assert seen["env_secret"] == G._COMPOSE_PLACEHOLDER_SECRET
 
 
 def test_docker_live_daemon_valid_compose_is_pass(monkeypatch):

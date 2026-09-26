@@ -357,11 +357,38 @@ drift alignment; architecture unchanged)
       rules as BedrockClient._credential() (single-line, ASCII,
       <=16384, no whitespace; env values are NOT stripped, matching
       the runtime), so an invalid env key is FAIL, never PASS.
-- [ ] 5.3 Docker: Dockerfile HEALTHCHECK switches to `/health/ready`;
+- [x] 5.3 Docker: Dockerfile HEALTHCHECK switches to `/health/ready`;
       compose api mounts backups read-only (deep age). **Docker is a G4
       acceptance item: docker absent => G4 stays BLOCKED; do NOT tick
       5.3 as G4-complete.** Only AWS/formal-EVAL are permitted non-goal
       BLOCKED edges.
+      DELIVERED 2026-09-26 (LIVE, not static-inferred): host Docker
+      29.8.0 + compose v5.5.1. Dockerfile: HEALTHCHECK→/health/ready,
+      offline wheelhouse install (`--no-index --find-links`, in-image
+      `build_wheelhouse.py verify` on all 27 wheels before pip), explicit
+      PLANPILOT_ENV=production, `COPY data` (preflight refuses a missing
+      factory root — image could never boot without it). compose.yaml:
+      api production-profiled, PLANPILOT_ENV=production explicit,
+      non-loopback publish (`${PLANPILOT_PUBLISH_ADDR:-0.0.0.0}:8080`),
+      `backups:/backups:ro`, secret via required `:?` interpolation (zero
+      plaintext), wheelhouse via named build-context `wh`
+      (additional_contexts, default ../planpilot-wheelhouse out-of-repo,
+      PLANPILOT_WHEELHOUSE_DIR override). Two integration defects found
+      by the live run and fixed at the source: (1) preflight demanded
+      WRITABILITY of PLANPILOT_BACKUP_DIR — contradicting the mandated
+      :ro mount (production unbootable); backup dir is now a READ target
+      (production: exists+readable; development: absent tolerated);
+      (2) deploy_gate.probe_docker ran `compose config --quiet` without
+      profiles (vacuous — profile-gated services skipped) and without
+      satisfying the `:?` secret (missing secret misreported as broken
+      compose file); now both profiles + subprocess-only placeholder.
+      Live acceptance chain (evidence: tests/evidence/g4-production-gates/
+      docker-live.log): build→up→/health/live 200→/health/ready 200
+      db ok→deep 403 unauth→/backups touch refused + mount ro,relatime→
+      HEALTHCHECK healthy ExitCode 0→restart→ready again→/audit/status +
+      db sha256 byte-identical→deploy_gate live docker L3 PASS +
+      http_ready PASS→down -v. Static regressions:
+      tests/unit/test_deployment_static.py (7).
 - [x] 5.4 EVAL: `run_evals.py` byte-unchanged (hash-locked);
       30 BLOCKED / 0 PASS / exit 1 stays (acceptance = the REAL
       summary lines, no `BLOCKED:` token exists); smoke harness output
@@ -377,17 +404,69 @@ drift alignment; architecture unchanged)
 
 ## Phase 6 — evidence, negctl, closure
 
-- [ ] 6.1 negctl sandbox adds must-fail mutations, EXACT counts pinned
+- [x] 6.1 negctl sandbox adds must-fail mutations, EXACT counts pinned
       HERE only: ready ro-probe false-green; restore skips verification;
       ack gate bypass; secret gate bypass; hollow same-name trigger
       accepted; [hold] clock/publisher pass.
-- [ ] 6.2 Move staged probes/logs from `%LOCALAPPDATA%\Temp\g4-staging\`
+      DELIVERED 2026-09-26: new tests/negative_control/
+      test_g4_closeout_negctl.py adds ONLY the two §8 lines without a
+      prior control — §8.2 restore skips the read-only battery
+      (bare-db restore must fail) and §8.4 secret/startup gate
+      short-circuited (31-char secret must be refused). §8.1 (ready
+      ro/reservation/phantom false-greens), §8.3 (ack/marker/receipt
+      gate bypass) and §8.5 (hollow trigger) are ALREADY controlled by
+      test_clock_defence_negctl.py mutations 3-6 and
+      test_recovery_negctl.py mutations 3-5 — referenced in the file
+      header, never restaged (no duplicate theater).
+      HOLDS: clock defence (test_clock_session_defence.py) + publisher
+      audited transaction (test_publisher_schema.py) must STAY GREEN
+      under every closeout mutation — both explicit, fast, socket-free
+      (structural guard test_hold_suites_are_http_free); no
+      expected_suite=None path exists.
+      EXACT COUNTS (from raw stdout, negctl.log):
+      g4-closeout caught=2 escaped=0 broken=0 held=2 of 2;
+      whole tests/negative_control = **12 passed in 338.78s**
+      (approval 14/0/0, clock-defence 6/0/0, g4-closeout 2/0/0+2 held,
+      model-binding 6/0/0, plan-store 56/0/0 + 2 defence-in-depth held,
+      recovery 5/0/0, security-audit 9/0/0, tool-middleware 11/0/0).
+      Real-tree byte-restore hash-checked in every file.
+- [x] 6.2 Move staged probes/logs from `%LOCALAPPDATA%\Temp\g4-staging\`
       into `tests/evidence/g4-production-gates/` (targeted/unit/full/
       negctl logs + EVIDENCE.json with case_map, known_gaps, honest
       timing), final tracked state.
-- [ ] 6.3 Full runs: targeted matrix -> `tests/unit` -> full suite ->
+      DELIVERED 2026-09-26: 10 LF-normalized logs (targeted/unit/full/
+      negctl/vocabulary/diffcheck/deploy_gate/docker/docker-live/
+      formal_eval_blocked) + EVIDENCE.json (HEAD, branch, contract SHA,
+      peeled baseline tag, per-log SHA-256+command+exit+counts/duration,
+      case_map, docker_status, eval_status, known_gaps,
+      failures_and_corrections, mutation_restore, strict all_green
+      definition that EXCLUDES formal EVAL and bedrock_credential).
+      Arithmetic reconciled: full 938 = unit 926 + negctl 12.
+      evidence-integrity test green against the staged copy (working-file
+      fallback — blob-integrity attested post-commit in 6.4).
+      compose config RENDER excluded from the pack (it echoes
+      interpolated values); throwaway secret scrubbed and re-verified
+      0 hits.
+- [x] 6.3 Full runs: targeted matrix -> `tests/unit` -> full suite ->
       negctl (serial, no parallel) -> vocabulary -> docker/EVAL live
       probes; EXIT markers captured; report numbers == raw stdout.
+      DELIVERED 2026-09-26 on the frozen tree (HEAD 8265a5b + the 8
+      uncommitted G4 paths), strictly serial, staging dir
+      `%LOCALAPPDATA%\Temp\g4-staging\20260926T212620Z`:
+      targeted 177 passed/44.51s EXIT 0; unit **926 passed/103.07s**
+      EXIT 0; full **938 passed/438.70s** EXIT 0; negctl **12
+      passed/338.78s** EXIT 0; vocabulary PASS EXIT 0; diff --check
+      clean EXIT 0; contract SHA b92e53f4…fe639 unchanged; baseline tag
+      peeled 5bf299adb1e0… unchanged; deploy_gate EXIT 1 (auth_secret
+      FAIL length 0 — no secret supplied on purpose, never faked;
+      bedrock_credential BLOCKED; worktree_clean FAIL = the frozen
+      pre-commit state; docker L3 PASS; wheelhouse PASS); docker probe
+      compose config EXIT 0 (first driver pass logged a misleading
+      EXIT 1 from a sourcing bug — probe re-run alone on the IDENTICAL
+      frozen tree, documented in EVIDENCE.json, not papered over);
+      formal EVAL `cases=30 passed=0 failed=0 blocked=30` EXIT 1 with
+      runner SHA 6285b782… unchanged (--output to staging so the
+      tracked runtime-eval pack stays byte-frozen).
 - [ ] 6.4 Evidence-BODY commit (tests/devlog/tasks), then verify against
       final Git blobs (+ a no-.git harness copy + a
       bundle->temp-clone). Then an ATTESTATION commit ticking
@@ -399,11 +478,22 @@ drift alignment; architecture unchanged)
 
 ## Completion definition
 
-- [ ] All 8 clock_session / audit / backup / recovery / config / health /
+- [x] All 8 clock_session / audit / backup / recovery / config / health /
       docker / EVAL facts re-anchored to HEAD; P0-1 (rw ready + no
       clock-write readiness), P0-2 (zero-HTTP recovery, offline CLI),
       P0-3 (intent-ledger + 6-point kill matrix) resolved and test-pinned.
-- [ ] Docker gate honestly reported (BLOCKED if docker absent — not
+      RE-ANCHORED 2026-09-26 at the closeout freeze: docker facts now
+      live-verified (Dockerfile/compose bytes + the container acceptance
+      chain, evidence pack docker.log/docker-live.log); the other seven
+      families re-pinned by the targeted matrix (177 passed) at the same
+      HEAD.
+- [x] Docker gate honestly reported (BLOCKED if docker absent — not
       checked-and-claimed-done). Formal EVAL still BLOCKED with evidence.
+      2026-09-26: docker was PRESENT and the full acceptance chain ran
+      for real (deploy_gate docker L3 PASS: daemon 29.8.0 + compose
+      config both profiles; container build/up/probes/ro-mount/
+      healthcheck/restart-persistence all green in docker-live.log).
+      Formal EVAL: `cases=30 passed=0 failed=0 blocked=30` EXIT 1,
+      runner bytes unchanged (formal_eval_blocked.log).
 - [ ] Unit/full/negctl green; contract & baseline untouched; no
       self-modifying verifier; G4 closed only after reviewer sign-off.

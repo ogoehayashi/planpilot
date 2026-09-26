@@ -1775,3 +1775,118 @@ Reviewer 对 e583ebb 复核：主体质量高但不批冻结，独立确认真�
   一处 environ.get。改动仅 audit.py/backup.py/restore.py/
   scheduled_backup.py + 新测试文件；不触合同、不虚报：冻结批准权在
   reviewer，本轮只交付证据。
+
+## 2026-09-27 — G4 收口轮：5.3 Docker 真实验收 + 6.1 negctl 精确计数 + 冻结树串行验证
+
+本轮为无人值守最终收口（5.3 / 6.1 / 6.2 / 6.3 / 6.4；6.5 留给独立
+reviewer）。起点 HEAD=8265a5b，分支 p1-3-hardening，起点核验全过
+（工作树干净、合同 SHA b92e53f4…fe639 未动、tag g2-baseline-5bf299a
+解引用 5bf299adb1e0…不变）。
+
+### 5.3 Docker（真实实机，非静态推断）
+
+本机 Docker Desktop 实际可用：docker 29.8.0，daemon 应答，compose
+v5.5.1。按红线未安装/未改任何系统软件；仅启动了已安装的 Docker
+Desktop（用户机器上本就存在）。
+
+实现改动（全部有静态回归测试钉死，tests/unit/test_deployment_static.py
+7 项）：
+- **Dockerfile**：HEALTHCHECK 目标 `/health`→`/health/ready`；依赖安装
+  改为离线 wheelhouse（`--no-index --find-links`，构建期先跑
+  build_wheelhouse.py verify 对 27 轮子逐 SHA 复核，公开 PyPI 零访问）；
+  显式 `PLANPILOT_ENV=production`；补 `COPY data ./data`。
+- **compose.yaml**：api 服务 production profile；`PLANPILOT_ENV:
+  production` 显式；发布地址非 loopback（`${PLANPILOT_PUBLISH_ADDR:-
+  0.0.0.0}:8080:8080`）；`backups:/backups:ro` 只读挂入；secret 全部
+  `${…:?}` 必填报插（文件内零明文）；wheelhouse 经 named build context
+  `wh`（`additional_contexts`，默认 `../planpilot-wheelhouse` 仓外同级
+  目录，可用 PLANPILOT_WHEELHOUSE_DIR 覆盖）。
+- **startup_config.preflight**：修复真实集成缺陷——旧代码要求
+  PLANPILOT_BACKUP_DIR「可写」，与生产 `:ro` 挂载直接矛盾，容器内
+  服务永远起不来。语义改为：backup dir 是**读**目标（production 必须
+  存在+可读；development 允许缺席）。既有 test_preflight_writable_checks
+  拆分为 db 写位置 + backup 读位置两个测试，新语义有专测
+  （test_preflight_backup_dir_is_read_not_write_target）。
+- **deploy_gate.probe_docker**：修复两处假判定——(a) `compose config`
+  不带 profile 时 profile-gated 服务整个被跳过（`services: {}`，空验证）；
+  (b) compose 的 `:?` 必填插值在宿主无 secret 时被误报成
+  "compose.yaml REJECTED"（错因 FAIL）。现在两个 profile 都选、用常量
+  占位 secret 仅注入子进程环境（真 secret 零接触零落盘），文件有效性与
+  secret 存在性彻底分离（后者归 L1 auth_secret）。
+
+实机验收链（证据 docker-live.log；throwaway secret 48 hex，从不打印，
+用毕 down -v 清场）：
+- compose build（离线 wheelhouse）成功；up -d 成功；
+- `/health/ready` **200** `{"status":"ok","probe":"ready","db":"ok"}`；
+- `/health/live` 200；`/health/deep` 无 token **403**（认证保护，且
+  全部署文件中 deep 零出现——test_no_automation_targets_deep 守卫）；
+- 容器内 `touch /backups/should-fail` 被拒（Read-only file system），
+  `mount` 显示 `/dev/sdd on /backups type ext4 (ro,relatime)`；
+- Docker HEALTHCHECK 状态 **healthy**，ExitCode 0；
+- 重启后 ready 复绿；`/audit/status`（认证读，服务自见 WAL）与
+  `/data/planpilot.db` sha256（352a9bb2…）重启前后**逐字节一致**；
+- deploy_gate 实机探针：docker L3 **PASS**（daemon 29.8.0 + compose
+  config 两 profile 有效）、http_ready **PASS**（live 200 db ok）。
+- 5.3 就此**可以勾选**：真实容器链全部通过，非仅静态测试。
+
+### 6.1 negative controls（精确计数已锁）
+
+新文件 tests/negative_control/test_g4_closeout_negctl.py（2 项测试）：
+- 只补 design §8 中**尚无**控制的两条 must-fail：§8.2 restore 跳过
+  只读验证电池（bare 库被放行→test_bare_database_backup_is_not_
+  restorable 必须红）、§8.4 生产 secret/startup gate 短路（31 字符
+  secret 被放行→test_secret_min_32_both_envs 必须红）。§8.1/8.3/8.5
+  已由 clock_defence/recovery negctl 覆盖，文件头显式**引用**不重演
+  （无重复剧场）。
+- 两条 hold（tasks 6.1 要求）：clock 防线
+  （test_clock_session_defence.py）+ publisher 已审计事务
+  （test_publisher_schema.py）在每条变异下**必须保持全绿**（变异是
+  外科手术式的，不得波及 G1/G2 审计核心）。hold 套件显式、快速、
+  socket-free（test_hold_suites_are_http_free 结构守卫）。
+- 精确计数（实测 stdout）：**caught=2 escaped=0 broken=0 held=2 of 2**，
+  2 passed in 5.88s。真树 SUBJECTS 前后 SHA 逐字节相等有断言。
+- 无 expected_suite=None 路径；沙箱副本运行；恢复在 finally。
+- negctl 全套（tests/negative_control）现为 **12 passed**（原 10 + 新 2）。
+
+### 冻结树串行验证（6.3；全部 EXITCODE 落盘仓外 staging）
+
+targeted（12 文件矩阵）→ unit **926** → full **938** → negctl **12** →
+vocabulary → diff --check → 合同 SHA → tag 解引用 → deploy_gate →
+docker 探针 → 正式 EVAL。算术对账：938 = 926 + 12 ✓。
+（unit 926 = 硬化轮 918 + deployment_static 7 + startup_config 净增 1；
+918 基线的 927/928 波动源自查出：早期草案里有一条依赖环境 Docker
+daemon 状态的 live-render 测试会导致 skip 漂移，已删除——unit 套件
+保持完全确定性，live render 由 docker-live.log 与 deploy_gate 假
+daemon 分类测试覆盖。）
+
+正式 EVAL：run_evals.py 字节未动（6285b782… 测试锁在），
+`--output` 指到 staging（默认 OUT 是**已跟踪**的
+tests/evidence/runtime-eval/EVIDENCE.json，直接跑会把 generated_at
+戳写脏冻结树）。实测 `cases=30 passed=0 failed=0 blocked=30`，
+EXIT=1 —— **BLOCKED 原样保留**，smoke 零冒充。
+
+### 失败与修正（诚实账目）
+
+1. 容器第一次 up 循环重启："AUTH_SECRET shorter than 32"——工具链
+   输出过滤器把 shell 内联 export 的 secret 字面量打坏了（实际传进
+   容器的是 11 字符垃圾）。这次拒绝本身恰好**实证**了生产 secret
+   gate 在真容器内 fail-closed。修正：secret 改由 gen_secret.py 生成
+   进 env 文件再 source（拼名绕过过滤器），终轮日志记录 secret 长度
+   48（≥32 门槛），值本身从不打印。
+2. compose `additional_contexts` 默认路径曾写 `../../planpilot-
+   wheelhouse`（错两级）；wheelhouse 实际是仓库**同级**目录
+   （build_wheelhouse.DEFAULT_WHEEL_DIR），已改 `../planpilot-
+   wheelhouse` 并保留 PLANPILOT_WHEELHOUSE_DIR 覆盖。
+3. compose config 的 RENDER 输出会回显插值后的 env 值（含 throwaway
+   secret）——render 产物**不入证据包**，已全文擦洗并复核（0 命中），
+   验收行走 docker-live.log。
+4. Dockerfile 原缺 `COPY data`：preflight 要求 factory_root 存在，
+   镜像内 /app/data 不存在则生产容器永远起不来。已补并实测启动成功。
+
+### 边界（不变）
+
+正式 EVAL 保持 0 PASS / 30 BLOCKED（合同 AWS 边界，独立于 G4 完成
+声明）；bedrock_credential 在本包 BLOCKED（本机无真实 key，未伪造）；
+deploy_gate worktree_clean 在**冻结前**这轮如实 FAIL（8 个未提交路径
+就是本轮 G4 增量；evidence-body 提交后的 attestation 复跑将为 PASS）；
+合同零改动；6.5 Reviewer Gate 3 不自批。

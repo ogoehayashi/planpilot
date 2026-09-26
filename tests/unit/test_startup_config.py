@@ -199,19 +199,70 @@ def test_preflight_factory_root_must_be_existing_dir(tmp_path):
     assert issues and all(i.severity == "error" for i in issues)
 
 
-def test_preflight_writable_checks(tmp_path):
+def test_preflight_db_write_location_is_creatable(tmp_path):
     cfg, _ = parse_startup_env(base_env(tmp_path), root=tmp_path)
     assert preflight(cfg) == []
     # platform-independent unwritable probe: a FILE as ancestor can
     # never host a sqlite file (Windows chmod on dirs is advisory, so
-    # this pins the creatable-branch rather than ACL semantics).
+    # this pins the creatable-branch rather than ACL semantics). PLANPILOT_DB
+    # IS a server write target, so an impossible location is an error.
     blocker = tmp_path / "blocker"
     blocker.write_text("i am a file")
-    bad = dataclasses.replace(cfg, backup_dir=blocker / "sub" / "deeper.db")
-    issues = preflight(bad)
-    assert any(i.severity == "error" for i in issues), issues
     bad2 = dataclasses.replace(cfg, db_path=blocker / "nope.db")
-    assert any(i.severity == "error" for i in preflight(bad2))
+    assert any(i.severity == "error" and i.field == "PLANPILOT_DB"
+               for i in preflight(bad2))
+
+
+def test_preflight_backup_dir_is_read_not_write_target(tmp_path):
+    """[G4 5.3, design §6] The server only READS the verified-backup
+    manifest from PLANPILOT_BACKUP_DIR; the mandated production mount is
+    `backups:/backups:ro`. So preflight must NOT demand writability —
+    it demands an existing READABLE dir in production (a real mount
+    point), tolerates an absent dev dir, and refuses a non-directory in
+    every env. Requiring writability here was the exact bug that made
+    the read-only production container unbootable."""
+    # development: an absent backup dir is benign (no verified backups yet)
+    dev, _ = parse_startup_env(base_env(tmp_path, PLANPILOT_PORT="0"),
+                               root=tmp_path)
+    dev_absent = dataclasses.replace(dev, backup_dir=tmp_path / "not-yet")
+    assert preflight(dev_absent) == []
+    # development: an EXISTING readable dir is fine
+    good = tmp_path / "bk-good"
+    good.mkdir()
+    assert preflight(dataclasses.replace(dev, backup_dir=good)) == []
+    # a FILE at the backup dir is refused in every env (not a directory)
+    f = tmp_path / "bk-is-a-file"
+    f.write_text("x")
+    for env, extra in (("development", {}),
+                       # production also refuses the loopback default host
+                       ("production", {"PLANPILOT_HOST": "0.0.0.0"})):
+        c, issues = parse_startup_env(base_env(
+            tmp_path, PLANPILOT_ENV=env, PLANPILOT_PORT="0",
+            PLANPILOT_BACKUP_DIR=str(f), PLANPILOT_DB=str(tmp_path / "p.db"),
+            **extra), root=tmp_path)
+        assert c is not None, (env, [str(i) for i in issues])
+        found = preflight(c)
+        assert any(i.field == "PLANPILOT_BACKUP_DIR" and i.severity == "error"
+                   for i in found), (env, found)
+    # production: an ABSENT backup dir is refused (the mount must exist)
+    prod_absent = tmp_path / "prod-mount-missing"
+    pc, _ = parse_startup_env(base_env(
+        tmp_path, PLANPILOT_ENV="production", PLANPILOT_HOST="0.0.0.0",
+        PLANPILOT_PORT="0", PLANPILOT_BACKUP_DIR=str(prod_absent),
+        PLANPILOT_DB=str(tmp_path / "p.db")), root=tmp_path)
+    assert pc is not None
+    assert any(i.field == "PLANPILOT_BACKUP_DIR"
+               and "production requires an EXISTING directory" in i.message
+               for i in preflight(pc))
+    # production: a read-only (non-writable) dir is ACCEPTED — the whole point
+    ro_dir = tmp_path / "prod-ro"
+    ro_dir.mkdir()
+    rpc, _ = parse_startup_env(base_env(
+        tmp_path, PLANPILOT_ENV="production", PLANPILOT_HOST="0.0.0.0",
+        PLANPILOT_PORT="0", PLANPILOT_BACKUP_DIR=str(ro_dir),
+        PLANPILOT_DB=str(tmp_path / "p.db")), root=tmp_path)
+    assert rpc is not None
+    assert preflight(rpc) == []           # readable dir => OK, no write demand
 
 
 def test_startup_or_die_raises_without_construction(tmp_path, monkeypatch):

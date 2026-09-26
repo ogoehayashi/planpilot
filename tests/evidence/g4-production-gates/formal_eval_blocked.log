@@ -1,0 +1,7 @@
+##### run_evals.py --output STAGE (formal EVAL, expect BLOCKED exit1)
+##### cmd: PY tools/run_evals.py --output C:\Users\Lawrence\AppData\Local/Temp/g4-staging/20260926T212620Z/runtime-eval
+##### started: 2026-09-26T21:41:53Z
+formal EVAL readiness evidence: C:\Users\Lawrence\AppData\Local\Temp\g4-staging\20260926T212620Z\runtime-eval
+cases=30 passed=0 failed=0 blocked=30
+EXITCODE=1
+##### finished: 2026-09-26T21:41:53Z

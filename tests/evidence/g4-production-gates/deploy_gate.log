@@ -1,0 +1,15 @@
+##### deploy_gate --profile production (layers 1+2+3)
+##### cmd: PY tools/deploy_gate.py --profile production
+##### started: 2026-09-26T21:41:51Z
+[PASS   ] L1 profile_valid: production
+[PASS   ] L1 profile_matches_env: production
+[FAIL   ] L1 auth_secret: PLANPILOT_AUTH_SECRET missing or shorter than 32 chars (length 0)
+[PASS   ] L1 bind_host: 0.0.0.0
+[PASS   ] L2 tracked_secrets: 94 tracked files scanned, 0 matches
+[BLOCKED] L2 bedrock_credential: no PLANPILOT_BEDROCK_API_KEY env and no PLANPILOT_BEDROCK_KEY_FILE — inference probes cannot run (never reported as pass)
+[PASS   ] L2 wheelhouse: manifest verified: wheelhouse OK: 27 wheels, 59929033 bytes at E:\PlanPilot-Hackathon\planpilot-wheelhouse
+[FAIL   ] L2 worktree_clean: 8 uncommitted paths — freeze the tree before deploying
+[PASS   ] L3 docker: daemon reachable (server 29.8.0) AND compose config valid (both profiles, placeholder secret)
+overall=fail exit=1
+EXITCODE=1
+##### finished: 2026-09-26T21:41:52Z

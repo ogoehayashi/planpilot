@@ -240,26 +240,73 @@ def preflight(cfg: StartupConfig) -> list[Issue]:
     if not cfg.factory_root.is_dir():
         issues.append(_err("PLANPILOT_FACTORY_ROOT",
                            f"must be an EXISTING directory: {cfg.factory_root}"))
-    for label, path in (("PLANPILOT_DB", cfg.db_path),
-                        ("PLANPILOT_BACKUP_DIR", cfg.backup_dir)):
-        p = Path(path)
-        if p.exists():
-            if p.is_dir():
-                if not _writable(p):
-                    issues.append(_err(label, f"directory not writable: {p}"))
-            else:
-                parent = p.parent
-                if not (parent.is_dir() and _writable(parent)):
-                    issues.append(_err(label, f"file location not writable: {parent}"))
-        else:
-            parent = p.parent if not p.is_dir() else p
-            probe = parent
-            while not probe.exists() and probe != probe.parent:
-                probe = probe.parent
-            if not (probe.is_dir() and _writable(probe)):
-                issues.append(_err(label, f"not creatable/writable under {probe}"))
+    # PLANPILOT_DB is a WRITE target: it (or its parent) must be creatable
+    # and writable, or Database construction fails with a raw sqlite error
+    # instead of an operator-readable refusal.
+    _check_write_location(cfg.db_path, "PLANPILOT_DB", issues)
+    # [G4 5.3, design §6] PLANPILOT_BACKUP_DIR is NOT a server write target.
+    # The server only READS `last_verified_backup.json` from it (deep-health
+    # backup age, P1-4 — never an mtime guess); the WRITER is the separate
+    # scheduled-backup service, which mounts the same volume rw and does not
+    # go through this preflight. Requiring writability here contradicted the
+    # mandated production mount `backups:/backups:ro` and made the container
+    # unbootable.
+    #   production: the dir is a real mount point — it must EXIST and be
+    #     readable (a missing/unreadable backup dir would make deep health
+    #     silently report no manifest forever, a production gate failure
+    #     nobody can diagnose);
+    #   development: the default ROOT/backups may not exist yet — an absent
+    #     dev backup dir is benign (no verified backups yet); when it DOES
+    #     exist it must be readable.
+    if cfg.backup_dir is not None:
+        bd = Path(cfg.backup_dir)
+        if bd.exists() and not bd.is_dir():
+            issues.append(_err("PLANPILOT_BACKUP_DIR",
+                               f"exists but is not a directory: {bd}"))
+        elif cfg.env == "production":
+            if not bd.is_dir():
+                issues.append(_err("PLANPILOT_BACKUP_DIR",
+                                   f"production requires an EXISTING directory "
+                                   f"(the server reads the verified-backup "
+                                   f"manifest from it): {bd}"))
+            elif not _readable(bd):
+                issues.append(_err("PLANPILOT_BACKUP_DIR",
+                                   f"directory not readable: {bd}"))
+        elif bd.is_dir() and not _readable(bd):
+            issues.append(_err("PLANPILOT_BACKUP_DIR",
+                               f"directory not readable: {bd}"))
     issues.extend(_port_checks(cfg))
     return issues
+
+
+def _check_write_location(path, label: str, issues: list[Issue]) -> None:
+    """A WRITE target's location: writable if present, else creatable."""
+    p = Path(path)
+    if p.exists():
+        if p.is_dir():
+            if not _writable(p):
+                issues.append(_err(label, f"directory not writable: {p}"))
+        else:
+            parent = p.parent
+            if not (parent.is_dir() and _writable(parent)):
+                issues.append(_err(label, f"file location not writable: {parent}"))
+    else:
+        probe = p.parent if not p.is_dir() else p
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        if not (probe.is_dir() and _writable(probe)):
+            issues.append(_err(label, f"not creatable/writable under {probe}"))
+
+
+def _readable(d: Path) -> bool:
+    """Can we LIST this directory? (The manifest read itself is checked by
+    deep health at request time; a directory we cannot even list can never
+    yield one.)"""
+    try:
+        next(iter(d.iterdir()), None)
+    except OSError:
+        return False
+    return True
 
 
 def _writable(d: Path) -> bool:
