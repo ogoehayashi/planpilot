@@ -78,6 +78,19 @@ def verify_audit_connection(conn) -> dict:
             "FROM audit_chain ORDER BY id"):
         row_id, record, previous_hash, event_hash = row
         count += 1
+        # Reviewer P1: dynamically-typed corruption (record stored as
+        # BLOB/NULL, hashes as int/None…) must surface as a structured
+        # AuditChainError, never a bare TypeError/AttributeError leaking
+        # out of the walk.
+        for field_name, value in (("record", record),
+                                  ("previous_hash", previous_hash),
+                                  ("event_hash", event_hash)):
+            if not isinstance(value, str):
+                raise AuditChainError(
+                    "chain_break",
+                    f"at entry id={row_id} (position {count}): {field_name} "
+                    f"is {type(value).__name__}, not TEXT — stored bytes "
+                    "cannot have produced a valid hash link")
         expected = hashlib.sha256((previous + record).encode("utf-8")).hexdigest()
         if (row_id != count or previous_hash != previous
                 or event_hash != expected):

@@ -77,9 +77,28 @@ def run(source, directory, keep):
             old.unlink()
             removed.append('unverified/' + old.name)
 
+    # Reviewer P1 (TOCTOU): the manifest may only bless bytes the battery
+    # ACTUALLY verified. Re-hash and compare against result.sha256; any
+    # drift (or unreadable file) after verification means the verdict no
+    # longer describes this file — quarantine it, refuse, touch no manifest.
+    try:
+        current = sha256_file(target)
+    except OSError as exc:
+        current = None
+        drift_detail = f'cannot re-hash after verification: {exc}'
+    else:
+        drift_detail = (f'post-verification drift: {current[:12]}… != '
+                        f'verified {result.sha256[:12]}…')
+    if current != result.sha256:
+        quarantine = directory / 'unverified'
+        quarantine.mkdir(exist_ok=True)
+        moved = quarantine / target.name
+        shutil.move(str(target), str(moved))
+        return {'backup': None, 'quarantined': str(moved),
+                'failure': drift_detail, 'removed': []}
     _atomic_write_json(directory / MANIFEST_NAME, {
         'path': str(target),
-        'sha256': sha256_file(target),
+        'sha256': result.sha256,
         'verified_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
         'chain_head': {'entry_count': result.entry_count,
                        'event_hash': result.event_hash},

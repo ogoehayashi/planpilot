@@ -569,10 +569,11 @@ def execute_ledger(marker: Path, ledger: dict) -> dict:
 
 
 def plan_restore(db_path, backup_path, fresh: bool = True):
-    """Build/anchor the ledger for THIS restore. Never trusts a stale
-    marker bytes: fresh=True (a new restore) rewrites the ledger from
-    scratch after anchoring backup facts; resuming (CLI without a new
-    backup arg) passes an existing dict through."""
+    """Anchor backup facts for a NEW restore and mint a generation.
+    Only ever called when NO marker exists (reviewer P0: an existing
+    marker is an unfinished restore's ledger — it must be RESUMED with
+    the same backup or rolled back, never overwritten by a fresh plan).
+    `fresh` kept for call-site compatibility."""
     target = Path(db_path)
     backup = Path(backup_path)
     if not backup.is_file():
@@ -600,8 +601,20 @@ def restore_database(db_path, backup_path, lock_handle_owner=None):
     try:
         marker = marker_path(target)
         existing = load_ledger(marker)
-        if existing is not None and existing["target_db"] == str(target) \
-                and existing["backup_path"] == str(Path(backup_path)):
+        if existing is not None:
+            # Reviewer P0: a marker IS an unfinished restore's ledger —
+            # it owns this database. A second restore with a DIFFERENT
+            # backup must never overwrite it, or the first quarantine
+            # generation silently loses its ledger and rollback path.
+            if existing["target_db"] != str(target):
+                raise RestoreAborted(
+                    f"marker {marker} belongs to a different target "
+                    f"({existing['target_db']!r}); refusing to touch it")
+            if existing["backup_path"] != str(Path(backup_path)):
+                raise RestoreAborted(
+                    "an interrupted restore owns this database: resume it "
+                    f"with the SAME backup ({existing['backup_path']!r}) "
+                    "or run --rollback first. This refusal wrote nothing.")
             ledger = existing                  # resume: reconcile decides
         else:
             ledger = plan_restore(target, backup_path)
@@ -621,11 +634,14 @@ def rollback_ledger(db_path) -> dict:
     contract — the operator restores a different backup instead)."""
     target = Path(db_path)
     marker = marker_path(target)
-    ledger = load_ledger(marker)
-    if ledger is None:
-        raise RestoreAborted("no restore-state marker: nothing to roll back")
+    # Reviewer P1: lock FIRST — acquire before reading the marker or any
+    # sidecar, so a concurrent restore can neither finish nor clear the
+    # marker in the gap while we act on a stale ledger.
     holder = acquire_server_lock(target)
     try:
+        ledger = load_ledger(marker)
+        if ledger is None:
+            raise RestoreAborted("no restore-state marker: nothing to roll back")
         qdir = quarantine_root(target) / ledger["generation"] \
             if ledger["generation"] else None
         if qdir is None or not qdir.is_dir():
@@ -705,23 +721,29 @@ def write_ack(db_path, operator: str) -> dict:
     plus provenance (operator, timestamp) and ack-time evidence
     (restored_db_sha256_at_ack, never re-compared at boot)."""
     target = Path(db_path)
-    receipt = receipt_path(target)
-    if not receipt.is_file():
-        raise RestoreAborted(
-            "no restore-receipt to ack: a restore must complete first")
-    rdata = json.loads(receipt.read_text(encoding="utf-8"))
-    payload = {
-        "receipt_sha256": sha256_file(receipt),
-        "generation": rdata["generation"],
-        "backup_sha256": rdata["backup_sha256"],
-        "target_db": str(target),
-        "operator": operator,
-        "acked_at": _now_ts(),
-        "restored_db_sha256_at_ack": sha256_file(target),
-    }
-    ack = ack_path(target)
-    _atomic_write_json(ack, payload)
-    return payload
+    # Reviewer P1: the ack is part of the recovery WRITE path — same OS
+    # lock as restore/rollback, never a concurrent sidecar write.
+    holder = acquire_server_lock(target)
+    try:
+        receipt = receipt_path(target)
+        if not receipt.is_file():
+            raise RestoreAborted(
+                "no restore-receipt to ack: a restore must complete first")
+        rdata = json.loads(receipt.read_text(encoding="utf-8"))
+        payload = {
+            "receipt_sha256": sha256_file(receipt),
+            "generation": rdata["generation"],
+            "backup_sha256": rdata["backup_sha256"],
+            "target_db": str(target),
+            "operator": operator,
+            "acked_at": _now_ts(),
+            "restored_db_sha256_at_ack": sha256_file(target),
+        }
+        ack = ack_path(target)
+        _atomic_write_json(ack, payload)
+        return payload
+    finally:
+        holder.release()
 
 
 def evaluate_recovery_gate(db_path) -> tuple[bool, list[str]]:

@@ -1736,3 +1736,42 @@ DROP 全被驱动拒。P0-2 boot 证明：gate 拒绝启动 = 零构造 spy + �
   ddc1520741091cf5bfe67e、同目录 .sha256 sidecar 程序直写并读回核
   对；手写 sidecar 曾出错已作废重生成）。本轮冻结提交落盘后需再出
   含新提交的 bundle——当前 bundle 只保到 1786025。
+
+## 2026-09-26 — Phase 4 评审打回硬化轮（P0 + 3×P1）
+
+Reviewer 对 e583ebb 复核：主体质量高但不批冻结，独立确认真实 P0 + 三个 P1。
+本轮逐条关闭，全部有可复演回归测试（tests/unit/test_reviewer_hardening.py，
+9 项，对应评审六条验收）。
+
+- **P0（marker 覆盖）**：restore_database 中 marker 存在即视为未完成恢复的
+  ledger 所有权：target 不同直接拒绝（外来 marker 永不改署）；backup 不同
+  拒绝并提示 resume-SAME-backup 或 --rollback；两者均在持锁后判定、拒绝
+  路径零写入（测试以 marker 字节 + 目标三件套 + 全部 quarantine 生成树
+  fingerprint 前后全等证明）。plan_restore 语义同步收窄为仅无 marker 时调用。
+  评审 exact 复演（hard-kill 于 quarantine-wal，换 backup B）：拒；原
+  backup A resume 收敛出 receipt；--rollback 仍字节还原 pre_main。
+- **P1a（锁序）**：rollback_ledger 与 write_ack 改为先 acquire_server_lock
+  再读 marker/receipt 等 sidecar（旧代码 rollback 先读 ledger 后拿锁，
+  ack 完全不拿锁）。活锁下两者均 DbLockHeld 拒绝且零写入（子进程持锁
+  复演）。
+- **P1b（损坏文件裸抛）**：verify_backup_file 吸收 sqlite3.Error——连接/
+  pragma/schema 任一步抛错均转结构化 failed check（DatabaseError: file is
+  not a database 现为 integrity_check/required_tables 失败文案），battery
+  对随机垃圾字节不再上抛；sha_unchanged 仍 PASS。verify_audit_connection
+  新增逐字段类型守卫：record/previous_hash/event_hash 非 str（BLOB/NULL/
+  int）即 chain_break 型 AuditChainError，不再 TypeError 泄漏。CLI
+  exit 1 无 traceback（子进程断言）。
+- **P1c（manifest TOCTOU）**：scheduled_backup.run 在电池通过后重算哈希并
+  与 result.sha256 比对；漂移（或被改写/不可读）一律移入 unverified/ 拒绝
+  发 manifest；manifest 只写 result.sha256（电池实际验证过的字节）。
+- 证据轮（硬化后重跑）：hardening 定向 9/9（含 P0 精确 hard-kill 复演、
+  活锁零写入、垃圾字节结构化、BLOB 结构化、post-verify 漂移拒发 manifest）；
+  Phase-4 定向五族 68 passed；恢复负控 caught=5 escaped=0 broken=0 of 5
+  （1 passed）；unit 918（909+9 吻合，g4-probe-staging/h-unit.log）、
+  negctl 10（h-negctl.log）、**full 928 passed / 464.04s / EXIT 0**
+  （h-full.log；928 = 918+10 吻合）。词表守卫 PASS；合同 SHA
+  b92e53f4ff0541050ec6585f…未动；回收变量 PLANPILOT_RECOVERY_ACK/_DIAG
+  全库仅注释命中、零运行时读取；kill 缝仍仅 PLANPILOT_RESTORE_KILL_AT
+  一处 environ.get。改动仅 audit.py/backup.py/restore.py/
+  scheduled_backup.py + 新测试文件；不触合同、不虚报：冻结批准权在
+  reviewer，本轮只交付证据。

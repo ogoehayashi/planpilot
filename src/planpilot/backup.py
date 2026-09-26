@@ -114,25 +114,48 @@ def verify_backup_file(path: str | Path) -> BackupVerification:
             checks.append(Check('audit_chain', False,
                                 'skipped — file refused as not self-contained'))
         else:
-            conn = sqlite3.connect(p.as_uri() + '?mode=ro&immutable=1', uri=True)
-            conn.execute('PRAGMA query_only=ON')
-            conn.row_factory = sqlite3.Row
+            conn = None
+            try:
+                conn = sqlite3.connect(p.as_uri() + '?mode=ro&immutable=1',
+                                       uri=True)
+                conn.execute('PRAGMA query_only=ON')
+                conn.row_factory = sqlite3.Row
+                integrity = conn.execute('PRAGMA integrity_check').fetchone()[0]
+                integrity_ok = integrity == 'ok'
+                integrity_detail = (f"returned 'ok'" if integrity_ok
+                                    else f'returned {integrity!r}')
+            except sqlite3.Error as exc:
+                # reviewer P1: genuinely corrupt bytes can make the PRAGMA
+                # RAISE (e.g. 'file is not a database') — that is still an
+                # expected corruption, reported as a FAILED check, never a
+                # bare exception escaping the result.
+                integrity_ok = False
+                integrity_detail = (f'pragma raised {type(exc).__name__}: '
+                                    f'{exc}')
+            checks.append(Check('integrity_check', integrity_ok,
+                                integrity_detail))
 
-            integrity = conn.execute('PRAGMA integrity_check').fetchone()[0]
-            checks.append(Check('integrity_check', integrity == 'ok',
-                                f'returned {integrity!r}' if integrity != 'ok'
-                                else "returned 'ok'"))
+            if conn is None:
+                missing = list(REQUIRED_TABLES)
+                checks.append(Check('required_tables', False,
+                                    'skipped — file refused as unreadable'))
+            else:
+                try:
+                    tables = {row[0] for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'")}
+                    missing = [t for t in REQUIRED_TABLES if t not in tables]
+                    tables_detail = (
+                        f'missing table(s): {missing}; only a FULL runtime '
+                        'backup is restorable (design §5 policy)' if missing
+                        else f'all {len(REQUIRED_TABLES)} core tables present')
+                except sqlite3.Error as exc:
+                    missing = list(REQUIRED_TABLES)
+                    tables_detail = (f'schema unreadable: '
+                                     f'{type(exc).__name__}: {exc}')
+                checks.append(Check('required_tables', not missing,
+                                    tables_detail))
 
-            tables = {row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'")}
-            missing = [t for t in REQUIRED_TABLES if t not in tables]
-            checks.append(Check(
-                'required_tables', not missing,
-                f'missing table(s): {missing}; only a FULL runtime backup '
-                'is restorable (design §5 policy)' if missing
-                else f'all {len(REQUIRED_TABLES)} core tables present'))
-
-            walkable = integrity == 'ok' and not missing
+            walkable = integrity_ok and not missing
             if walkable:
                 try:
                     tip = verify_audit_connection(conn)
