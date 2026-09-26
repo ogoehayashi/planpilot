@@ -276,7 +276,11 @@ drift alignment; architecture unchanged)
       be a regular file passing BedrockClient content rules (a
       directory can no longer masquerade); build_wheelhouse `download`
       refuses a non-empty wheel dir. No AWS probe (real AWS = formal
-      EVAL boundary). tests/unit/test_deploy_gate.py.
+      EVAL boundary). tests/unit/test_deploy_gate.py. 5.2.2
+      2026-09-26: the ENV credential channel now runs the SAME token
+      rules as BedrockClient._credential() (single-line, ASCII,
+      <=16384, no whitespace; env values are NOT stripped, matching
+      the runtime), so an invalid env key is FAIL, never PASS.
 - [ ] 5.3 Docker: Dockerfile HEALTHCHECK switches to `/health/ready`;
       compose api mounts backups read-only (deep age). **Docker is a G4
       acceptance item: docker absent => G4 stays BLOCKED; do NOT tick

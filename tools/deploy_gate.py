@@ -190,17 +190,20 @@ def probe_tracked_secrets() -> Finding:
                    f"{len(scan_targets)} tracked files scanned, 0 matches", 2)
 
 
-def _validate_key_content(kf: Path):
-    """Mirror BedrockClient._credential() exactly (bedrock_client.py
-    ~line 105-112): read utf-8-sig capped at 16385, strip, then the
-    token must be non-empty, <=16384 chars, pure ASCII, and contain no
-    whitespace anywhere (single-line). Returns None when valid, else a
-    violation description that NEVER contains the content."""
-    try:
-        with kf.open("r", encoding="utf-8-sig") as stream:
-            token = stream.read(16385).strip()
-    except (OSError, UnicodeError) as exc:
-        return f"unreadable as text ({type(exc).__name__})"
+def _validate_key_value(token, strip_outer=False):
+    """Shared Bedrock-credential token rules, mirrored EXACTLY from
+    BedrockClient._credential() (bedrock_client.py ~line 110): a
+    token survives iff it is a str, non-empty, <=16384 chars, pure
+    ASCII, and free of whitespace anywhere. strip_outer=True applies
+    the FILE channel's .strip() semantics (the runtime strips file
+    content after reading); the ENV channel must NOT strip — the
+    runtime takes os.environ.get() verbatim, so a leading/trailing
+    space fails there too. Returns None when valid, else a violation
+    description that NEVER contains the value (5.2.2 reviewer #P1)."""
+    if not isinstance(token, str):
+        return "not a string"
+    if strip_outer:
+        token = token.strip()
     if not token:
         return "empty or whitespace-only"
     if len(token) > 16384:
@@ -212,6 +215,18 @@ def _validate_key_content(kf: Path):
     return None
 
 
+def _validate_key_content(kf: Path):
+    """File channel read semantics, identical to the runtime: utf-8-sig,
+    capped read of 16385, outer whitespace stripped, then the shared
+    token rules."""
+    try:
+        with kf.open("r", encoding="utf-8-sig") as stream:
+            token = stream.read(16385)
+    except (OSError, UnicodeError) as exc:
+        return f"unreadable as text ({type(exc).__name__})"
+    return _validate_key_value(token, strip_outer=True)
+
+
 def probe_key_file(env: dict) -> Finding:
     """Bedrock credential: env var OR managed key file (both legal)."""
     api_key = env.get("PLANPILOT_BEDROCK_API_KEY", "") or ""
@@ -220,8 +235,20 @@ def probe_key_file(env: dict) -> Finding:
         return Finding("bedrock_credential", FAIL,
                        "PLANPILOT_BEDROCK_API_KEY env AND PLANPILOT_BEDROCK_KEY_FILE both set — pick one channel", 2)
     if api_key:
+        # 5.2.2 (reviewer P1): the env channel used to PASS on ANY
+        # non-empty value, while BedrockClient._credential() rejects
+        # multiline / non-ASCII / over-16384 / whitespace-containing
+        # tokens outright — the gate said "credential ok" and the
+        # agent then failed at call time. Run the env token through the
+        # SAME rules with the runtime's env semantics (no stripping).
+        bad = _validate_key_value(api_key, strip_outer=False)
+        if bad:
+            return Finding("bedrock_credential", FAIL,
+                           f"PLANPILOT_BEDROCK_API_KEY present but invalid — {bad}; "
+                           "BedrockClient would refuse it at call time (value not shown)", 2)
         return Finding("bedrock_credential", PASS,
-                       f"PLANPILOT_BEDROCK_API_KEY env present (length {len(api_key)}, value not shown)", 2)
+                       f"PLANPILOT_BEDROCK_API_KEY env present, valid single-line ASCII key "
+                       f"(length {len(api_key)}, value not shown)", 2)
     if not kf_raw:
         return Finding("bedrock_credential", BLOCKED,
                        "no PLANPILOT_BEDROCK_API_KEY env and no PLANPILOT_BEDROCK_KEY_FILE — inference probes cannot run (never reported as pass)", 2)

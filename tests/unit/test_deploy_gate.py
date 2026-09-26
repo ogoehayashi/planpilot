@@ -98,6 +98,31 @@ def test_key_file_channel_neither_set_is_BLOCKED_not_pass():
     assert f.status == G.BLOCKED  # "no runnable target" rule
 
 
+# --- 5.2.2 (reviewer P1): the ENV channel must face the SAME token
+# rules the runtime applies; env semantics = NO stripping (the client
+# takes os.environ.get() verbatim), unlike the file channel.
+@pytest.mark.parametrize("value,why", [
+    ("line1\nline2", "not single-line"),
+    ("pass\xc3\xa9-word", "non-ASCII"),
+    ("A" * 20000, "longer than 16384"),
+    ("  AKIAdashdashdash  ", "not single-line"),   # outer spaces NOT tolerated on env
+    ("AKIA with spaces inside", "not single-line"),
+])
+def test_env_key_violations_are_fail_not_pass(value, why):
+    f = G.probe_key_file({"PLANPILOT_BEDROCK_API_KEY": value})
+    assert f.status == G.FAIL, f.detail
+    assert why in f.detail
+    stripped = value.strip()
+    if stripped:
+        assert stripped[:10] not in f.detail  # value never echoed
+
+
+def test_env_key_clean_single_line_ascii_still_passes():
+    f = G.probe_key_file({"PLANPILOT_BEDROCK_API_KEY": "AKIA" + "f" * 30})
+    assert f.status == G.PASS, f.detail
+    assert "single-line ASCII" in f.detail
+
+
 def test_key_file_inside_repo_is_fail(tmp_path):
     inside = ROOT / "src" / "sneaky.key"
     try:

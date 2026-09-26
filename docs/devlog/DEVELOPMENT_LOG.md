@@ -1497,3 +1497,36 @@ g4-probe-staging/phase521-{unit,negctl,full}.log，EXIT 均 0。
 Docker 缺席⇒本机 gate 如实 BLOCKED/exit 2（worktree 冻结后复跑
 仅余 auth-secret 未设的 FAIL 与 bedrock/docker 的 BLOCKED）；
 5.3 不勾；G4 整体与正式 EVAL 继续 BLOCKED；合同 SHA 不变。
+
+
+## 2026-09-26 — G4 Phase 5.2.2（评审残余 P1：env 凭据通道未过运行时校验）
+
+评审确认 5.2.1 七项全修复，但指出同类最后一处假 PASS：
+`PLANPILOT_BEDROCK_API_KEY` 只要非空即 PASS，而
+`BedrockClient._credential()`（bedrock_client.py:110）会拒绝多行、
+非 ASCII、>16384、含空白的值——gate 说"凭据可用"，真调用即失败。
+现场用评审给的三个向量复现全部命中。
+
+修复（最小、fix-forward，按评审指定方案）：
+- 抽出共享 `_validate_key_value(token, strip_outer=False)`，规则逐字
+  镜像运行时：str、非空、≤16384、纯 ASCII、任意位置无空白；
+- 文件通道 `_validate_key_content` 读 utf-8-sig + 16385 上限后以
+  `strip_outer=True` 走共享校验（与运行时 `.strip()` 语义一致）；
+- env 通道 `strip_outer=False`——运行时对 os.environ 的值不做清理，
+  首尾空格同样拒绝；违规 FAIL detail 只报原因、绝不回显值；
+- 新增 6 项测试：多行/非 ASCII/20000 字符/首尾空格/内部空格五个
+  env 负向量（参数化）+ 1 项干净 env key 仍 PASS 的正向量。
+
+验证（按评审省时间指令：定向 + tests/unit；full+negctl 合并进
+Phase 4 冻结验收）：py_compile 通过；词表守卫 PASS；定向
+test_deploy_gate **34 passed**（28+6）；tests/unit **844 passed**
+（838+6，算术吻合；g4-probe-staging/phase522-unit.log）。
+
+本轮插曲如实记录：开工时 E:（SanDisk 移动盘，USBSTOR 有注册记录）
+从系统消失约半小时，全盘取证确认仓库本体在盘上未受损——重插后
+HEAD=31b5af4、工作树干净、合同 SHA b92e53f4… 原样。另一次 patch
+误删了 test_key_file_channel_neither_set 的一行测试体，同轮发现
+同轮恢复（diff 可见），最终文件以 pytest 全绿为准。
+
+边界不变：5.3 未勾；本机无 Docker⇒G4 整体 BLOCKED；正式 EVAL
+0 PASS / 30 BLOCKED；run_evals.py 零改动。
