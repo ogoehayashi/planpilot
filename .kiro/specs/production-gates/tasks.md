@@ -252,15 +252,25 @@ drift alignment; architecture unchanged)
       lock<clock ordering test; restore's non-blocking take uses the
       same helper when wired in 4.5.
       tests/unit/test_db_lock_boot.py 6 passed; unit 866 passed.
-- [ ] 4.5 Intent-ledger state machine (`<db>.restore-state`): every op
+- [x] 4.5 Intent-ledger state machine (`<db>.restore-state`): every op
       logged pending/done with per-file SHA; a phase advances ONLY when
-      all its ops are done; on reopen `reconcile_ledger()` re-derives
-      fact from filesystem (main.db vs staging vs quarantine + SHA),
-      never trusts the label. WAL/SHM moved file-by-file. `--rollback`
-      path. Receipt temp->fsync->replace->parent-fsync binding backup
+      all its ops are done; on reopen `reconcile_ledger()` re-derives fact
+      from filesystem (main.db vs staging vs quarantine + SHA), never
+      trusts the label. WAL/SHM moved file-by-file. `--rollback` path.
+      Receipt temp->fsync->replace->parent-fsync binding backup
       SHA+target+audit_head+quarantine generation; any later byte =>
       gate rejects.
-- [ ] 4.6 Zero-HTTP recovery gate (P0-2): NO unacked server starts
+      DELIVERED 2026-09-26: `src/planpilot/restore.py` — nine-op ledger
+      (ack-invalidate, stage-copy, stage-verify, quarantine main/wal/shm,
+      replace-staging, receipt-write, marker-clear); declare-before /
+      facts-after marker writes; reconcile re-derives every op from
+      byte-level facts (replace-proven retroactively completes earlier
+      ops — design kill#5 verbatim); stage-verify runs the 4.2 battery;
+      rollback validates slot ownership (pre-move fact / anchored sha /
+      quarantine copy) and refuses over unknown bytes with zero
+      mutation. Tests: test_restore_ledger.py 21 passed (matrix cases
+      land in 4.7).
+- [x] 4.6 Zero-HTTP recovery gate (P0-2): NO unacked server starts
       (dev too; socket never bound, StartupConfigError-class refusal
       before bind). Diagnostics are OFFLINE-ONLY via the existing CLIs
       (`tools/verify_backup.py`, `tools/restore_database.py --status /
@@ -276,6 +286,17 @@ drift alignment; architecture unchanged)
       revoked; the ONLY ack path is restore_database.py --ack, round-4
       P0-1); the restored_db hash is ack-time evidence, NOT a boot-time
       equality constraint (a live DB must restart fine after writes).
+      DELIVERED 2026-09-26: `evaluate_recovery_gate()` in restore.py +
+      api_server.py main() slot (line 655 — after lock, before
+      clock@672/Database/Server/bind; refusal is a SystemExit with the
+      operator message, same class as the startup-config refusal it
+      sits beside). ack-invalidate op voids a stale ack BEFORE target
+      touches (kill-safe). CLI --status byte-frozen tests + source-level
+      construct ban (docstring excluded, it names the absences).
+      Revoked env vars: ZERO reads (grep environ/getenv + RECOVERY = 0
+      hits; the only textual occurrence is the api_server comment
+      stating the revocation itself). Gate/boot-order
+      proofs land in 4.7.
 - [ ] 4.7 unit: kill-point matrix at SIX points (after marker-pre-stage,
       after stage, after main moved, after partial WAL, after replace-
       pre-phase, after receipt-pre-clear) => every case a SECOND restore

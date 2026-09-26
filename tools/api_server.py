@@ -18,6 +18,7 @@ from planpilot.authority import RuntimeAuthority
 from planpilot.approval import ApprovalError
 from planpilot.clock import Clock, WallClock, clock_from_env
 from planpilot.db_lock import DbLockHeld, acquire_server_lock
+from planpilot.restore import evaluate_recovery_gate
 from planpilot.persistence import Database
 from planpilot.publisher import PublisherService
 from planpilot.startup_config import (StartupConfigError, config_provenance,
@@ -644,6 +645,20 @@ def main():
         db_lock = acquire_server_lock(cfg.db_path)
     except DbLockHeld as exc:
         raise SystemExit(f"startup refused: {exc}") from exc
+    # G4 4.6 (design §5 R4, zero-HTTP recovery gate): if a restore
+    # happened at this database (receipt present, or an intent marker
+    # that never got receipted) and no matching ack exists, startup
+    # ABORTS in every environment, dev included. The socket is never
+    # bound and no Database/Clock is constructed — this check is
+    # read-only on sidecar files. PLANPILOT_RECOVERY_ACK/…_DIAG are
+    # REVOKED: the only ack path is restore_database.py --ack.
+    gate_ok, gate_reasons = evaluate_recovery_gate(cfg.db_path)
+    if not gate_ok:
+        raise SystemExit(
+            "startup refused: an unacked database restore is pending "
+            f"({', '.join(gate_reasons)}); run "
+            "tools/restore_database.py --ack <operator> after verifying "
+            "the receipt")
     # [BATCH-A review-3 #1] BOTH constructors live inside the try: if
     # Server(...) raises (a bind error, say), the already-open Database
     # handle still closes in the finally — previously it leaked.

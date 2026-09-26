@@ -1639,3 +1639,49 @@ pid，kill 走 taskkill /F /T 进程树）；DbSpy 缺 bind_clock 代理（加
 __getattr__ 委托）。O_BINARY token 被词表守卫拒（os.open 本就二进制，
 移除）。unit 合并 **866 passed**（860+6，phase444b-unit.log）；
 词表 PASS；合同 SHA 未动。
+
+
+## 2026-09-26 — G4 Phase 4：4.5 intent-ledger 恢复 + 4.6 零-HTTP 恢复门
+
+新增 `src/planpilot/restore.py`（759 行）+ `tools/restore_database.py`
+CLI（125 行）+ `tools/api_server.py` boot 插入 gate（lock 之后、
+Clock/Database 之前——4.4 钉的槽位）。
+
+4.5 按 design R2：`<db>.restore-state` 是 intent ledger（九 op：
+ack-invalidate/stage-copy/stage-verify/quarantine-main/wal/shm/
+replace-staging/receipt-write/marker-clear），每 op 声明先落盘、
+完成后刷新事实再落盘；`reconcile_ledger()` 是唯一的进入逻辑——扫全部
+位置、哈希在场文件、从 FACTS 重导 done/pending，label 永不受信
+（含自家 ops 字典）。REPLACED 事实先行：target 字节==anchored backup
+sha 即证明 replace，回溯判定先前 move 全部完成（design §5 kill#5
+字面要求）。trio 一次一个文件进 `<db>.quarantine/<UTCts>-<seq>/`
+（mkdir 争用创生、seq 递增保唯一）。receipt 按 R3 绑定
+backup_sha256、backup_path、target_db、audit head（entry_count+
+event_hash，来自 4.2 电池 walk）、quarantine_dir、generation、
+restored_at、tool_version。
+`--rollback` 逐槽校验字节归属（pre-move fact / anchored backup sha /
+quarantine 副本三者之一），来路不明的字节 -> 拒绝且零改动；回滚清掉
+同 generation 的 receipt/ack（回滚后的世界不得留门档）。
+测试缝 PLANPILOT_RESTORE_KILL_AT=<op> 走 os._exit(9)（PLANPILOT_
+（PLANPILOT_是实现命名空间，守卫放行，与既有 CRASH 缝同机制）。
+
+4.6 按 design R4 + round-4 P0-1/P0-2：gate 只读 sidecar（receipt 或
+marker 在场=有恢复发生），缺 ack / ack 畸形 / 四个安全绑定字段
+（receipt_sha256、generation、backup_sha256、target_db）任一不符 ->
+拒绝，dev 环境同样拒绝；operator/timestamp 仅 provenance，同格式编辑
+不声明可检测（round-5 原话）。PLANPILOT_RECOVERY_ACK 与 _DIAG 双双
+不存在（已撤销），唯一 ack 路径是 CLI --ack。restored_db_sha 只是
+ack 时刻证据，boot 永不复比。CLI --status/--show-receipt 纯读（测试
+用字节对比钉死零写入；源码级检查禁 Server(/Database( 等构造，docstring
+除外——它正是解释为何缺席的散文）。
+
+测试 `tests/unit/test_restore_ledger.py` 21 passed：干净收敛、receipt
+字段全绑、bare 库拒于 marker 写下之前、facts 压过 label（kill#5 世
+界）、同备份二次恢复新 generation、gate P0-1 四项回归（旧 ack 被
+ack-invalidate 原子作废 / ack 后写入照常开机 / receipt 合法 JSON 改值
+-> receipt_sha256 拒绝 / 四字段逐个单改全拒）、malformed/missing 拒、
+无恢复放行、provenance 边界、rollback 字节复原/拒未知/无 marker 拒、
+CLI 离线双检。api_server boot 顺序测试补 gate 槽位由 4.7 覆盖。
+合并 `tests/unit` **887 passed**（866+21 吻合，
+g4-probe-staging/phase4-4546-unit.log）。词表守卫 PASS；合同 SHA 未动
+(b92e53f4…)。端到端冒烟脚本留在 repo 外（g4-probe-staging）。
