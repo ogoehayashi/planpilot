@@ -1711,3 +1711,28 @@ DROP 全被驱动拒。P0-2 boot 证明：gate 拒绝启动 = 零构造 spy + �
    OTHER restore 的 ack（design 原话 every NEW restore invalidates
    the PREVIOUS ack），本 ledger 的 ack 保留续跑。
 验证数字：矩阵+伪证+boot 证明合并 `tests/unit` **909 passed**（887+22 吻合，g4-probe-staging/phase4-47-unit.log）；词表 PASS；合同 b92e53f4… 未动。
+
+
+## 2026-09-26 — G4 Phase 4 冻结验收：full + negctl 合并轮 + 恢复防线负控
+
+按评审约定，Phase 4 结束时把此前欠跑的一轮 full+negctl 合并补上，
+外加本轮新增的恢复防线负控文件：
+
+- 新 `tests/negative_control/test_recovery_negctl.py`：五道 Phase-4
+  防线逐条翻行 -> 对应 focused 测试必须真实 FAILED（非崩溃式假红），
+  沙箱外 .git、真树字节还原 + 前后哈希比对。变异清单：V3 verify-
+  after-create 旁路（4.3 devlog 欠账本轮清偿）、boot order 锁后置、
+  gate 摘除、receipt 字节绑定摘除、ack-invalidate 摘除。
+  结果 caught=5 escaped=0 broken=0 of 5
+  （g4-probe-staging/phase4-negctl-new.log）。
+- 合并轮：unit 909（phase4free-unit.log）+ negctl 10
+  （phase4free-negctl.log）+ **full 919 passed / 538.15s / EXIT 0**
+  （phase4free-full2.log；919 = 909 + 10 吻合）。词表守卫 PASS；
+  合同 b92e53f4ff054105…未动。
+- E 盘会话中两次掉线（13:32、约 15 时），重插后 HEAD=1786025 完好。
+  教训落地：恢复后第一件事已执行——`git bundle --all` 封存到
+  D:/PlanPilot_backups/planpilot_phase4_1786025_all.bundle
+  （verify 通过、sha256=b41be721cd1b55775182f375a6cb5dac1a9ca4bf8a
+  ddc1520741091cf5bfe67e、同目录 .sha256 sidecar 程序直写并读回核
+  对；手写 sidecar 曾出错已作废重生成）。本轮冻结提交落盘后需再出
+  含新提交的 bundle——当前 bundle 只保到 1786025。
