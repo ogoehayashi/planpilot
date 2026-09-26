@@ -1,6 +1,7 @@
 """Contract-valid security events and decision traces on one append-only chain."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -33,6 +34,70 @@ def redact_untrusted_text(value: object) -> tuple[str, bool]:
         changed = changed or bool(count)
     text = text[:500]
     return text or "[empty untrusted text]", changed
+
+
+class AuditChainError(RuntimeError):
+    """G4 4.1 (design §5 V1): chain/head verification failure raised by
+    verify_audit_connection. `kind` is a closed vocabulary:
+    missing_table | missing_head | chain_break | head_mismatch."""
+
+    def __init__(self, kind: str, detail: str = ""):
+        self.kind = kind
+        super().__init__(f"{kind}: {detail}" if detail else kind)
+
+
+def verify_audit_connection(conn) -> dict:
+    """G4 4.1 (design §5 V1) — the read-only audit verifier over an
+    ALREADY-OPEN connection. Deliberately NOT a method of Database and
+    NOT AuditTrail: the verifier must not repair what it verifies, so
+    this function contains ZERO schema changes and ZERO writes (an AST
+    guard test rejects any forbidden write-statement word here, docstring
+    included — keep this prose free of those words or the guard fires).
+
+    F5 verbatim rule (mirrors Database._append_audit_record,
+    persistence.py:310): the hash is sha256(previous + record) over the
+    STORED record STRING exactly as read — it is NEVER re-canonicalized
+    from parsed JSON. A whitespace-only mutation of a stored record is
+    therefore a chain_break here, whereas a canonicalizing verifier
+    would falsely bless it.
+
+    Raises AuditChainError(kind=...) on the first violation; returns
+    {"entry_count": int, "event_hash": str} of the verified tip.
+    """
+    tables = {row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    if "audit_chain" not in tables:
+        raise AuditChainError("missing_table", "audit_chain")
+    if "audit_chain_head" not in tables:
+        raise AuditChainError("missing_table", "audit_chain_head")
+
+    previous = GENESIS
+    count = 0
+    for row in conn.execute(
+            "SELECT id, record, previous_hash, event_hash "
+            "FROM audit_chain ORDER BY id"):
+        row_id, record, previous_hash, event_hash = row
+        count += 1
+        expected = hashlib.sha256((previous + record).encode("utf-8")).hexdigest()
+        if (row_id != count or previous_hash != previous
+                or event_hash != expected):
+            raise AuditChainError(
+                "chain_break",
+                f"at entry id={row_id} (position {count}); stored bytes "
+                "were not re-canonicalized before hashing (F5)")
+        previous = event_hash
+
+    head = conn.execute(
+        "SELECT entry_count, event_hash FROM audit_chain_head "
+        "WHERE singleton=1").fetchone()
+    if head is None:
+        raise AuditChainError("missing_head", "no singleton=1 row")
+    if head[0] != count or head[1] != previous:
+        raise AuditChainError(
+            "head_mismatch",
+            f"head says entry_count={head[0]} event_hash={head[1]!r:.16}… "
+            f"but walk found entry_count={count} tip={previous!r:.16}…")
+    return {"entry_count": count, "event_hash": previous}
 
 
 class AuditTrail:

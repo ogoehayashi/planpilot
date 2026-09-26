@@ -1530,3 +1530,33 @@ HEAD=31b5af4、工作树干净、合同 SHA b92e53f4… 原样。另一次 patch
 
 边界不变：5.3 未勾；本机无 Docker⇒G4 整体 BLOCKED；正式 EVAL
 0 PASS / 30 BLOCKED；run_evals.py 零改动。
+
+
+## 2026-09-26 — G4 Phase 4 开工：4.1 审计验证器 + 4.2 备份全电池
+
+评审批准 5.1/5.2/5.4 后进入 Phase 4（恢复与备份）。本轮交付 4.1、4.2。
+
+- 4.1 `src/planpilot/audit.py`: `AuditChainError`（kind 闭集
+  missing_table/missing_head/chain_break/head_mismatch）+
+  `verify_audit_connection(conn)` 纯 SELECT 逐字重算 sha256(previous +
+  record)，不重建 Database、不跑 init schema、不改一行数据（design §5
+  V1；persistence.py:248 的 INSERT OR IGNORE head 修复路径已验证不可
+  达）。F5 verbatim 规则：哈希读存储原文，空白级篡改即 chain_break。
+- 4.2 `src/planpilot/backup.py` 全电池：SHA → 单文件自含（-wal/-shm
+  搁浅即拒，V2）→ 只读 URI immutable 打开 + query_only →
+  PRAGMA integrity_check → 13 张 REQUIRED_TABLES（含 runtime_events
+  三兄弟与 factory_states，bare fixture 库故意不可恢复=round-4 政策）→
+  触发器存活 → `verify_audit_connection` 链 → 逐结局验证前后字节 SHA
+  不变（V1 不修复）。`backup_database` 升级为 sqlite3 backup API
+  （在线安全）+ WAL checkpoint + 同目录原子 move + 0o600 + sidecar
+  `.sha256` 先于指针。
+- `tools/verify_backup.py` CLI：exit 0 PASS / 1 电池失败 / 2 路径错误。
+  冒烟实证：真备份 exit 0（tip=entries=3）；篡改 record exit 1 报
+  chain_break(F5)；缺文件 exit 2。临时冒烟脚本已删，仓库外 staging。
+
+测试：`tests/unit/test_backup_verification.py` **11 passed**（AST
+guard、tip 报告、篡改/空白级/删 head/head 超前/DROP 表/wal 搁浅/
+好备份/bare 库拒绝/无修复路径）。首跑 3 failed 均为测试自身缺陷
+（AST 被 docstring 绊、注入 no-op、SHA 取样时机），同轮修复，逐条
+见测试注释。合并 `tests/unit` **855 passed**（844+11 吻合）。词表
+守卫 PASS。合同 SHA 未动。
