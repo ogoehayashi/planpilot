@@ -1890,3 +1890,47 @@ EXIT=1 —— **BLOCKED 原样保留**，smoke 零冒充。
 deploy_gate worktree_clean 在**冻结前**这轮如实 FAIL（8 个未提交路径
 就是本轮 G4 增量；evidence-body 提交后的 attestation 复跑将为 PASS）；
 合同零改动；6.5 Reviewer Gate 3 不自批。
+
+## 2026-09-26 — G4 收口轮 attestation（证据体提交后验证）
+
+Evidence-body commit：**`1d4c94bf137c133b1e3c6e730e4ec4d4a37ac66e`**
+（21 files, +1319/−41；含 5.3 实现 + 6.1 negctl + 证据包 + devlog +
+tasks 勾账）。本条为该提交**之后**的独立验证记录（G3 attestation
+纪律：先证据体提交，再对已提交 blob 验证，最后小型 attestation 提交）。
+
+对 `1d4c94b` 逐项验证（全部真实命令输出）：
+
+1. `git status --porcelain` 空；`git diff --check` 干净。
+2. **Git blob 复核**：`git cat-file blob HEAD:tests/evidence/
+   g4-production-gates/<log>` 重算 SHA-256 与 EVIDENCE.json 记录值
+   **10/10 全等**；所有 blob 零 CRLF。
+3. `git ls-files --eol`：证据包 11 个文件全部 i/lf w/lf
+   attr/text eol=lf。
+4. **无 .git harness 副本**（`git archive HEAD` 解到 temp）：
+   evidence-integrity 测试对 working-file 字节 **PASS**。
+5. **bundle**：`D:\PlanPilot_backups\planpilot_g4_1d4c94b_20260926.bundle`
+   （1,182,391 字节；sha256 `ee8062f8c7229506181956d4669baf8124c3e78eb2cd8db67d4837ca27c7f05b`；
+   sidecar 程序直写）。`git bundle verify`：**complete history**，
+   HEAD=1d4c94b。
+6. **bundle→temp clone**：HEAD、branch（p1-3-hardening）、合同 SHA
+   `b92e53f4ff0541050ec6585f3237f4d764a26e455447a672f3419dfb284fe639`、
+   baseline tag 解引用 `5bf299adb1e06c2f061db4086cc3bf183944ff56`、
+   证据包 11 文件全部一致；clone 内 evidence-integrity **PASS**、
+   blob SHA **10/10**。temp clone/harness 已删，bundle 保留。
+7. **post-commit deploy_gate 复跑**：worktree_clean FAIL→**PASS**
+   （证据包内那次 FAIL 是冻结时未提交状态，EVIDENCE.json known_gaps
+   已如实登记）；auth_secret FAIL（length 0——本轮探针故意不带
+   secret，不伪造）；bedrock_credential BLOCKED（无真实 key）；
+   docker L3 PASS（daemon 29.8.0 + compose config 双 profile）；
+   wheelhouse PASS（27 wheels）；overall exit 1，如实。
+
+另：提交过程中 git 后台 geometric-repack 维护任务报
+"could not write multi-pack-index: Permission denied"（疑与索引文件被
+瞬时占用有关，USB 盘环境常见）。提交对象本身完好：`git fsck` 零坏
+对象（仅历史 dangling），HEAD/log/status/tag 全部复核正常，不影响
+任何证据。如实记录，不掩饰。
+
+边界：6.5 Reviewer Gate 3 **未勾**——等待独立 reviewer；G4 completion
+第三项（reviewer sign-off 后关闭）未勾。正式 EVAL 保持
+`cases=30 passed=0 failed=0 blocked=30` EXIT 1，runner 字节
+`6285b782…` 未动。合同零改动，baseline tag 未动。

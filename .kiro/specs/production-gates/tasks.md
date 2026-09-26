@@ -467,12 +467,35 @@ drift alignment; architecture unchanged)
       formal EVAL `cases=30 passed=0 failed=0 blocked=30` EXIT 1 with
       runner SHA 6285b782… unchanged (--output to staging so the
       tracked runtime-eval pack stays byte-frozen).
-- [ ] 6.4 Evidence-BODY commit (tests/devlog/tasks), then verify against
+- [x] 6.4 Evidence-BODY commit (tests/devlog/tasks), then verify against
       final Git blobs (+ a no-.git harness copy + a
       bundle->temp-clone). Then an ATTESTATION commit ticking
       verification-class boxes by exact verified SHA. Bundle kept
       OUTSIDE the repo at `D:\PlanPilot_backups\` with a `#`-commented
       `.sha256` sidecar.
+      ATTESTED 2026-09-26 against evidence-body commit
+      **`1d4c94bf137c133b1e3c6e730e4ec4d4a37ac66e`**:
+      (a) `git status --porcelain` empty + `git diff --check` clean at
+      the body commit; (b) all 10 evidence logs re-hashed FROM GIT BLOBS
+      (`git cat-file blob HEAD:…`) == EVIDENCE.json recorded SHA-256,
+      10/10 match, zero CRLF in any blob; (c) `git ls-files --eol`:
+      every pack file i/lf w/lf attr/text eol=lf; (d) no-.git harness
+      copy (`git archive HEAD` → temp): evidence-integrity test PASSES
+      on working-file bytes; (e) bundle
+      `D:\PlanPilot_backups\planpilot_g4_1d4c94b_20260926.bundle`
+      (1,182,391 bytes, sha256
+      ee8062f8c7229506181956d4669baf8124c3e78eb2cd8db67d4837ca27c7f05b)
+      `git bundle verify`: complete history, HEAD 1d4c94b; (f) clone
+      from the bundle to temp: HEAD/branch/contract SHA
+      b92e53f4…fe639/baseline peeled 5bf299adb1e0…/11 evidence files
+      all match, evidence-integrity PASSES IN THE CLONE, blob SHAs
+      10/10; temp clone+harness deleted, bundle RETAINED; (g) post-
+      commit deploy_gate re-run: worktree_clean flipped FAIL→**PASS**
+      (the pack's FAIL was the documented frozen pre-commit state);
+      auth_secret FAIL (length 0, no secret supplied — never faked),
+      bedrock BLOCKED, docker L3 PASS, wheelhouse PASS, exit 1 honest.
+      A FINAL bundle covering this attestation commit ships per the
+      closeout instruction (Stage 10).
 
 - [ ] 6.5 **Reviewer Gate 3**: present; spec/commit only after approval.
 
