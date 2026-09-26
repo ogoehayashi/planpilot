@@ -190,12 +190,16 @@ drift alignment; architecture unchanged)
 
 ## Phase 4 — backup verification + recovery (design §5)
 
-- [ ] 4.1 `verify_audit_connection(conn)` pure SELECT-only over the
+- [x] 4.1 `verify_audit_connection(conn)` pure SELECT-only over the
       connection (no ctor, no repair); hash = `sha256((prev +
       row["record"]).encode())` on the STORED record STRING; re-canonicalize
       mutation must be rejected. AST guard: verifier source has no
       CREATE/INSERT/UPDATE/DELETE.
-- [ ] 4.2 `verify_backup_file(path)->BackupVerification` — a SEPARATE
+      DELIVERED cbb484f + correction entry 2026-09-26: AuditChainError
+      (kind: missing_table|missing_head|chain_break|head_mismatch);
+      F5 verbatim stored-text hashing; guard = ast walk of the function
+      source, keyword test asserts the guard itself bites.
+- [x] 4.2 `verify_backup_file(path)->BackupVerification` — a SEPARATE
       read-only fn from `verify_audit_connection`: `mode=ro&immutable=1`
       + `query_only=ON`; requires `PRAGMA integrity_check == "ok"`;
       REFUSES if a `-wal`/`-shm` sibling exists beside the backup; core
@@ -203,13 +207,31 @@ drift alignment; architecture unchanged)
       security_events, decision_traces, publication_receipt,
       authority_state, idempotency_registry, factory_states); audit
       chain+head walk; backup SHA unchanged before/after.
-- [ ] 4.3 `backup_database()` STAYS `-> None` (design §5 V3 — no
+      DELIVERED cbb484f + correction entry 2026-09-26: REQUIRED_TABLES
+      = exactly the 9 tables above (the earlier "13 incl. runtime_events"
+      devlog note was wrong and is corrected, not the code); every
+      outcome — pass AND each refusal — leaves the file byte-identical
+      (V1 never-repair pinned per-outcome). CLI tools/verify_backup.py
+      exit 0/1/2 (PASS / battery FAIL / path error), smoke-proven on a
+      real tampered copy.
+- [x] 4.3 `backup_database()` STAYS `-> None` (design §5 V3 — no
       public API change); `tools/scheduled_backup.py` derives the
       deterministic backup filename from its own inputs, computes its
       SHA-256, then calls verify_backup_file on it AFTER each backup, excludes failures from
       the retention "successful" set, and atomically writes
       `last_verified_backup.json` (manifest binding path + sha256);
       deep-health age reads THIS manifest.
+      DELIVERED 2026-09-26: battery runs BEFORE anything is advertised;
+      refused file -> shutil.move into <dir>/unverified/ (quarantine
+      gets its OWN bounded prune, same keep); manifest = atomic
+      mkstemp+fsync+os.replace of {path, sha256, verified_at RFC3339-Z,
+      chain_head:{entry_count,event_hash}} — field-by-field compatible
+      with the existing _manifest_verified_epoch reader
+      (api_server.py:284/312). The manifest sha256 is recomputed via
+      sha256_file(target) at advertise time — the same chunked
+      algorithm the battery used for its before/after invariant
+      (BackupVerification.sha256 == sha_after), so the two agree by
+      construction. tests/unit/test_scheduled_verified_set.py 5 passed.
 - [ ] 4.4 OS lock helper (msvcrt/flock) acquired by the ENTRY POINT
       BEFORE any Database/Clock construction (round-4 P0-2 boot order:
       env -> parse+non-DB preflight -> LOCK -> marker/receipt/ACK gate

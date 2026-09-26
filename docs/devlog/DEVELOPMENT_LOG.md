@@ -1560,3 +1560,57 @@ guard、tip 报告、篡改/空白级/删 head/head 超前/DROP 表/wal 搁浅/
 （AST 被 docstring 绊、注入 no-op、SHA 取样时机），同轮修复，逐条
 见测试注释。合并 `tests/unit` **855 passed**（844+11 吻合）。词表
 守卫 PASS。合同 SHA 未动。
+
+
+## 2026-09-26 — devlog 更正：cbb484f 条目三处 claim 超出代码
+
+复核全文件后确认，上一条目（随 cbb484f 提交）有三处与代码不符，
+逐条更正（append-only，不删原文）：
+
+1. `backup_database` 写成 "WAL checkpoint + 0o600 + sidecar .sha256
+   先于指针"。实现只做 sqlite3 backup API（ro URI 读源，在线安全）、
+   目标端 PRAGMA integrity_check、fsync、同目录 mkstemp+os.replace
+   原子落位。WAL checkpoint 未调用、未 chmod 0o600、无 per-file
+   sidecar（4.3 的 manifest JSON 里有 sha256 字段，但那不是 sidecar）。
+2. "13 张 REQUIRED_TABLES（含 runtime_events 三兄弟）"。实际
+   REQUIRED_TABLES = **9** 张，与 tasks 4.2 括号清单逐字一致：
+   audit_chain、audit_chain_head、authority_state、clock_session、
+   decision_traces、factory_states、idempotency_registry、
+   publication_receipt、security_events。`runtime_events` 不是任何
+   表名，13 是误记。
+3. "触发器存活"不是电池检查项。代码检查的是链重算
+   （verify_audit_connection 纯 SELECT）；篡改检测由哈希承担，与
+   触发器存在性无关。
+
+设计 §5 V1/V3 与 tasks 4.2 均未要求这三项，故不补码凑话——更正至
+与代码一致。教训回写技能：claim 落笔前逐句对代码，勿凭"打算做"记
+"已做到"；条目里的**数字**（表数/字节数）必须当场数过再写。
+
+
+## 2026-09-26 — G4 Phase 4：4.3 scheduled_backup 接入 V1 验证集
+
+`tools/scheduled_backup.py` 重写 run()（design §5 V3，F4 修复：旧版
+零验证按 mtime 修剪）：
+
+- backup_database 保持 -> None 公开签名（V3 红线，未动）；工具自派
+  确定性文件名，create 之后立刻跑 verify_backup_file 只读电池。
+- 失败 -> 文件 move（shutil.move，同目录）进 <dir>/unverified/，不进
+  retention 成功集、不广播；manifest 保持原字节（测试用 read_bytes
+  对比钉死）。
+- 成功 -> 原子写（mkstemp+fsync+os.replace）
+  <dir>/last_verified_backup.json：{path, sha256, verified_at
+  (RFC3339-Z), chain_head:{entry_count,event_hash}} — deep-health
+  既有 _manifest_verified_epoch 读取器（api_server.py:284/312，
+  Batch A 交付）字段逐一对上，含 Z 后缀 swap 规则。
+- retention 只数主目录符合 NAME_RE 的文件；quarantine 有同 keep 的
+  独立修剪（防 unverified/ 无限堆积——首版 ghost 清理按同名触发实为
+  死代码，提交前自查修正，另加 quarantine 修剪测试）。keep<1 仍拒绝。
+
+测试 `tests/unit/test_scheduled_verified_set.py` **5 passed**：全
+运行时源验证+广播+manifest schema+verified_at 可解析；bare 库
+required_tables 拒绝 -> quarantine+manifest 字节不变；keep=2 修剪
+只留新两；keep=0 抛 ValueError；quarantine 同 keep 独立修剪。合并
+`tests/unit` **860 passed**（855+5 吻合，
+g4-probe-staging/phase4-43b-unit.log）。词表守卫 PASS。合同 SHA 未动。
+negctl "verify after create" 翻行按 V3 要求在 4.7 冻结验收一并落
+（与 kill-matrix 同轮）。
