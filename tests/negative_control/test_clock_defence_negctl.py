@@ -109,10 +109,23 @@ MUTATIONS = (
 
 
 def once(text, old, new, label):
-    count = text.count(old)
-    if count != 1:
-        raise AssertionError(f"[{label}] broken anchor: {count} occurrences")
-    return text.replace(old, new)
+    """Apply one mutation, tolerating the checkout's line endings.
+
+    ``.gitattributes`` pins LF in the working tree for every file type, but a
+    checkout can still arrive with CRLF (``core.autocrlf=true`` on Windows). The
+    anchors below are authored with LF, so on a CRLF checkout ``text.count(old)``
+    would be 0 and the mutation would be reported as a *broken anchor* rather than
+    actually applied — a false negative that hides whether the defence still
+    detects the mutation. Match whichever form the file on disk uses.
+    """
+    for to_file in (str, lambda value: value.replace("\n", "\r\n")):
+        candidate = to_file(old)
+        count = text.count(candidate)
+        if count == 1:
+            return text.replace(candidate, to_file(new))
+        if count > 1:
+            raise AssertionError(f"[{label}] broken anchor: {count} occurrences")
+    raise AssertionError(f"[{label}] broken anchor: 0 occurrences")
 
 
 @pytest.fixture(scope="module")
