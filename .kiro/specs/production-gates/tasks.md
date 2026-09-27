@@ -497,7 +497,35 @@ drift alignment; architecture unchanged)
       A FINAL bundle covering this attestation commit ships per the
       closeout instruction (Stage 10).
 
-- [ ] 6.5 **Reviewer Gate 3**: present; spec/commit only after approval.
+- [x] 6.5 **Reviewer Gate 3**: present; spec/commit only after approval.
+      **APPROVED 2026-09-27 by an independent reviewer** on `d1c73e0`.
+      The reviewer treated every claim in the handoff report as
+      unverified and re-derived it: working tree clean, `git diff --check`
+      clean, contract SHA `b92e53f4…fe639` unchanged, baseline tag
+      `5bf299a…4ff56` unmoved, 33/35 with only this gate + the final
+      sign-off open, bundle complete history with HEAD `d1c73e0`, bundle
+      SHA-256 `c74d8962c9bab404c016874b9861a628e966dba11aa142cee4e134233e8148cc`,
+      all 10 evidence-log hashes matching, evidence-integrity +
+      deployment-static + startup-config targeted = **77 passed**, new G4
+      negctl **2 passed** (caught=2 escaped=0 broken=0 held=2), closed
+      vocabulary PASS, and an independent full-suite re-run of
+      **938 passed in 515.52s**. Docker was independently REPLAYED under a
+      separate project name rather than trusting the committed logs:
+      compose config both profiles PASS, offline build from current source
+      PASS, container up PASS, `/health/live` 200, `/health/ready` 200 with
+      `db=ok`, `/health/deep` 403 unauthenticated, `/backups` write refused
+      by the read-only mount, Docker HEALTHCHECK `healthy`, ready 200 again
+      after restart, and all temp containers/networks/volumes/review image
+      cleaned up. (The reviewer's first replay read Docker health
+      immediately after app-ready and saw `starting` — a probe that did not
+      wait for the HEALTHCHECK interval; corrected to await `healthy`, the
+      same frozen tree passed in full. Not a product defect.) Reviewer P3,
+      non-blocking: `docker.log` / `docker-live.log` carry a null top-level
+      `exit_code` in EVIDENCE.json although the logs contain per-step
+      `COMPOSE_CONFIG_EXIT=0` / `UP_EXIT=0` / `DOWN_EXIT=0`; future packs
+      should set those two top-level values to `0` explicitly. The attested
+      pack at `d1c73e0` is deliberately left byte-identical so the
+      reviewer-verified hashes stay valid.
 
 ## Completion definition
 
@@ -518,5 +546,26 @@ drift alignment; architecture unchanged)
       healthcheck/restart-persistence all green in docker-live.log).
       Formal EVAL: `cases=30 passed=0 failed=0 blocked=30` EXIT 1,
       runner bytes unchanged (formal_eval_blocked.log).
-- [ ] Unit/full/negctl green; contract & baseline untouched; no
+- [x] Unit/full/negctl green; contract & baseline untouched; no
       self-modifying verifier; G4 closed only after reviewer sign-off.
+      All four clauses hold at the signoff commit. Green: the reviewer
+      independently re-ran the full suite on the frozen tree `d1c73e0`
+      (**938 passed in 515.52s**, exit 0) rather than accepting the
+      committed `full.log`, and separately confirmed targeted 77 passed,
+      new G4 negctl 2 passed (caught=2 escaped=0 broken=0 held=2), and
+      closed vocabulary PASS — so unit/full/negctl green is
+      third-party-verified, not self-reported. Untouched: contract SHA
+      `b92e53f4…fe639` and baseline tag peel `5bf299a…4ff56` both
+      re-derived by the reviewer as unchanged/unmoved. No self-modifying
+      verifier: no verifier, evidence log, or frozen-contract byte was
+      edited to make a gate pass; the only test-file changes this round
+      are the new 5.3 static regressions and the new G4 negctl, and the
+      one semantics correction in `test_preflight_*` was forced by a real
+      product defect (read-only `/backups` mount vs. a preflight
+      writability demand) recorded in
+      EVIDENCE.json `failures_and_corrections`. Signed off: 6.5 now
+      carries the reviewer's own APPROVED record, so this item is ticked
+      *after* sign-off, never before. Formal EVAL stays
+      `0 PASS / 30 BLOCKED` (exit 1) and is explicitly OUTSIDE this local
+      G4 completion claim — it belongs to the later real AWS/Bedrock
+      phase and must not be rewritten because G4 closed.

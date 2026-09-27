@@ -1934,3 +1934,110 @@ tasks 勾账）。本条为该提交**之后**的独立验证记录（G3 attesta
 第三项（reviewer sign-off 后关闭）未勾。正式 EVAL 保持
 `cases=30 passed=0 failed=0 blocked=30` EXIT 1，runner 字节
 `6285b782…` 未动。合同零改动，baseline tag 未动。
+## 2026-09-27 — G4 Reviewer Gate 3 独立批准，production-gates 关闭（35/35）
+
+上一轮 attestation 提交 `d1c73e0` 之后，独立 reviewer 对 Reviewer Gate 3
+作出**批准**结论。本条记录其独立验证内容，以及据此完成 6.5 与最后一项
+Completion definition 的勾选（**先批准后勾选**，顺序不可颠倒）。
+
+### Reviewer 的独立复核（不是采信实施方报告）
+
+reviewer 明确把交付报告里的每条声明当作待验证项，在冻结树 `d1c73e0`
+上自行重算：
+
+- HEAD `d1c73e02dfc83b4455c58ccbd277adab7cef1211`，工作树干净，
+  `git diff --check` 通过；
+- 合同 SHA `b92e53f4…fe639` 未变，基线 tag `5bf299a…4ff56` 未移动；
+- 任务当时 33/35，未勾两项确实只有 Reviewer Gate 3 与最终 sign-off；
+- bundle 完整历史、HEAD 正确，SHA-256
+  `c74d8962c9bab404c016874b9861a628e966dba11aa142cee4e134233e8148cc`；
+- evidence 中 10 份日志哈希**全部匹配**；
+- 证据完整性 + 部署静态 + startup 配置定向：**77 passed**；
+- 新 G4 negctl：**2 passed**，`caught=2 / escaped=0 / broken=0 / held=2`；
+- 封闭词表：PASS；
+- **完整套件独立重跑：938 passed in 515.52s**（自行跑，不看入库 full.log）。
+
+### Docker 独立复演
+
+reviewer 没有只采信入库日志，而是用**独立项目名**重新执行了一遍容器链：
+双 profile compose config PASS、当前源码离线构建 PASS、容器启动 PASS、
+`/health/live` 200、`/health/ready` 200 且 `db=ok`、`/health/deep` 无认证
+403、`/backups` 写入被只读挂载拒绝、Docker HEALTHCHECK `healthy`、重启后
+`/health/ready` 重新 200，临时容器/网络/数据卷/复核镜像全部清理。
+
+其第一次复演在应用 ready 后立即读取 Docker health 得到 `starting`——那是
+reviewer 自己的探针没有等 HEALTHCHECK 周期；改为等待 `healthy` 后，同一
+冻结树完整通过。**判定为探针时序问题，不是产品缺陷**，无需改实现。
+
+### Reviewer P3（非阻塞，不改已认证证据）
+
+`EVIDENCE.json` 中 `docker.log` 与 `docker-live.log` 的**顶层** `exit_code`
+为 `null`，虽然日志内部逐步有 `COMPOSE_CONFIG_EXIT=0` / `UP_EXIT=0` /
+`DOWN_EXIT=0`，且 reviewer 已独立复演成功。建议未来证据包把这两个顶层值
+明确写成 `0`。
+
+本轮**故意不回填**这两处：`d1c73e0` 的证据包已经过 reviewer 逐字节哈希
+核验，改动任何一字节都会使其核验结论失效。因此 P3 仅作为证据格式改进
+记录在案（并写入 tasks.md 6.5 条目），留待下一个证据包周期实施。
+
+### 据此完成的勾选
+
+- **6.5 Reviewer Gate 3** → 勾选，并在条目内完整记录 reviewer 的独立
+  复核数字、Docker 复演结论、P3 与"不回填"的理由。
+- **Completion definition 最后一项**（unit/full/negctl 绿；合同与基线
+  未动；无自改验证器；G4 仅在 reviewer 签署后关闭）→ 勾选，四个分句
+  逐条对应到 reviewer 的第三方证据（绿是 reviewer 自行重跑的
+  938/515.52s，不是自报）。
+
+至此 `.kiro/specs/production-gates/tasks.md` 为 **35/35，0 项未勾**：
+G4 本地生产门禁关闭。
+
+### 不变的边界
+
+正式 EVAL 仍为 `cases=30 passed=0 failed=0 blocked=30`，EXIT 1，
+runner 字节未变。它属于后续真实 AWS/Bedrock 实测阶段，**不因 G4 本地
+门禁通过而改写**，也不计入任何本地完成声明。
+### 本轮 signoff 过程中的一次失败与修复（真实账目）
+
+勾选完成后跑 `tests/unit` 出现 **1 failed, 925 passed**：
+`test_preflight_db_write_location_is_creatable` 报
+`[WinError 10048] 通常每个套接字地址(协议/网络地址/端口)只允许使用一次`。
+
+本轮改动是**纯文档**（tasks.md 勾账 + devlog），不可能影响该测试，因此
+没有当作"重跑碰运气"，而是定位根因：
+
+- 该测试的 preflight 会做一次**真实 socket bind** 到 `127.0.0.1:8080`；
+- `netstat` 显示 8080 已被占用：`0.0.0.0:8080`（PID 52352
+  `com.docker.backend`）与 `127.0.0.1:8080`（PID 33440 `wslrelay`）；
+- 两个 PID 都是 Docker 为容器做宿主端口转发的组件，对应容器
+  **`planpilot-build-api-1`（Up ~13 分钟，healthy，`0.0.0.0:8080->8080`）**
+  ——即 5.3 验收遗留的**孤儿容器**，不是用户进程，也不是产品缺陷。
+
+成因：5.3 的 live 验收脚本被并发触发过多次（其中一次日志里出现
+`rm: cannot remove '...live53': Device or resource busy` 即为并发证据）。
+脚本用默认 compose project 名（取自目录名 `planpilot-build`，未加 `-p`
+唯一化），因此两次并发运行共用同一 project：A 次的 `down -v` 可能在 B 次
+`up -d` 之前完成，于是 B 次的容器被遗留。
+
+时间线证明**已认证证据未被污染**：孤儿容器启动于 `2026-09-27T02:17:57Z`，
+而终 bundle `planpilot_g4_d1c73e0_20260926.bundle` 写出于
+`2026-09-26T22:03:49Z`，容器比 bundle **晚 4 小时 14 分**。reviewer 在
+`d1c73e0` 上独立重跑的 `938 passed in 515.52s` 也早于该孤儿出现。
+
+修复：`docker compose --profile production --profile operations down -v
+--remove-orphans`（`down` 同样要过 compose 的 `:?` 必填 secret 插值，故
+临时给了一个**一次性占位串**，仅用于插值、不启动任何服务、不是真实凭据）。
+容器、两个数据卷（`planpilot-build_data` / `planpilot-build_backups`）与
+网络全部移除；`netstat` 确认 8080 已无 LISTENING。
+
+验证：`tests/unit/test_startup_config.py` **35 passed**，随后
+`tests/unit` 全套 **926 passed in 111.08s**（EXIT 0），与冻结树基线一致。
+
+遗留改进（不入本轮已认证证据包）：live 验收脚本应给每次运行加唯一
+compose project 名（`-p g4-live-<ts>`），并在 teardown 用
+`--remove-orphans`，从根上消除并发互踩。reviewer 自己的复演正是用独立
+project 名做的，故未受此影响。
+
+说明：本轮不再重跑 `tests/` 全套——reviewer 已在 `d1c73e0` 上独立重跑并
+得到 938 passed，而本提交相对该树只有 tasks.md/devlog 两个纯文档文件
+（`git status` 仅 2 个 M，证据包 0 字节变化），unit 926 已复验绿。
