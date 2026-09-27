@@ -11,6 +11,8 @@ from urllib.request import Request, urlopen
 import pytest
 
 from planpilot.agent.chat import ChatService
+from planpilot.authority import RuntimeAuthority
+from planpilot.domain.planning import PROFILES
 from planpilot.inference.bedrock_client import (
     DEFAULT_BEDROCK_MODEL,
     DEFAULT_BEDROCK_REGION,
@@ -19,6 +21,7 @@ from planpilot.inference.bedrock_client import (
     NoRedirect,
 )
 from planpilot.persistence import Database
+from planpilot.runtime_planning import generate_authoritative_plans
 from planpilot.security import issue_token
 from tools.build_team_package import build
 
@@ -63,6 +66,12 @@ def client(db, transport):
 
 def intent(action):
     return json.dumps({'action': action, 'response': '请通过审批界面操作。' if action == 'reply' else ''})
+
+
+def _converse_json(request):
+    """The JSON handed to the model, unwrapped from the Bedrock Converse envelope."""
+    payload = json.loads(request.data.decode())
+    return json.loads(payload['messages'][0]['content'][0]['text'])
 
 
 def test_regional_bearer_transport_usage_and_audit(db):
@@ -383,3 +392,44 @@ def test_daily_budget_uses_billing_calendar_not_scenario_clock(db, monkeypatch):
         assert '2026-09-14' not in days
     finally:
         scenario_db.close()
+
+
+def test_explain_attaches_the_sibling_profiles_of_the_same_generation(db):
+    """The web UI pins ONE plan as the chat context, so it must still compare.
+
+    Asking to explain the trade-offs between "the three plans" used to answer
+    "the current plan contains only one candidate" — honest, but it made a
+    working feature look broken, and comparing the three plans is the most
+    natural question a reviewer asks. The other two plans are already on the
+    authority under the same ``PLAN-<state>-<PROFILE>`` generation, so attach
+    them and mark which candidate is the one actually open.
+    """
+    state = json.loads((ROOT / 'data/factory_demo_v18.json').read_text(encoding='utf-8'))
+    authority = RuntimeAuthority(db)
+    generated = generate_authoritative_plans(state, authority)
+    balanced = next(option for option in generated['plan_options']
+                    if option['profile'] == 'Balanced')
+
+    transport = Transport(intent('explain'), 'Delivery First spends the least overtime.')
+    service = ChatService(db, client(db, transport), ROOT / 'data', authority=authority)
+    service.run({'message': 'Explain the trade-offs between the three plans.',
+                 'plan_id': balanced['plan_id'],
+                 'expected_version': balanced['plan_version']}, 'planner')
+
+    sent = _converse_json(transport.requests[0])
+    candidates = sent['current_plan']['candidates']
+    assert {candidate['profile'] for candidate in candidates} == set(PROFILES), candidates
+    assert sum(bool(candidate['current']) for candidate in candidates) == 1, candidates
+    opened = next(candidate for candidate in candidates if candidate['current'])
+    assert opened['profile'] == 'Balanced'
+    assert sent['current_plan']['plan_id'] == balanced['plan_id']
+
+
+def test_explain_falls_back_to_a_single_candidate_when_no_siblings_exist(db):
+    """A plan with no sibling generation must not invent one."""
+    transport = Transport(intent('explain'), 'Only one plan is available.')
+    service = ChatService(db, client(db, transport), ROOT / 'data')
+    with pytest.raises(ValueError, match='referenced plan version not found'):
+        service.run({'message': 'Explain the trade-offs.',
+                     'plan_id': 'PLAN-0000000000000000-BALANCED',
+                     'expected_version': 1}, 'planner')
