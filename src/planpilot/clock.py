@@ -274,7 +274,7 @@ def clock_from_env(environ, host: str) -> Clock:
             scenario={
                 "dataset": environ.get("PLANPILOT_SCENARIO_DATASET",
                                        "factory_demo_v18.json"),
-                "note": "服务端场景时钟；过期窗口须重新生成计划，不得复活旧计划。",
+                "note": "Server scenario clock; an expired window requires a regenerated plan; old plans must not be revived.",
             },
         )
     raise ValueError(

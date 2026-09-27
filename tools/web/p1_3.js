@@ -1,3 +1,4 @@
+window.PPT=window.PPT||((k,f)=>(window.PlanPilotI18n&&window.PlanPilotI18n.t(k))||f);
 /* Human approval workflow. Server snapshots, never UI guesses, own decisions. */
 (() => {
   let selectedRecord = null;
@@ -9,10 +10,10 @@
     'DUE_DATE_COMMITMENT_UNACCEPTABLE', 'CUSTOMER_NOT_CONSULTED',
     'SECONDARY_SKILL_NOT_AUTHORISED', 'OTHER_SEE_COMMENT'
   ];
-  const errorText = error => error.code ? error.code + '：' + error.message : error.message;
+  const errorText = error => error.code ? error.code + ': ' + error.message : error.message;
   const showError = error => { $('status').textContent = errorText(error); };
   const binding = () => {
-    if (!selectedRecord) throw new Error('请先选择或读取计划');
+    if (!selectedRecord) throw new Error('Select or load a plan first');
     const content = selectedRecord.content;
     return {plan_id:content.plan_id, plan_version:content.plan_version,
       plan_digest:content.plan_digest};
@@ -20,14 +21,14 @@
 
   async function requestApi(path, options = {}, role = 'planner') {
     const token = role === 'manager' ? $('managerToken').value.trim() : $('token').value.trim();
-    if (!token) throw new Error(role === 'manager' ? '请填写经理 Token' : '请填写 Planner Token');
+    if (!token) throw new Error(role === 'manager' ? 'Enter the Manager Token' : 'Enter the Planner Token');
     const response = await fetch(path, {
       ...options,
       headers: {'Content-Type':'application/json', Authorization:'Bearer ' + token}
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(data.error || '请求失败 ' + response.status);
+      const error = new Error(data.error || 'Request failed ' + response.status);
       error.code = data.error_code;
       throw error;
     }
@@ -38,13 +39,13 @@
     if (!selectedRecord) return;
     const content = selectedRecord.content;
     const lifecycle = selectedRecord.lifecycle;
-    $('state').textContent = lifecycle.status;
+    $('state').textContent = pretty(lifecycle.status);
     $('version').textContent = content.plan_version;
     $('planid').textContent = content.plan_id;
     $('planLookup').value = content.plan_id;
     $('planVersionLookup').value = content.plan_version;
     $('approval').textContent = lifecycle.status === 'PUBLISHED'
-      ? 'PUBLISHED' : (approvalSnapshot?.aggregate_status || lifecycle.status);
+      ? 'PUBLISHED' : pretty(approvalSnapshot?.aggregate_status || lifecycle.status);
     if (current) {
       current.plan_id = content.plan_id;
       current.version = content.plan_version;
@@ -55,7 +56,9 @@
     $('timeline').replaceChildren(...stages.map((label, position) => {
       const node = document.createElement('div');
       node.className = 'step ' + (index >= 0 && position <= index ? 'done' : '');
-      node.textContent = label;
+      const text = label.replace(/_/g, ' ');
+      node.textContent = text;
+      node.title = text;
       return node;
     }));
   }
@@ -72,41 +75,41 @@
     const root = $('approvals');
     root.replaceChildren();
     if (!selectedRecord) {
-      root.textContent = '请选择计划';
+      root.textContent = 'Select a plan';
       return;
     }
     if (!approvalSnapshot) {
       root.textContent = selectedRecord.lifecycle.approval_set_id
-        ? '审批集合已绑定；点击“刷新审批状态”读取服务端状态。'
-        : '尚未发起审批。发起一次即可创建全部所需审批项。';
+        ? 'Approval set bound; click "Refresh Approval Status" to read server state.'
+        : 'No approval requested yet. One request creates all required approval items.';
       return;
     }
-    appendText(root, 'strong', '集合 ' + approvalSnapshot.approval_set_id + ' · ' +
+    appendText(root, 'strong', 'Set ' + approvalSnapshot.approval_set_id + ' · ' +
       approvalSnapshot.aggregate_status);
     for (const item of approvalSnapshot.approvals) {
       const row = document.createElement('div');
       row.className = 'approval-row';
       appendText(row, 'strong', item.action + ' · ' + item.status);
-      appendText(row, 'div', '审批角色：' + item.approver_role + ' · 到期：' + item.expires_at,
+      appendText(row, 'div', 'Approver role: ' + item.approver_role + ' · expires: ' + item.expires_at,
         'muted');
-      appendText(row, 'div', '请求：' + item.approval_request_id, 'muted');
+      appendText(row, 'div', 'Request: ' + item.approval_request_id, 'muted');
       const impact = item.impact_summary || {};
-      appendText(row, 'div', '影响订单：' + (impact.affected_order_ids || []).join(', ') +
-        ' · 变更工序：' + (impact.changed_operation_count ?? 0) +
-        ' · 原因：' + (impact.reason_codes || []).join(', '), 'muted');
+      appendText(row, 'div', 'Affected orders: ' + (impact.affected_order_ids || []).join(', ') +
+        ' · changed operations: ' + (impact.changed_operation_count ?? 0) +
+        ' · reason: ' + (impact.reason_codes || []).join(', '), 'muted');
       if (item.status === 'PENDING' && approvalSnapshot.aggregate_status === 'PENDING') {
         const controls = document.createElement('div');
         controls.className = 'actions';
-        const approve = appendText(controls, 'button', '批准', 'btn');
+        const approve = appendText(controls, 'button', 'Approve', 'btn');
         approve.type = 'button';
-        const reject = appendText(controls, 'button', '拒绝', 'btn danger');
+        const reject = appendText(controls, 'button', 'Reject', 'btn danger');
         reject.type = 'button';
         const reason = document.createElement('select');
-        reason.setAttribute('aria-label', '拒绝原因');
+        reason.setAttribute('aria-label', 'Reject reason');
         reason.replaceChildren(...rejectionReasons.map(code => new Option(code, code)));
         const comment = document.createElement('input');
-        comment.placeholder = '拒绝说明（可选）';
-        comment.setAttribute('aria-label', '拒绝说明');
+        comment.placeholder = 'Rejection note (optional)';
+        comment.setAttribute('aria-label', 'Rejection note');
         controls.append(reason, comment);
         approve.onclick = () => decide(item, 'APPROVED');
         reject.onclick = () => decide(item, 'REJECTED', reason.value, comment.value);
@@ -134,21 +137,21 @@
     const content = selectedRecord?.content;
     const lines = [];
     if (content) {
-      lines.push('计划：' + content.plan_id + ' · 版本：' + content.plan_version);
-      lines.push('摘要 SHA-256：' + content.plan_digest);
-      lines.push('求解器：' + content.engine.solver + ' · ' + content.engine.solver_status);
+      lines.push('Plan: ' + content.plan_id + ' · Version: ' + content.plan_version);
+      lines.push('Digest SHA-256: ' + content.plan_digest);
+      lines.push('Solver: ' + content.engine.solver + ' · ' + content.engine.solver_status);
     }
-    if (agentTrace.length) lines.push('Agent 步骤：\n' + formatAgentTrace(agentTrace));
+    if (agentTrace.length) lines.push('Agent steps:\n' + formatAgentTrace(agentTrace));
     if (auditSnapshot) {
-      lines.push('审计链：' + (auditSnapshot.verified ? '已验证' : '验证失败') +
-        ' · ' + auditSnapshot.entry_count + ' 条');
-      lines.push('链头：' + auditSnapshot.head_hash);
+      lines.push('Audit chain: ' + (auditSnapshot.verified ? 'verified' : 'FAILED') +
+        ' · ' + auditSnapshot.entry_count + ' entries');
+      lines.push('Head: ' + auditSnapshot.head_hash);
       for (const row of auditSnapshot.recent) {
         lines.push(row.audit_log_id + ' · ' + row.event + ' · ' +
-          (row.plan_id || '无计划') + ' · ' + row.event_hash);
+          (row.plan_id || 'no plan') + ' · ' + row.event_hash);
       }
     }
-    $('trace').textContent = lines.join('\n') || '尚无计划或审计记录';
+    $('trace').textContent = lines.join('\n') || 'No plan or audit records yet';
   }
 
   function loadedCandidate(content) {
@@ -196,7 +199,7 @@
   $('load').onclick = async () => {
     try {
       const id = $('planLookup').value.trim();
-      if (!id) throw new Error('请填写计划 ID');
+      if (!id) throw new Error('Enter a Plan ID');
       const query = new URLSearchParams({plan_id:id});
       const version = $('planVersionLookup').value.trim();
       if (version) query.set('version', version);
@@ -209,7 +212,7 @@
         }]};
       render();
       await refreshApproval();
-      $('status').textContent = '已读取服务端保存的计划与生命周期。';
+      $('status').textContent = 'Loaded the server-saved plan and lifecycle.';
     } catch (error) { showError(error); }
   };
 
@@ -220,7 +223,7 @@
       selectedRecord.lifecycle.approval_set_id = approvalSnapshot.approval_set_id;
       renderApprovals();
       await refreshAudit();
-      $('status').textContent = '已发起全部服务端所需审批。';
+      $('status').textContent = 'All server-required approvals requested.';
     } catch (error) { showError(error); }
   };
 
@@ -236,7 +239,7 @@
         body:JSON.stringify(body)}, role);
       renderApprovals();
       await refreshAudit();
-      $('status').textContent = decision === 'APPROVED' ? '审批决定已保存。' : '拒绝决定已保存；该计划不能发布。';
+      $('status').textContent = decision === 'APPROVED' ? 'Approval decision saved.' : 'Rejection saved; this plan cannot be published.';
     } catch (error) { showError(error); }
   }
 
@@ -246,7 +249,7 @@
     try {
       const b = binding();
       const setId = selectedRecord.lifecycle.approval_set_id;
-      if (!setId) throw new Error('请先发起审批');
+      if (!setId) throw new Error('Request approval first');
       await refreshApproval();
       const result = await requestApi('/publish', {method:'POST', body:JSON.stringify({
         plan_id:b.plan_id, expected_plan_version:b.plan_version,
@@ -260,7 +263,7 @@
       Object.assign(selectedRecord.lifecycle, result);
       updatePlanHeader();
       await refreshAudit();
-      $('status').textContent = '计划已发布，版本与摘要已重新核对。';
+      $('status').textContent = 'Plan published; version and digest re-verified.';
     } catch (error) { showError(error); }
   };
 
@@ -272,19 +275,22 @@
       const status = await response.json();
       const badge = $('clockBadge');
       if (status.kind === 'scenario') {
-        const name = status.scenario?.dataset || '固定场景数据';
-        badge.textContent = '场景时间 ' + status.now + ' · ' + name;
-        badge.title = '服务端场景时钟：演示数据锚定在其计划窗口内，并非当前生产时间';
-        badge.style.background = '#fdf3e3';
+        const name = status.scenario?.dataset || 'fixed scenario data';
+        badge.textContent = PPT('scenarioTime','Scenario time ') + status.now + ' · ' + name;
+        badge.title = PPT('clockTitleScenario','Server scenario clock: demo data anchored in its planning window, not current production time');
+        badge.style.background = 'rgba(239,145,0,.16)';
         badge.style.color = 'var(--warn)';
+        badge.style.boxShadow = '0 0 0 1px rgba(239,145,0,.4)';
       } else {
-        badge.textContent = '服务端时间 ' + status.now;
-        badge.title = '服务端墙钟（Asia/Singapore）';
-        badge.style.background = '#e8f6ef';
+        badge.textContent = PPT('serverTime','Server time ') + status.now;
+        badge.title = PPT('clockTitleWall','Server wall clock (Asia/Singapore)');
+        badge.style.background = 'rgba(118,185,0,.16)';
         badge.style.color = 'var(--ok)';
+        badge.style.boxShadow = '0 0 0 1px rgba(118,185,0,.35)';
       }
-    } catch (error) { $('clockBadge').textContent = '时钟不可用'; }
+    } catch (error) { $('clockBadge').textContent = PPT('clockUnavailable','Clock unavailable'); }
   }
+  window.refreshClock = refreshClock;
   refreshClock();
   setInterval(refreshClock, 30000);
 })();

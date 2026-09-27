@@ -31,11 +31,11 @@ def compare_candidates(payload):
     best = max(feasible, key=lambda c: (c["kpis"]["eligible_order_coverage_rate"], c["kpis"]["on_time_rate"],
                                        -c["kpis"]["total_tardiness_min"], -c["kpis"]["total_changeover_min"])) if feasible else None
     if best is None:
-        return {"recommendation": None, "approval_required": False, "explanation": "没有可执行计划，请检查未排工序和物料预留。"}
+        return {"recommendation": None, "approval_required": False, "explanation": "No executable plan; check unscheduled operations and material reservations."}
     kpis = best["kpis"]
-    explanation = (f"推荐 {best['profile']}：准时率 {kpis['on_time_rate']:.1%}，订单覆盖率 {kpis['eligible_order_coverage_rate']:.1%}，"
-                   f"延迟 {kpis['total_tardiness_min']} 分钟，未排工序 {kpis['unscheduled_operations']} 项，"
-                   f"换线 {kpis['changeover_count']} 次。发布前须完成审批。")
+    explanation = (f"Recommended {best['profile']}: on-time rate {kpis['on_time_rate']:.1%}, order coverage {kpis['eligible_order_coverage_rate']:.1%}, "
+                   f"tardiness {kpis['total_tardiness_min']} min, unscheduled operations {kpis['unscheduled_operations']}, "
+                   f"changeovers {kpis['changeover_count']}. Approval is required before publication.")
     return {"recommendation": best["profile"], "approval_required": True, "explanation": explanation}
 
 
