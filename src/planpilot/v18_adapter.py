@@ -272,7 +272,8 @@ def build_plan_content(candidate: dict, state: dict, plan_id: str, plan_version:
         "engine": {
             "solver": "PRIORITY_DISPATCH_FALLBACK" if candidate["solver_status"] == "HEURISTIC_FALLBACK" else "CP-SAT",
             "solver_status": candidate["solver_status"] if candidate["solver_status"] in ("OPTIMAL", "HEURISTIC_FALLBACK") else "FEASIBLE",
-            "random_seed": 42, "time_budget_seconds": 40, "deterministic_budget": 0.2,
+            "random_seed": 42, "time_budget_seconds": 40,
+            "deterministic_budget": float(candidate.get("deterministic_budget", 0.0)),
             "canonical_plan_hash": "0" * 64, "objective_value": None,
             "normalized_scores": {
                 "delivery_score": kpis["on_time_rate"], "overtime_score": overtime_score,

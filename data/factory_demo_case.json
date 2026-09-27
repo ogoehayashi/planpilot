@@ -80,8 +80,8 @@
    "order_id": "ORD-4002",
    "product_id": "SHAFT-B",
    "quantity": 30,
-   "due_date": "2026-09-15",
-   "due_at": 1440,
+   "due_date": "2026-09-16",
+   "due_at": 2880,
    "priority": 7,
    "operations": [
     {
@@ -116,9 +116,9 @@
    "order_id": "ORD-4003",
    "product_id": "HOUSING-C",
    "quantity": 25,
-   "due_date": "2026-09-16",
-   "due_at": 2880,
-   "priority": 6,
+   "due_date": "2026-09-15",
+   "due_at": 1440,
+   "priority": 3,
    "operations": [
     {
      "operation_no": 1,
@@ -162,7 +162,7 @@
    "quantity": 50,
    "due_date": "2026-09-16",
    "due_at": 2880,
-   "priority": 5,
+   "priority": 6,
    "operations": [
     {
      "operation_no": 1,
@@ -198,7 +198,7 @@
    "quantity": 45,
    "due_date": "2026-09-17",
    "due_at": 4320,
-   "priority": 4,
+   "priority": 5,
    "operations": [
     {
      "operation_no": 1,
@@ -234,7 +234,7 @@
    "quantity": 30,
    "due_date": "2026-09-17",
    "due_at": 4320,
-   "priority": 3,
+   "priority": 2,
    "operations": [
     {
      "operation_no": 1,
@@ -268,9 +268,9 @@
    "order_id": "ORD-4007",
    "product_id": "HOUSING-C",
    "quantity": 20,
-   "due_date": "2026-09-19",
-   "due_at": 7200,
-   "priority": 2,
+   "due_date": "2026-09-18",
+   "due_at": 5760,
+   "priority": 4,
    "operations": [
     {
      "operation_no": 1,
@@ -451,11 +451,27 @@
    "machine_id": "CNC-01"
   },
   {
+   "calendar_window_id": "CAL-M-CNC-01-0-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 480,
+   "end": 720,
+   "machine_id": "CNC-01"
+  },
+  {
    "calendar_window_id": "CAL-M-CNC-01-1",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 1440,
    "end": 1920,
+   "machine_id": "CNC-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-CNC-01-1-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 1920,
+   "end": 2160,
    "machine_id": "CNC-01"
   },
   {
@@ -467,11 +483,27 @@
    "machine_id": "CNC-01"
   },
   {
+   "calendar_window_id": "CAL-M-CNC-01-2-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 3360,
+   "end": 3600,
+   "machine_id": "CNC-01"
+  },
+  {
    "calendar_window_id": "CAL-M-CNC-01-3",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 4320,
    "end": 4800,
+   "machine_id": "CNC-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-CNC-01-3-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 4800,
+   "end": 5040,
    "machine_id": "CNC-01"
   },
   {
@@ -483,11 +515,27 @@
    "machine_id": "CNC-01"
   },
   {
+   "calendar_window_id": "CAL-M-CNC-01-4-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 6240,
+   "end": 6480,
+   "machine_id": "CNC-01"
+  },
+  {
    "calendar_window_id": "CAL-M-MILL-01-0",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 0,
    "end": 480,
+   "machine_id": "MILL-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-MILL-01-0-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 480,
+   "end": 720,
    "machine_id": "MILL-01"
   },
   {
@@ -499,11 +547,27 @@
    "machine_id": "MILL-01"
   },
   {
+   "calendar_window_id": "CAL-M-MILL-01-1-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 1920,
+   "end": 2160,
+   "machine_id": "MILL-01"
+  },
+  {
    "calendar_window_id": "CAL-M-MILL-01-2",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 2880,
    "end": 3360,
+   "machine_id": "MILL-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-MILL-01-2-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 3360,
+   "end": 3600,
    "machine_id": "MILL-01"
   },
   {
@@ -515,11 +579,27 @@
    "machine_id": "MILL-01"
   },
   {
+   "calendar_window_id": "CAL-M-MILL-01-3-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 4800,
+   "end": 5040,
+   "machine_id": "MILL-01"
+  },
+  {
    "calendar_window_id": "CAL-M-MILL-01-4",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 5760,
    "end": 6240,
+   "machine_id": "MILL-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-MILL-01-4-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 6240,
+   "end": 6480,
    "machine_id": "MILL-01"
   },
   {
@@ -531,11 +611,27 @@
    "machine_id": "GRIND-01"
   },
   {
+   "calendar_window_id": "CAL-M-GRIND-01-0-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 480,
+   "end": 720,
+   "machine_id": "GRIND-01"
+  },
+  {
    "calendar_window_id": "CAL-M-GRIND-01-1",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 1440,
    "end": 1920,
+   "machine_id": "GRIND-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-GRIND-01-1-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 1920,
+   "end": 2160,
    "machine_id": "GRIND-01"
   },
   {
@@ -547,11 +643,27 @@
    "machine_id": "GRIND-01"
   },
   {
+   "calendar_window_id": "CAL-M-GRIND-01-2-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 3360,
+   "end": 3600,
+   "machine_id": "GRIND-01"
+  },
+  {
    "calendar_window_id": "CAL-M-GRIND-01-3",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 4320,
    "end": 4800,
+   "machine_id": "GRIND-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-GRIND-01-3-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 4800,
+   "end": 5040,
    "machine_id": "GRIND-01"
   },
   {
@@ -563,11 +675,27 @@
    "machine_id": "GRIND-01"
   },
   {
+   "calendar_window_id": "CAL-M-GRIND-01-4-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 6240,
+   "end": 6480,
+   "machine_id": "GRIND-01"
+  },
+  {
    "calendar_window_id": "CAL-M-QC-01-0",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 0,
    "end": 480,
+   "machine_id": "QC-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-QC-01-0-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 480,
+   "end": 720,
    "machine_id": "QC-01"
   },
   {
@@ -579,11 +707,27 @@
    "machine_id": "QC-01"
   },
   {
+   "calendar_window_id": "CAL-M-QC-01-1-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 1920,
+   "end": 2160,
+   "machine_id": "QC-01"
+  },
+  {
    "calendar_window_id": "CAL-M-QC-01-2",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 2880,
    "end": 3360,
+   "machine_id": "QC-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-QC-01-2-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 3360,
+   "end": 3600,
    "machine_id": "QC-01"
   },
   {
@@ -595,11 +739,27 @@
    "machine_id": "QC-01"
   },
   {
+   "calendar_window_id": "CAL-M-QC-01-3-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 4800,
+   "end": 5040,
+   "machine_id": "QC-01"
+  },
+  {
    "calendar_window_id": "CAL-M-QC-01-4",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 5760,
    "end": 6240,
+   "machine_id": "QC-01"
+  },
+  {
+   "calendar_window_id": "CAL-M-QC-01-4-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 6240,
+   "end": 6480,
    "machine_id": "QC-01"
   },
   {
@@ -611,11 +771,27 @@
    "worker_id": "W-01"
   },
   {
+   "calendar_window_id": "CAL-W-W-01-0-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 480,
+   "end": 720,
+   "worker_id": "W-01"
+  },
+  {
    "calendar_window_id": "CAL-W-W-01-1",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 1440,
    "end": 1920,
+   "worker_id": "W-01"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-01-1-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 1920,
+   "end": 2160,
    "worker_id": "W-01"
   },
   {
@@ -627,11 +803,27 @@
    "worker_id": "W-01"
   },
   {
+   "calendar_window_id": "CAL-W-W-01-2-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 3360,
+   "end": 3600,
+   "worker_id": "W-01"
+  },
+  {
    "calendar_window_id": "CAL-W-W-01-3",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 4320,
    "end": 4800,
+   "worker_id": "W-01"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-01-3-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 4800,
+   "end": 5040,
    "worker_id": "W-01"
   },
   {
@@ -643,11 +835,27 @@
    "worker_id": "W-01"
   },
   {
+   "calendar_window_id": "CAL-W-W-01-4-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 6240,
+   "end": 6480,
+   "worker_id": "W-01"
+  },
+  {
    "calendar_window_id": "CAL-W-W-02-0",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 0,
    "end": 480,
+   "worker_id": "W-02"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-02-0-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 480,
+   "end": 720,
    "worker_id": "W-02"
   },
   {
@@ -659,11 +867,27 @@
    "worker_id": "W-02"
   },
   {
+   "calendar_window_id": "CAL-W-W-02-1-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 1920,
+   "end": 2160,
+   "worker_id": "W-02"
+  },
+  {
    "calendar_window_id": "CAL-W-W-02-2",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 2880,
    "end": 3360,
+   "worker_id": "W-02"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-02-2-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 3360,
+   "end": 3600,
    "worker_id": "W-02"
   },
   {
@@ -675,11 +899,27 @@
    "worker_id": "W-02"
   },
   {
+   "calendar_window_id": "CAL-W-W-02-3-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 4800,
+   "end": 5040,
+   "worker_id": "W-02"
+  },
+  {
    "calendar_window_id": "CAL-W-W-02-4",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 5760,
    "end": 6240,
+   "worker_id": "W-02"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-02-4-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 6240,
+   "end": 6480,
    "worker_id": "W-02"
   },
   {
@@ -691,11 +931,27 @@
    "worker_id": "W-03"
   },
   {
+   "calendar_window_id": "CAL-W-W-03-0-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 480,
+   "end": 720,
+   "worker_id": "W-03"
+  },
+  {
    "calendar_window_id": "CAL-W-W-03-1",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 1440,
    "end": 1920,
+   "worker_id": "W-03"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-03-1-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 1920,
+   "end": 2160,
    "worker_id": "W-03"
   },
   {
@@ -707,11 +963,27 @@
    "worker_id": "W-03"
   },
   {
+   "calendar_window_id": "CAL-W-W-03-2-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 3360,
+   "end": 3600,
+   "worker_id": "W-03"
+  },
+  {
    "calendar_window_id": "CAL-W-W-03-3",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 4320,
    "end": 4800,
+   "worker_id": "W-03"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-03-3-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 4800,
+   "end": 5040,
    "worker_id": "W-03"
   },
   {
@@ -723,11 +995,27 @@
    "worker_id": "W-03"
   },
   {
+   "calendar_window_id": "CAL-W-W-03-4-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 6240,
+   "end": 6480,
+   "worker_id": "W-03"
+  },
+  {
    "calendar_window_id": "CAL-W-W-04-0",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 0,
    "end": 480,
+   "worker_id": "W-04"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-04-0-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 480,
+   "end": 720,
    "worker_id": "W-04"
   },
   {
@@ -739,11 +1027,27 @@
    "worker_id": "W-04"
   },
   {
+   "calendar_window_id": "CAL-W-W-04-1-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 1920,
+   "end": 2160,
+   "worker_id": "W-04"
+  },
+  {
    "calendar_window_id": "CAL-W-W-04-2",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 2880,
    "end": 3360,
+   "worker_id": "W-04"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-04-2-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 3360,
+   "end": 3600,
    "worker_id": "W-04"
   },
   {
@@ -755,11 +1059,27 @@
    "worker_id": "W-04"
   },
   {
+   "calendar_window_id": "CAL-W-W-04-3-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 4800,
+   "end": 5040,
+   "worker_id": "W-04"
+  },
+  {
    "calendar_window_id": "CAL-W-W-04-4",
    "window_type": "REGULAR",
    "overtime_allowed": false,
    "start": 5760,
    "end": 6240,
+   "worker_id": "W-04"
+  },
+  {
+   "calendar_window_id": "CAL-W-W-04-4-OT",
+   "window_type": "OVERTIME",
+   "overtime_allowed": true,
+   "start": 6240,
+   "end": 6480,
    "worker_id": "W-04"
   }
  ],
@@ -775,19 +1095,19 @@
    "machine_id": "CNC-01",
    "from_product_id": "BRACKET-A",
    "to_product_id": "SHAFT-B",
-   "minutes": 45
+   "minutes": 90
   },
   {
    "machine_id": "CNC-01",
    "from_product_id": "BRACKET-A",
    "to_product_id": "HOUSING-C",
-   "minutes": 45
+   "minutes": 90
   },
   {
    "machine_id": "CNC-01",
    "from_product_id": "SHAFT-B",
    "to_product_id": "BRACKET-A",
-   "minutes": 45
+   "minutes": 90
   },
   {
    "machine_id": "CNC-01",
@@ -799,19 +1119,19 @@
    "machine_id": "CNC-01",
    "from_product_id": "SHAFT-B",
    "to_product_id": "HOUSING-C",
-   "minutes": 45
+   "minutes": 90
   },
   {
    "machine_id": "CNC-01",
    "from_product_id": "HOUSING-C",
    "to_product_id": "BRACKET-A",
-   "minutes": 45
+   "minutes": 90
   },
   {
    "machine_id": "CNC-01",
    "from_product_id": "HOUSING-C",
    "to_product_id": "SHAFT-B",
-   "minutes": 45
+   "minutes": 90
   },
   {
    "machine_id": "CNC-01",
@@ -829,7 +1149,7 @@
    "machine_id": "MILL-01",
    "from_product_id": "BRACKET-A",
    "to_product_id": "HOUSING-C",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "MILL-01",
@@ -841,7 +1161,7 @@
    "machine_id": "MILL-01",
    "from_product_id": "HOUSING-C",
    "to_product_id": "BRACKET-A",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "MILL-01",
@@ -865,13 +1185,13 @@
    "machine_id": "GRIND-01",
    "from_product_id": "SHAFT-B",
    "to_product_id": "HOUSING-C",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "GRIND-01",
    "from_product_id": "HOUSING-C",
    "to_product_id": "SHAFT-B",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "GRIND-01",
@@ -889,19 +1209,19 @@
    "machine_id": "QC-01",
    "from_product_id": "BRACKET-A",
    "to_product_id": "SHAFT-B",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "QC-01",
    "from_product_id": "BRACKET-A",
    "to_product_id": "HOUSING-C",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "QC-01",
    "from_product_id": "SHAFT-B",
    "to_product_id": "BRACKET-A",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "QC-01",
@@ -913,19 +1233,19 @@
    "machine_id": "QC-01",
    "from_product_id": "SHAFT-B",
    "to_product_id": "HOUSING-C",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "QC-01",
    "from_product_id": "HOUSING-C",
    "to_product_id": "BRACKET-A",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "QC-01",
    "from_product_id": "HOUSING-C",
    "to_product_id": "SHAFT-B",
-   "minutes": 25
+   "minutes": 50
   },
   {
    "machine_id": "QC-01",
@@ -935,11 +1255,11 @@
   }
  ],
  "assumptions": {
-  "overtime_cap_hours": 0,
-  "changeover_reference_min": 60,
+  "overtime_cap_hours": 16,
+  "changeover_reference_min": 1220,
   "stability_drift_min": 30,
   "allow_optional_lot_splitting": false,
-  "max_overtime_min_per_worker_per_day": 0
+  "max_overtime_min_per_worker_per_day": 240
  },
  "events": []
 }

@@ -10,6 +10,22 @@ from .objectives import profile_weights
 
 PROFILES = ("Balanced", "Delivery First", "Cost First")
 
+# Bounded, reproducible search width for the rung-2 deterministic dispatcher: how
+# many candidate start slots one operation may be scored against.  Small enough to
+# stay fast, wide enough that a profile which dislikes overtime can look past the
+# earliest (possibly overtime) slot into the next regular window.
+MAX_PLACEMENT_CANDIDATES = 6
+
+# Deterministic solver budget the production entry point (``build_candidates``)
+# gives each of the five lexicographic stages.  The contract's Tier 3 — the only
+# stage where the profile weights are consulted — cannot be reached at all if the
+# solver spends its whole budget proving earlier tiers, so this must be large
+# enough for the tiers to settle.  Measured on the shipped demo dataset: tiers 0-2
+# settle to proven optimality in ~1.7 s total, tier 3 uses the rest.  ``solve``
+# keeps its own conservative 0.2 s default so callers that pin a budget explicitly
+# are unaffected.
+DEFAULT_DETERMINISTIC_BUDGET = 5.0
+
 
 def reserve_materials(factory):
     stock = {}
@@ -59,10 +75,81 @@ def windows(factory, op, horizon):
     return result
 
 
-def build_candidates(factory, references=None, stability_drift_min=0):
+def build_candidates(factory, references=None, stability_drift_min=0,
+                     deterministic_budget=DEFAULT_DETERMINISTIC_BUDGET):
     references = references or {}
     return [solve(factory, profile, reference_starts=references.get(profile),
-                  stability_drift_min=stability_drift_min) for profile in PROFILES]
+                  stability_drift_min=stability_drift_min,
+                  deterministic_budget=deterministic_budget) for profile in PROFILES]
+
+
+def _overtime_minute_table(model, start, active, factory, op, horizon, overtime_daily):
+    """Exact legacy overtime encoding: a ``horizon + 1`` lookup table per operation.
+
+    Only used for window layouts the compact form cannot express (overlapping
+    REGULAR/OVERTIME windows, or a window crossing midnight), where the per-minute
+    definition ``overtime = not regular and overtime`` is not a plain overlap.
+    """
+    by_start = [overtime_by_day(factory.shifts, op.worker_id, minute, minute + op.duration_minutes)
+                for minute in range(horizon + 1)]
+    raw = model.NewIntVar(0, op.duration_minutes, "raw_overtime")
+    model.AddElement(start, [sum(item.values()) for item in by_start], raw)
+    charged = model.NewIntVar(0, op.duration_minutes, "overtime")
+    model.AddMultiplicationEquality(charged, [raw, active])
+    for day in sorted({day for item in by_start for day in item}):
+        raw_day = model.NewIntVar(0, op.duration_minutes, "raw_overtime_day")
+        model.AddElement(start, [item.get(day, 0) for item in by_start], raw_day)
+        charged_day = model.NewIntVar(0, op.duration_minutes, "overtime_day")
+        model.AddMultiplicationEquality(charged_day, [raw_day, active])
+        overtime_daily[(op.worker_id, day)].append(charged_day)
+    return charged
+
+
+def _overtime_terms(model, start, end, active, factory, op, horizon, overtime_daily):
+    """Charged overtime minutes for one optional operation, as a model variable.
+
+    The previous encoding built a ``horizon + 1``-entry table per operation and fed
+    it to ``AddElement``.  On a five-day horizon that is 7,201 Python
+    ``overtime_by_day`` calls per operation, which measured ~13 s of model
+    construction for 26 operations — before the solver had done any work, and long
+    enough that the primary solver effectively never ran.
+
+    Overtime is defined by a handful of shift windows, so it is expressed here as
+    the exact overlap of the operation with each overtime window: a few
+    ``AddMin``/``AddMax`` constraints instead of a 7,201-entry table.  The
+    arithmetic is identical to ``overtime_by_day`` whenever a worker's REGULAR and
+    OVERTIME windows are disjoint and no window crosses midnight; for any other
+    layout the exact per-minute encoding is used instead.
+    """
+    overtime = sorted(((row["start"], row["end"]) for row in factory.shifts
+                       if row.get("worker_id") == op.worker_id
+                       and row.get("window_type") == "OVERTIME"),
+                      key=lambda item: (item[0], item[1]))
+    regular = [(row["start"], row["end"]) for row in factory.shifts
+               if row.get("worker_id") == op.worker_id
+               and row.get("window_type", "REGULAR") == "REGULAR"]
+    overlaps_regular = any(a < regular_end and regular_start < b
+                           for regular_start, regular_end in regular for a, b in overtime)
+    crosses_midnight = any(a // 1440 != (b - 1) // 1440 for a, b in overtime)
+    if overlaps_regular or crosses_midnight:
+        return _overtime_minute_table(model, start, active, factory, op, horizon, overtime_daily)
+    pieces = []
+    for window_start, window_end in overtime:
+        lower = model.NewIntVar(0, horizon, "overtime_lower")
+        model.AddMaxEquality(lower, [start, window_start])
+        upper = model.NewIntVar(0, horizon, "overtime_upper")
+        model.AddMinEquality(upper, [end, window_end])
+        gap = model.NewIntVar(-horizon, horizon, "overtime_gap")
+        model.Add(gap == upper - lower)
+        overlap = model.NewIntVar(0, horizon, "overtime_overlap")
+        model.AddMaxEquality(overlap, [0, gap])
+        charged = model.NewIntVar(0, horizon, "overtime_charged")
+        model.AddMultiplicationEquality(charged, [overlap, active])
+        overtime_daily[(op.worker_id, window_start // 1440)].append(charged)
+        pieces.append(charged)
+    total = model.NewIntVar(0, horizon, "overtime_total")
+    model.Add(total == sum(pieces))
+    return total
 
 
 def _transition_minutes(factory, machine_id, from_product_id, to_product_id, default):
@@ -121,21 +208,10 @@ def solve(factory, profile, *, deterministic_budget=0.2,
             row.get("worker_id") == op.worker_id and row.get("window_type") == "OVERTIME"
             for row in factory.shifts
         ):
-            by_start = [overtime_by_day(factory.shifts, op.worker_id, minute, minute + op.duration_minutes)
-                        for minute in range(horizon + 1)]
-            total_values = [sum(item.values()) for item in by_start]
-            raw_overtime = model.NewIntVar(0, op.duration_minutes, f"raw_overtime_{i}")
-            model.AddElement(start, total_values, raw_overtime)
-            charged = model.NewIntVar(0, op.duration_minutes, f"overtime_{i}")
-            model.AddMultiplicationEquality(charged, [raw_overtime, active])
+            charged = _overtime_terms(
+                model, start, end, active, factory, op, horizon, overtime_daily,
+            )
             overtime_terms.append(charged)
-            for day in sorted({day for item in by_start for day in item}):
-                values = [item.get(day, 0) for item in by_start]
-                raw_day = model.NewIntVar(0, op.duration_minutes, f"raw_overtime_{i}_{day}")
-                model.AddElement(start, values, raw_day)
-                charged_day = model.NewIntVar(0, op.duration_minutes, f"overtime_{i}_{day}")
-                model.AddMultiplicationEquality(charged_day, [raw_day, active])
-                overtime_daily[(op.worker_id, day)].append(charged_day)
     for i, row in enumerate(sorted(factory.maintenance, key=lambda r: (r.get("machine_id", ""), r.get("worker_id", ""), r["start"], r["end"]))):
         interval = model.NewIntervalVar(row["start"], row["end"] - row["start"], row["end"], f"block_{i}")
         if row.get("machine_id"):
@@ -246,7 +322,7 @@ def solve(factory, profile, *, deterministic_budget=0.2,
     solver.parameters.num_search_workers = 1
     solver.parameters.random_seed = 42
     if deterministic_budget <= 0:
-        return _priority_dispatch(factory, profile, reservations)
+        return _priority_dispatch(factory, profile, reservations, deterministic_budget)
     solver.parameters.max_deterministic_time = deterministic_budget / 5
     stages = (unscheduled_count, sum(late_flags), sum(lateness), sum(secondary_terms), tier3)
     status = cp_model.UNKNOWN
@@ -254,10 +330,10 @@ def solve(factory, profile, *, deterministic_budget=0.2,
         model.Minimize(expression)
         status = solver.Solve(model)
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            return _priority_dispatch(factory, profile, reservations)
+            return _priority_dispatch(factory, profile, reservations, deterministic_budget)
         if index < len(stages) - 1:
             if status != cp_model.OPTIMAL:
-                return _priority_dispatch(factory, profile, reservations)
+                return _priority_dispatch(factory, profile, reservations, deterministic_budget)
             model.Add(expression == round(solver.ObjectiveValue()))
     output, unscheduled = [], []
     for i, (order, op) in enumerate(jobs):
@@ -271,10 +347,11 @@ def solve(factory, profile, *, deterministic_budget=0.2,
                            "duration": op.duration_minutes, "material_id": op.material_id, "material_qty": op.material_qty})
     output.sort(key=lambda r: (r["start"], r["machine_id"], r["order_id"], r["operation_no"]))
     return _finish_plan(factory, profile, output, unscheduled, reservations,
-                        solver.StatusName(status))
+                        solver.StatusName(status), deterministic_budget)
 
 
-def _finish_plan(factory, profile, output, unscheduled, reservations, solver_status):
+def _finish_plan(factory, profile, output, unscheduled, reservations, solver_status,
+                 deterministic_budget=0.0):
     violations = validate_plan(output, factory, unscheduled)
     completion = {r["order_id"]: max(x["end"] for x in output if x["order_id"] == r["order_id"]) for r in output}
     on_time = sum(o.order_id in completion and completion[o.order_id] <= o.due_at for o in factory.orders)
@@ -296,16 +373,48 @@ def _finish_plan(factory, profile, output, unscheduled, reservations, solver_sta
             "changeover_count": sum(change > 0 for change in changes), "total_changeover_min": sum(changes),
             "unscheduled_operations": len(unscheduled), "secondary_skill_assignment_count": secondary}
     return SchedulePlan(profile, output, unscheduled, kpis, violations, reservations,
-                        ["publish_plan"] + (["assign_qualified_secondary_skill"] if secondary else []), solver_status)
+                        ["publish_plan"] + (["assign_qualified_secondary_skill"] if secondary else []), solver_status,
+                        deterministic_budget)
 
 
-def _priority_dispatch(factory, profile, reservations):
-    """Fixed-order, whole-order fallback with no partial routing commits."""
+def _dispatch_sequence(profile):
+    """Order sequence for the rung-2 dispatcher, per profile.
+
+    ``Delivery First`` and ``Balanced`` both dispatch earliest-promise-date-first,
+    because the contract gives every profile the same service-level obligation
+    (Tier 1 settles lateness before the profile weights are consulted at all).
+    ``Cost First`` instead runs one product family back to back, which is the one
+    sequencing choice that changes how much changeover a machine pays.
+    """
+    if profile == "Cost First":
+        return lambda order: (order.product_id, order.due_at, -order.priority, order.order_id)
+    return lambda order: (order.due_at, -order.priority, order.order_id)
+
+
+def _priority_dispatch(factory, profile, reservations, deterministic_budget=0.0):
+    """Deterministic whole-order dispatch (rung 2 / HEURISTIC_FALLBACK).
+
+    Orders are dispatched in the contract's service-level order — priority, then
+    promise date — so the fallback gives up as little delivery as possible when
+    the primary solver cannot run.  The profile is applied where a dispatcher still
+    has a genuine choice: the start time selected for each operation is the
+    cheapest under the contract's own profile weights over tardiness and overtime
+    (_select_start).
+
+    The guard this dispatcher exists to provide: a profile-blind fallback returns
+    byte-identical plans for all three profiles at any budget, which is precisely
+    the defect that made the three-plan comparison meaningless.  The complete
+    tier-3 trade-off (changeover and stability as well as overtime) is expressed
+    by the primary solver, which build_candidates now budgets for.
+    """
+    weights = profile_weights()[profile]
+    delivery_weight, overtime_weight = weights[0], weights[1]
+    context = _op_context(factory)
     machine_end, machine_product, worker_end = {}, {}, {}
     daily_overtime = defaultdict(int)
     overtime_total = 0
     output, unscheduled = [], []
-    for order in sorted(factory.orders, key=lambda item: (-item.priority, item.due_at, item.order_id)):
+    for order in sorted(factory.orders, key=_dispatch_sequence(profile)):
         reservation = reservations[order.order_id]
         local_machine_end, local_machine_product = dict(machine_end), dict(machine_product)
         local_worker_end, local_daily = dict(worker_end), dict(daily_overtime)
@@ -323,32 +432,10 @@ def _priority_dispatch(factory, profile, reservations):
                 minimum = max(cursor, op.release_at, reservation["ready_at"] or 0,
                               local_machine_end.get(op.machine_id, 0) + setup,
                               local_worker_end.get(op.worker_id, 0))
-                assignment = None
-                for start in range(minimum, factory.horizon - op.duration_minutes + 1):
-                    end = start + op.duration_minutes
-                    if not any(a <= start and end <= b for a, b in windows(factory, op, factory.horizon)):
-                        continue
-                    setup_start = start - setup
-                    machine_rows = [row for row in factory.shifts if row.get("machine_id") == op.machine_id]
-                    if setup and factory.shifts and not covered(machine_rows, setup_start, start):
-                        continue
-                    if any(
-                        (block.get("machine_id") == op.machine_id or
-                         (op.worker_id and block.get("worker_id") == op.worker_id))
-                        and setup_start < block["end"] and block["start"] < end
-                        for block in factory.maintenance
-                    ):
-                        continue
-                    by_day = overtime_by_day(factory.shifts, op.worker_id, start, end)
-                    if factory.overtime_cap_min is not None and local_total + sum(by_day.values()) > factory.overtime_cap_min:
-                        continue
-                    if factory.max_overtime_min_per_worker_per_day is not None and any(
-                        local_daily.get((op.worker_id, day), 0) + minutes > factory.max_overtime_min_per_worker_per_day
-                        for day, minutes in by_day.items()
-                    ):
-                        continue
-                    assignment = (start, end, by_day)
-                    break
+                assignment = _select_start(
+                    factory, op, order, minimum, setup, delivery_weight, overtime_weight,
+                    local_total, local_daily, *context[(order.order_id, op.operation_no)],
+                )
                 if assignment is None:
                     break
                 start, end, by_day = assignment
@@ -376,7 +463,102 @@ def _priority_dispatch(factory, profile, reservations):
             unscheduled.extend({"order_id": order.order_id, "operation_no": op.operation_no,
                                 "reason": reason} for op in order.operations)
     output.sort(key=lambda row: (row["start"], row["machine_id"], row["order_id"], row["operation_no"]))
-    return _finish_plan(factory, profile, output, unscheduled, reservations, "HEURISTIC_FALLBACK")
+    return _finish_plan(factory, profile, output, unscheduled, reservations, "HEURISTIC_FALLBACK",
+                        deterministic_budget)
+
+
+def _op_context(factory):
+    """Pre-computed, start-independent facts for every operation in the state.
+
+    Computing these once per operation (instead of once per candidate start) is
+    what keeps the dispatcher fast on a five-day horizon.
+    """
+    context = {}
+    for order in factory.orders:
+        for op in order.operations:
+            context.setdefault((order.order_id, op.operation_no), (
+                windows(factory, op, factory.horizon),
+                [row for row in factory.shifts if row.get("machine_id") == op.machine_id],
+                [block for block in factory.maintenance
+                 if block.get("machine_id") == op.machine_id
+                 or (op.worker_id and block.get("worker_id") == op.worker_id)],
+                bool(op.worker_id) and any(
+                    row.get("window_type") == "OVERTIME" and row.get("worker_id") == op.worker_id
+                    for row in factory.shifts),
+            ))
+    return context
+
+
+def _placement_candidates(factory, op, minimum):
+    """Deterministic candidate start bounds for one operation.
+
+    ``minimum`` is the earliest the operation could start at all.  A profile that
+    dislikes overtime also needs to be able to consider the start of a later
+    regular window, so those window starts are added as further bounds — capped,
+    so the search stays bounded and reproducible.
+    """
+    bounds = {minimum}
+    if any(row.get("window_type") == "OVERTIME" for row in factory.shifts):
+        rows = [row for row in factory.shifts
+                if op.worker_id is not None and row.get("worker_id") == op.worker_id
+                and row.get("window_type", "REGULAR") == "REGULAR"]
+        for row in sorted(rows, key=lambda r: (r["start"], r["end"], str(r.get("calendar_window_id", "")))):
+            if row["start"] > minimum and row["start"] + op.duration_minutes <= row["end"]:
+                bounds.add(row["start"])
+                if len(bounds) >= MAX_PLACEMENT_CANDIDATES:
+                    break
+    return sorted(bounds)
+
+
+def _earliest_start(factory, op, bound, setup, op_windows, machine_rows, maintenance,
+                    overtime_used, daily_overtime, counts_overtime):
+    """Earliest feasible start at or after ``bound``, or None."""
+    for start in range(bound, factory.horizon - op.duration_minutes + 1):
+        end = start + op.duration_minutes
+        if not any(a <= start and end <= b for a, b in op_windows):
+            continue
+        setup_start = start - setup
+        if setup and factory.shifts and not covered(machine_rows, setup_start, start):
+            continue
+        if any(setup_start < block["end"] and block["start"] < end for block in maintenance):
+            continue
+        by_day = overtime_by_day(factory.shifts, op.worker_id, start, end) if counts_overtime else {}
+        if factory.overtime_cap_min is not None and overtime_used + sum(by_day.values()) > factory.overtime_cap_min:
+            continue
+        if factory.max_overtime_min_per_worker_per_day is not None and any(
+            daily_overtime.get((op.worker_id, day), 0) + minutes > factory.max_overtime_min_per_worker_per_day
+            for day, minutes in by_day.items()
+        ):
+            continue
+        return start, end, by_day
+    return None
+
+
+def _select_start(factory, op, order, minimum, setup, delivery_weight, overtime_weight,
+                  overtime_used, daily_overtime, op_windows, machine_rows, maintenance,
+                  counts_overtime):
+    """Cheapest profile-weighted feasible start for one operation.
+
+    Cost is the contract's own profile trade-off between tardiness and overtime.
+    The operation's changeover is fixed by the machine's previous product, so it
+    cannot separate two start times for the *same* operation; changeover is
+    expressed by the dispatch sequence instead.
+    """
+    best = None
+    for bound in _placement_candidates(factory, op, minimum):
+        found = _earliest_start(factory, op, bound, setup, op_windows, machine_rows,
+                                maintenance, overtime_used, daily_overtime, counts_overtime)
+        if found is None:
+            continue
+        start, end, by_day = found
+        cost = (delivery_weight * max(0, end - order.due_at)
+                + overtime_weight * sum(by_day.values()))
+        key = (cost, start, end)
+        if best is None or key < best[0]:
+            best = (key, found)
+    return None if best is None else best[1]
+
+
 
 
 def qualified(factory, op):

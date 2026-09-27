@@ -30,3 +30,4 @@ class SchedulePlan:
     material_reservations: dict[str, Any] = field(default_factory=dict)
     required_actions: list[str] = field(default_factory=list)
     solver_status: str = "UNKNOWN"
+    deterministic_budget: float = 0.0
